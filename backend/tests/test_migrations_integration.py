@@ -118,7 +118,13 @@ def test_builtin_roles_seeded(migrated: None) -> None:
         ("operator", "janus-operators", True),
     ]
     perms = run_sql("SELECT role, permission FROM role_permission ORDER BY 1, 2")
-    assert perms == [("auditor", "audit.read"), ("auditor", "users.read")]
+    assert perms == [
+        ("auditor", "audit.read"),
+        ("auditor", "inventory.read"),
+        ("auditor", "users.read"),
+        ("operator", "inventory.manage"),
+        ("operator", "inventory.read"),
+    ]
 
 
 def test_hypertables_and_policies(migrated: None) -> None:

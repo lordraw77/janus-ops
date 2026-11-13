@@ -21,6 +21,10 @@
 > **v0.6** — amministratore iniziale da `.env`; gestione utenti dalla UI (lldap via `janus-manager`);
 > ruoli configurabili con permessi (ADR-010), incluso chi legge l'audit log; viewer dell'audit;
 > **TOTP opzionale** per utente, funzionante dietro proxy aziendale e air-gapped.
+>
+> **v0.7** — inventory (nodi, tag, gruppi, capability) e vault credenziali (ADR-004 implementato):
+> **fase F0 completata**, AC-01 verificato. Migrazione `0003`, permessi `inventory.*` e
+> `credentials.manage`.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -259,6 +263,7 @@ janus-ops/
 - *Opzioni*: (a) cifratura applicativa AES-256-GCM con envelope encryption (DEK per segreto, KEK da master key in env/file) — nessuna dipendenza; (b) OpenBao/Vault esterno — più robusto ma un servizio in più; (c) pgcrypto — chiave visibile al DB.
 - *Decisione*: **(a)** dietro un'interfaccia `SecretBackend`, così (b) diventa un'implementazione aggiuntiva (FR-86).
 - *Conseguenze*: procedura di rotazione KEK documentata; la master key non va mai nel DB né nei backup DB.
+- *Implementazione (v0.7)*: KEK = `JANUS_SECRET_KEY`; una DEK casuale per credenziale; segreto e DEK cifrati AES-256-GCM con AAD legata all'id della credenziale (righe non scambiabili); `kek_version` per la futura rotazione della KEK (solo re-wrap delle DEK). Segreti in sola scrittura via API; `reveal()` riservato ai moduli che li useranno (F1+). Chiavi SSH validate al salvataggio (OpenSSH/PEM, passphrase via `cryptography[ssh]`/bcrypt), con tipo e fingerprint salvati in `public_info`. Rotazione della KEK: non ancora implementata `OPEN`.
 
 **ADR-005 — Storage metriche**
 - *Opzioni*: (a) TimescaleDB nello stesso Postgres — un solo DB, SQL e JOIN con inventory; (b) Prometheus/VictoriaMetrics — ottimi per metriche, ma secondo sistema e modello dati separato.
@@ -394,7 +399,8 @@ Razionale dell'ordine: F1 dà valore immediato senza agent e costruisce i matton
 | Ruoli e permessi configurabili, ruoli custom (ADR-010) | ✅ | Test: permesso `audit.read` concesso/revocato con effetto immediato su sessioni attive |
 | TOTP opzionale (setup con QR, login in due passi, recovery, reset admin) | ✅ | Vettori RFC 6238; test di integrazione; prova HTTPS via Caddy |
 | Consultazione audit (API + UI, filtri, verifica catena) | ✅ | AC-03 |
-| Inventory CRUD, vault | ⏳ | AC-01 |
+| Inventory: nodi, tag, gruppi (variabili Ansible), dipendenze, capability validate | ✅ | AC-01; test su regole capability/credenziale, cicli, filtri, audit |
+| Vault credenziali (envelope encryption, segreti in sola scrittura) | ✅ | Test: cifratura legata alla riga, rotazione, nessun segreto in API/DB/audit; fingerprint uguale a `ssh-keygen` |
 | Command palette `Ctrl+K` | ⏳ | FR-05 |
 
 Rimandati alla fase che li usa, per la regola "nessun componente senza requisito": **Redis** e
@@ -513,9 +519,11 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F0 in corso (identità e accessi completati)
-  Delivered:   piano v0.6 (ADR-001..010), schema F0–F3 + 0002, login LDAP, admin iniziale da .env,
-               gestione utenti/ruoli/permessi, TOTP opzionale, viewer audit, UI, compose, CI
-  Open:        CSP per l'UI esportata; [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, yamux, Taskiq
-  Next:        inventory (nodi, tag, gruppi, capability) e vault credenziali
+  Phase:       Engineer — F0 completata (identità, accessi, inventory, vault)
+  Delivered:   piano v0.7 (ADR-001..010), migrazioni 0001–0003, login LDAP, admin da .env,
+               utenti/ruoli/permessi, TOTP opzionale, audit, inventory, vault, UI, compose, CI
+  Open:        CSP per l'UI esportata; rotazione KEK; [VERIFY] Proxmoxer async, aiodocker ssh,
+               NTLM Go, yamux, Taskiq
+  Next:        F1 — SSH bastion: terminale web (xterm.js ⇄ WebSocket ⇄ AsyncSSH) con credenziali
+               dal vault, jump host, registrazione sessioni, SFTP
 ```

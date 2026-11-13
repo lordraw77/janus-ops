@@ -27,7 +27,7 @@ self-hosted TLS, and a planned Go agent that only opens outbound connections.
 |---|---|
 | Control plane, web UI shell, database schema | ✅ available |
 | LDAP sign-in, user / role / permission management, optional TOTP, break-glass, audit log | ✅ available |
-| Inventory, credential vault | 🚧 phase F0 |
+| Inventory (nodes, tags, groups, capabilities) and encrypted credential vault | ✅ available |
 | SSH bastion (web terminal, SFTP) | phase F1 |
 | `janus-agent`, telemetry, NOC dashboard | phase F2 |
 | Alerting: thresholds, ack, downtimes, dependencies, notifications | phase F3 |
@@ -106,7 +106,8 @@ Then open **Users & roles** to create users, set passwords, assign roles, disabl
 
 Each role maps to an LDAP group and holds a set of permissions (the union applies with several
 roles). Built-in roles: **admin** (`janus-admins`, every permission), **operator**
-(`janus-operators`), **auditor** (`janus-auditors`, `audit.read` + `users.read`). Permissions:
+(`janus-operators`, inventory), **auditor** (`janus-auditors`, read-only: audit, users,
+inventory). Permissions:
 
 | Permission | Allows |
 |---|---|
@@ -114,6 +115,8 @@ roles). Built-in roles: **admin** (`janus-admins`, every permission), **operator
 | `users.read` | view users, roles and permissions |
 | `users.manage` | create, edit, disable, delete users; reset passwords and 2FA |
 | `roles.manage` | create and delete roles; change permissions and LDAP groups |
+| `inventory.read` / `inventory.manage` | view / change nodes, tags, groups, capabilities |
+| `credentials.manage` | create, replace and delete vault credentials (secrets are write-only) |
 
 Who can read the audit log is a checkbox in the roles table. Only admins can grant the admin role.
 Sessions last 8 hours with a 1-hour inactivity timeout; 5 failed attempts lock a username for
@@ -125,6 +128,13 @@ Each user can enable TOTP from **My account**: scan the QR code with any authent
 save the recovery codes. It works **behind corporate proxies and air-gapped**: the QR code is drawn
 by the server and codes depend only on the clock (keep NTP in sync). Seeds are encrypted with
 `JANUS_SECRET_KEY`: back it up together with the database volume.
+
+### Inventory and vault
+
+Add nodes (IP or FQDN, environment, tags, groups, parent dependency) and enable their
+capabilities: SSH target, Janus agent, Proxmox node, Docker host, SNMP device. Credentials (SSH
+keys, passwords, Proxmox tokens, SNMP secrets) live in the vault with envelope encryption under
+`JANUS_SECRET_KEY`; they are write-only and never sent to the browser.
 
 ### Break-glass account
 
@@ -207,6 +217,8 @@ Variables used by the Compose stack (`.env`):
 | `/api/v1/auth/totp/*` | TOTP self-service: setup, enable, disable, recovery codes |
 | `/api/v1/users` · `/api/v1/roles` | User and role/permission administration |
 | `/api/v1/audit` · `/audit/verify` | Audit log (paged, filterable) and hash-chain verification |
+| `/api/v1/nodes` · `/groups` · `/tags` | Inventory |
+| `/api/v1/credentials` | Vault (metadata only; secrets are never returned) |
 | `/api/v1/health` | Liveness: the process is up |
 | `/api/v1/ready` | Readiness: database reachable, TimescaleDB loaded, schema up to date (`503` otherwise) |
 | `/api/docs` | OpenAPI documentation |

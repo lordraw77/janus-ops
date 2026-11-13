@@ -62,6 +62,18 @@ const MESSAGES: Record<string, string> = {
   totp_not_started: "Start the setup again.",
   totp_secret_unreadable: "The stored TOTP secret cannot be read. Ask an administrator to reset it.",
   not_found: "Not found.",
+  name_exists: "This name is already used.",
+  name_required: "A name is required.",
+  name_and_address_required: "Name and address are required.",
+  address_required: "An address is required.",
+  environment_required: "An environment is required.",
+  parent_cycle: "This parent would create a loop (a node cannot depend on itself).",
+  unknown_parent: "The parent node does not exist.",
+  unknown_credential: "The selected credential does not exist.",
+  docker_via_ssh_needs_ssh: "Docker over SSH needs the SSH capability on the same node.",
+  jump_host_without_ssh: "The jump host must have the SSH capability enabled.",
+  credential_in_use: "This credential is used by some nodes: detach it first.",
+  vault_unavailable: "The vault is not configured on this server (JANUS_SECRET_KEY).",
 };
 
 export function message(code: string, retryAfter?: number): string {
@@ -70,6 +82,18 @@ export function message(code: string, retryAfter?: number): string {
     return `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
   }
   if (code.startsWith("unknown_role:")) return `Unknown role: ${code.slice(13)}.`;
+  const colon = code.indexOf(":");
+  const prefix = colon > 0 ? code.slice(0, colon) : code;
+  const rest = colon > 0 ? code.slice(colon + 1) : undefined;
+  const DETAILED: Record<string, string> = {
+    invalid_secret: "Invalid secret",
+    unknown_group: "Unknown group",
+    credential_required: "A credential is required for capability",
+    credential_kind_mismatch: "The credential type does not fit capability",
+    credential_not_used: "No credential is used by capability",
+    invalid_config: "Invalid setting",
+  };
+  if (rest !== undefined && DETAILED[prefix]) return `${DETAILED[prefix]}: ${rest}.`;
   if (code.startsWith("unknown_permission:")) return `Unknown permission: ${code.slice(19)}.`;
   return MESSAGES[code] ?? `Request failed (${code}).`;
 }

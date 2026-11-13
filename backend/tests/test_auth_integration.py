@@ -136,8 +136,8 @@ def me(c: TestClient) -> dict[str, Any]:
     ("user", "roles", "permissions"),
     [
         ("alice", ["admin"], sorted(PERMISSIONS)),
-        ("bob", ["operator"], []),
-        ("carol", ["auditor"], ["audit.read", "users.read"]),
+        ("bob", ["operator"], ["inventory.manage", "inventory.read"]),
+        ("carol", ["auditor"], ["audit.read", "inventory.read", "users.read"]),
     ],
 )
 def test_login_roles_and_permissions(
@@ -257,15 +257,18 @@ def test_default_audit_access(user: str, status: int) -> None:
 def test_granting_audit_read_applies_to_live_sessions() -> None:
     with signed_in("alice") as admin, signed_in("bob") as bob:
         assert bob.get("/api/v1/audit").status_code == 403
-        r = admin.patch("/api/v1/roles/operator", json={"permissions": ["audit.read"]})
+        roles = admin.get("/api/v1/roles").json()["roles"]
+        original = next(r["permissions"] for r in roles if r["name"] == "operator")
+        granted = sorted([*original, "audit.read"])
+        r = admin.patch("/api/v1/roles/operator", json={"permissions": granted})
         assert r.status_code == 204, r.text
         try:
             assert bob.get("/api/v1/audit").status_code == 200  # same session, no re-login
             assert "audit.read" in me(bob)["permissions"]
         finally:
-            admin.patch("/api/v1/roles/operator", json={"permissions": []})
+            admin.patch("/api/v1/roles/operator", json={"permissions": original})
         assert bob.get("/api/v1/audit").status_code == 403
-    assert ("roles.updated", {"permissions": ["audit.read"]}) in audit_actions("alice")
+    assert ("roles.updated", {"permissions": granted}) in audit_actions("alice")
 
 
 def test_audit_listing_filters_and_pages() -> None:
@@ -349,7 +352,12 @@ def test_union_of_permissions_for_several_roles() -> None:
         with signed_in("olga", NEW_PW) as olga:
             info = me(olga)
             assert info["roles"] == ["auditor", "operator"]
-            assert info["permissions"] == ["audit.read", "users.read"]
+            assert info["permissions"] == [
+                "audit.read",
+                "inventory.manage",
+                "inventory.read",
+                "users.read",
+            ]
         admin.delete("/api/v1/users/olga")
 
 

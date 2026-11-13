@@ -17,6 +17,8 @@ from janus_ops.auth.service import AuthService
 from janus_ops.config import Settings, get_settings
 from janus_ops.db import create_engine, schema_head
 from janus_ops.directory import LldapAdmin
+from janus_ops.inventory import credentials, groups, nodes
+from janus_ops.vault import Vault
 
 API_PREFIX = "/api/v1"
 
@@ -66,6 +68,7 @@ def create_app(
         app.state.schema_head = schema_head()
         app.state.auth = AuthService(engine, settings, directory)
         app.state.directory_admin = LldapAdmin(settings) if settings.directory_managed else None
+        app.state.vault = Vault(app.state.auth.box)
         try:
             yield
         finally:
@@ -98,8 +101,15 @@ def create_app(
 
     app.include_router(health.router, prefix=API_PREFIX)
     app.include_router(auth_router, prefix=API_PREFIX)
-    for admin_router in (users.router, roles.router, audit_log.router):
-        app.include_router(admin_router, prefix=API_PREFIX)
+    for module_router in (
+        users.router,
+        roles.router,
+        audit_log.router,
+        nodes.router,
+        groups.router,
+        credentials.router,
+    ):
+        app.include_router(module_router, prefix=API_PREFIX)
     for router in extra_routers:
         app.include_router(router, prefix=API_PREFIX)
 

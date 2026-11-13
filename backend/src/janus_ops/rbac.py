@@ -17,6 +17,9 @@ PERMISSIONS: dict[str, str] = {
     "users.read": "View users, roles and permissions",
     "users.manage": "Create, edit, disable and delete users; reset passwords and TOTP",
     "roles.manage": "Create and delete roles; change their permissions and LDAP group",
+    "inventory.read": "View nodes, tags, groups and credential names (never secrets)",
+    "inventory.manage": "Create, edit and delete nodes, tags, groups and capabilities",
+    "credentials.manage": "Create, replace and delete vault credentials",
 }
 
 ROLE_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,31}$"

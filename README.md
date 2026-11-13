@@ -85,8 +85,8 @@ get the union. The built-in roles:
 | Role | LDAP group | Default permissions |
 |---|---|---|
 | admin | `janus-admins` | all (fixed) |
-| operator | `janus-operators` | — |
-| auditor | `janus-auditors` | `audit.read`, `users.read` |
+| operator | `janus-operators` | `inventory.read`, `inventory.manage` |
+| auditor | `janus-auditors` | `audit.read`, `users.read`, `inventory.read` |
 
 | Permission | Allows |
 |---|---|
@@ -94,6 +94,9 @@ get the union. The built-in roles:
 | `users.read` | view users, roles and permissions |
 | `users.manage` | create, edit, disable and delete users; reset passwords and 2FA |
 | `roles.manage` | create and delete roles; change their permissions and LDAP group |
+| `inventory.read` | view nodes, tags, groups and credential names (never secrets) |
+| `inventory.manage` | create, edit and delete nodes, tags, groups and capabilities |
+| `credentials.manage` | create, replace and delete vault credentials |
 
 Who can read the audit log is therefore a checkbox in the roles table. Admins can create custom
 roles (the LDAP group is created for them). Permission changes apply immediately, also to
@@ -107,6 +110,22 @@ The lldap admin UI stays available on `127.0.0.1:17170` for advanced directory w
 Sessions last 8 hours and end after 1 hour of inactivity (`JANUS_SESSION_TTL_S`,
 `JANUS_SESSION_IDLE_S`). After 5 failed attempts a username is locked for 15 minutes. Every
 sign-in, failure, sign-out and administrative change is written to the audit log.
+
+### Inventory and credential vault
+
+**Inventory** holds every host once: name, IP or FQDN, environment (`prod`, `staging`, `lab`,
+`dmz`), tags, groups (with Ansible variables) and an optional *parent* it depends on (a switch, a
+Proxmox host: used later to suppress the alerts of its children). Each node enables the
+**capabilities** that apply: SSH target (port, user, jump host), Janus agent, Proxmox node, Docker
+host (via agent or SSH), SNMP device. A capability that needs to log in points to a credential of
+the right type.
+
+**Credentials** are stored in the vault: SSH keys (OpenSSH or PEM, with passphrase), passwords,
+Proxmox API tokens, registry and SNMP secrets. Each secret is encrypted with its own key, which is
+itself encrypted with `JANUS_SECRET_KEY` (envelope encryption, AES-256-GCM). Secrets are
+**write-only**: no page or API returns them, and they never reach the browser or the audit log.
+SSH keys show their type and SHA-256 fingerprint (same as `ssh-keygen -l`). A credential used by
+a node cannot be deleted.
 
 ### Two-factor authentication (optional)
 
@@ -241,8 +260,8 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 
 > 🚧 **Pre-alpha (0.1.0).** Available today: the single `lordraw77/janus-ops` image, LDAP
 > sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
-> audit log with viewer, the F0–F3 database schema, the Compose stack and CI.
-> Next: inventory and credential vault to close F0.
+> audit log, **inventory and credential vault** (phase F0 complete), the F0–F3 database schema,
+> the Compose stack and CI. Next: F1, the SSH bastion.
 
 | Phase | Scope |
 |---|---|

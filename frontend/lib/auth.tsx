@@ -3,7 +3,14 @@
 import { useRouter } from "next/navigation";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 
-export type Permission = "audit.read" | "users.read" | "users.manage" | "roles.manage";
+export type Permission =
+  | "audit.read"
+  | "users.read"
+  | "users.manage"
+  | "roles.manage"
+  | "inventory.read"
+  | "inventory.manage"
+  | "credentials.manage";
 
 export type SessionUser = {
   username: string;

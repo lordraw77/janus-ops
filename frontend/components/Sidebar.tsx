@@ -3,6 +3,7 @@
 import {
   Boxes,
   Container,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   type LucideIcon,
@@ -33,7 +34,8 @@ type NavItem = {
 // Order follows the mockup (res/mockups/janus-ops-noc-preview.html) + the modules it lacked
 const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, target: { href: "/" } },
-  { label: "Inventory", icon: Server, target: { phase: "F0" } },
+  { label: "Inventory", icon: Server, target: { href: "/inventory/", permission: "inventory.read" } },
+  { label: "Credentials", icon: KeyRound, target: { href: "/credentials/", permission: "inventory.read" } },
   { label: "Problems", icon: TriangleAlert, target: { phase: "F3" } },
   { label: "Containers", icon: Container, target: { phase: "F4" } },
   { label: "Proxmox VE", icon: Boxes, target: { phase: "F5" } },

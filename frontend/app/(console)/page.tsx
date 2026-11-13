@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 
+import Link from "next/link";
+
 import { type Status, StatusBadge } from "@/components/StatusBadge";
+import { useResource } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { CAPABILITIES, type CapabilityKind, ENVIRONMENTS, type InventoryNode } from "@/lib/inventory";
 
 const POLL_MS = 15_000;
 
@@ -27,7 +32,52 @@ function checkStatus(value: string): Status {
   return value === "ok" ? "ok" : "crit";
 }
 
+function InventorySummary() {
+  const { data: nodes, error } = useResource<InventoryNode[]>("/nodes");
+  if (error) return null;
+  const count = (pred: (n: InventoryNode) => boolean) => (nodes ?? []).filter(pred).length;
+  return (
+    <section className="rounded-lg border border-line bg-surface p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">Inventory</h2>
+        <Link href="/inventory/" className="text-[11px] text-primary hover:text-primary-hover">
+          Open →
+        </Link>
+      </div>
+      {!nodes ? (
+        <p className="text-sm text-fg-muted">Loading…</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-[auto_1fr_1fr]">
+          <div>
+            <div className="font-mono text-3xl font-bold tabular-nums">{nodes.length}</div>
+            <div className="text-[11px] text-fg-muted">nodes</div>
+          </div>
+          <dl className="space-y-1 font-mono text-xs">
+            {ENVIRONMENTS.map((env) => (
+              <div key={env} className="flex justify-between gap-3">
+                <dt className="text-fg-muted">{env}</dt>
+                <dd className="tabular-nums">{count((n) => n.environment === env)}</dd>
+              </div>
+            ))}
+          </dl>
+          <dl className="space-y-1 font-mono text-xs">
+            {(Object.keys(CAPABILITIES) as CapabilityKind[]).map((k) => (
+              <div key={k} className="flex justify-between gap-3">
+                <dt className="text-fg-muted">{CAPABILITIES[k].label}</dt>
+                <dd className="tabular-nums">
+                  {count((n) => n.capabilities.some((c) => c.kind === k && c.enabled))}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function DashboardPage() {
+  const { can } = useAuth();
   const [probe, setProbe] = useState<Probe>({ kind: "loading" });
 
   useEffect(() => {
@@ -93,6 +143,8 @@ export default function DashboardPage() {
           </ul>
         )}
       </section>
+
+      {can("inventory.read") && <InventorySummary />}
 
       <p className="text-xs text-fg-muted">
         NOC widgets (host and service hexagons, node cards, unhandled problems) arrive with
