@@ -1,4 +1,4 @@
-"""Login flow: rate limit, break-glass or LDAP, role, user upsert, session, audit."""
+"""Login flow: rate limit, break-glass or LDAP, roles, upsert, optional TOTP, session, audit."""
 
 import logging
 from dataclasses import dataclass
@@ -9,18 +9,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from janus_ops import audit
-from janus_ops.auth import sessions
-from janus_ops.auth.ldap import (
-    DirectoryBackend,
-    DirectoryUnavailable,
-    InvalidCredentials,
-    role_for_groups,
-)
+from janus_ops.auth import mfa, sessions
+from janus_ops.auth.ldap import DirectoryBackend, DirectoryUnavailable, InvalidCredentials
 from janus_ops.auth.passwords import verify_password
 from janus_ops.auth.ratelimit import LoginRateLimiter
 from janus_ops.config import Settings
+from janus_ops.crypto import SecretBox
+from janus_ops.rbac import ADMIN_ROLE, roles_for_groups
 
 log = logging.getLogger(__name__)
+
+MAX_MFA_FAILURES = 5
 
 
 class LoginError(Exception):
@@ -36,7 +35,8 @@ class LoginError(Exception):
 @dataclass(frozen=True)
 class LoginResult:
     token: str
-    session: sessions.Session
+    mfa_required: bool
+    ttl_s: int
 
 
 class AuthService:
@@ -53,6 +53,8 @@ class AuthService:
         self._directory = directory
         self._user_limiter = user_limiter or LoginRateLimiter(max_failures=5, window_s=900)
         self._ip_limiter = ip_limiter or LoginRateLimiter(max_failures=30, window_s=900)
+        key = settings.secret_key
+        self.box = SecretBox(key.get_secret_value()) if key else None
 
     async def _fail(
         self, username: str, ip: str | None, reason: str, status: int, *, count: bool
@@ -86,7 +88,7 @@ class AuthService:
             breakglass = (
                 await conn.execute(
                     text(
-                        "SELECT id, password_hash, is_active FROM app_user"
+                        "SELECT id, password_hash, is_active, totp_enabled FROM app_user"
                         " WHERE is_breakglass AND lower(username) = :u"
                     ),
                     {"u": username},
@@ -98,7 +100,12 @@ class AuthService:
             if not (breakglass.is_active and verify_password(password, breakglass.password_hash)):
                 raise await self._fail(username, ip, "invalid_credentials", 401, count=True)
             return await self._open_session(
-                str(breakglass.id), username, None, "admin", "breakglass", ip
+                str(breakglass.id),
+                username,
+                [ADMIN_ROLE],
+                "breakglass",
+                ip,
+                totp_enabled=breakglass.totp_enabled,
             )
 
         if self._directory is None:
@@ -113,8 +120,9 @@ class AuthService:
                 username, ip, "directory_unavailable", 503, count=False
             ) from None
 
-        role = role_for_groups(user.groups, self._settings)
-        if role is None:
+        async with self._engine.connect() as conn:
+            roles = await roles_for_groups(conn, user.groups)
+        if not roles:
             raise await self._fail(user.username, ip, "no_role", 403, count=False)
 
         try:
@@ -126,7 +134,7 @@ class AuthService:
                             " last_login_at) VALUES (:u, :dn, :name, :mail, :now)"
                             " ON CONFLICT (ldap_dn) DO UPDATE SET username = EXCLUDED.username,"
                             " display_name = EXCLUDED.display_name, email = EXCLUDED.email"
-                            " RETURNING id, is_active"
+                            " RETURNING id, is_active, totp_enabled"
                         ),
                         {
                             "u": user.username,
@@ -146,48 +154,98 @@ class AuthService:
         if not row.is_active:
             raise await self._fail(user.username, ip, "account_disabled", 403, count=False)
         return await self._open_session(
-            str(row.id), user.username, user.display_name, role, "ldap", ip
+            str(row.id), user.username, roles, "ldap", ip, totp_enabled=row.totp_enabled
         )
 
     async def _open_session(
         self,
         user_id: str,
         username: str,
-        display_name: str | None,
-        role: str,
+        roles: list[str],
         method: str,
         ip: str | None,
+        *,
+        totp_enabled: bool,
+        factor: str | None = None,
     ) -> LoginResult:
+        self._user_limiter.reset(username)
         async with self._engine.begin() as conn:
+            if totp_enabled and factor is None:
+                token, _session_id, _ = await sessions.create(
+                    conn,
+                    user_id=user_id,
+                    roles=roles,
+                    ttl_s=sessions.MFA_PENDING_TTL_S,
+                    stage="mfa_pending",
+                )
+                await audit.append(
+                    conn,
+                    action="auth.password_verified",
+                    actor_id=user_id,
+                    actor_name=username,
+                    source_ip=ip,
+                    payload={"method": method, "next": "totp"},
+                )
+                return LoginResult(token, True, sessions.MFA_PENDING_TTL_S)
+
             await conn.execute(
                 text("UPDATE app_user SET last_login_at = now() WHERE id = CAST(:id AS uuid)"),
                 {"id": user_id},
             )
-            token, session_id, expires_at = await sessions.create(
-                conn, user_id=user_id, role=role, ttl_s=self._settings.session_ttl_s
+            token, session_id, _ = await sessions.create(
+                conn, user_id=user_id, roles=roles, ttl_s=self._settings.session_ttl_s
             )
+            payload: dict[str, object] = {
+                "method": method,
+                "roles": roles,
+                "session_id": session_id,
+            }
+            if factor:
+                payload["mfa"] = factor
             await audit.append(
                 conn,
                 action="auth.login",
                 actor_id=user_id,
                 actor_name=username,
                 source_ip=ip,
-                payload={"method": method, "role": role, "session_id": session_id},
+                payload=payload,
             )
-        self._user_limiter.reset(username)
         if method == "breakglass":
             log.warning("break-glass account used")
-        return LoginResult(
-            token=token,
-            session=sessions.Session(
-                id=session_id,
-                user_id=user_id,
-                username=username,
-                display_name=display_name,
-                role=role,
-                method=method,
-                expires_at=expires_at,
-            ),
+        return LoginResult(token, False, self._settings.session_ttl_s)
+
+    async def complete_mfa(
+        self, pending: sessions.Session, code: str, ip: str | None
+    ) -> LoginResult:
+        """Second step: a TOTP or recovery code turns the pending session into a full one."""
+        locked = False
+        async with self._engine.begin() as conn:
+            factor = await mfa.verify_factor(conn, self.box, pending.user_id, code)
+            if factor is None:
+                failures = await sessions.record_mfa_failure(conn, pending.id)
+                locked = failures >= MAX_MFA_FAILURES
+                if locked:
+                    await sessions.revoke(conn, pending.id)
+                await audit.append(
+                    conn,
+                    action="auth.login_failed",
+                    actor_id=pending.user_id,
+                    actor_name=pending.username,
+                    source_ip=ip,
+                    payload={"reason": "mfa_locked" if locked else "invalid_code"},
+                )
+            else:
+                await sessions.revoke(conn, pending.id)  # a new token is issued below
+        if factor is None:
+            raise LoginError("mfa_locked" if locked else "invalid_code", 401)
+        return await self._open_session(
+            pending.user_id,
+            pending.username,
+            list(pending.roles),
+            pending.method,
+            ip,
+            totp_enabled=True,
+            factor=factor,
         )
 
     async def logout(

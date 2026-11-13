@@ -16,6 +16,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("serve", help="run the HTTP server (API + web UI)")
     sub.add_parser("migrate", help="apply database migrations up to the latest revision")
+    sub.add_parser(
+        "setup",
+        help="migrate, then create the initial administrator from JANUS_ADMIN_* if missing",
+    )
     sub.add_parser("version", help="print the version and exit")
     bg = sub.add_parser(
         "breakglass", help="create the break-glass admin account or rotate its password"
@@ -69,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
 
     configure_logging(settings.log_level)
 
-    if args.command == "migrate":
+    if args.command in ("migrate", "setup"):
         from alembic import command
 
         from janus_ops.db import alembic_config
@@ -77,6 +81,22 @@ def main(argv: list[str] | None = None) -> int:
         log.info("applying migrations")
         command.upgrade(alembic_config(settings.database_url.get_secret_value()), "head")
         log.info("migrations applied")
+        if args.command == "migrate":
+            return 0
+
+        import asyncio
+
+        from janus_ops.directory import DirectoryError
+        from janus_ops.setup import SetupError, ensure_admin
+
+        try:
+            asyncio.run(ensure_admin(settings))
+        except SetupError as exc:
+            print(f"janus-ops: {exc}", file=sys.stderr)
+            return 2
+        except DirectoryError as exc:
+            log.error("initial administrator not created", extra={"error": exc.code})
+            return 1
         return 0
 
     if args.command == "breakglass":

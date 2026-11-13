@@ -17,6 +17,10 @@
 >
 > **v0.5** — login LDAP con username e password, ruoli dai gruppi, sessioni, break-glass, audit con
 > hash chain, pagina di login (AC-02, AC-02b, AC-02c verificati). Dettagli implementativi in ADR-008.
+>
+> **v0.6** — amministratore iniziale da `.env`; gestione utenti dalla UI (lldap via `janus-manager`);
+> ruoli configurabili con permessi (ADR-010), incluso chi legge l'audit log; viewer dell'audit;
+> **TOTP opzionale** per utente, funzionante dietro proxy aziendale e air-gapped.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -33,7 +37,7 @@ Ogni assunzione è versionata. Se viene invalidata, la colonna "Impatta" indica 
 | A2 | ✅ *confermata "per il momento"* — Scala MVP: **≤ 500 nodi**, **≤ 20 utenti concorrenti**, un singolo server Janus-Ops (no HA nell'MVP) | ADR-002, ADR-005, sizing Timescale |
 | A3 | Runtime target: **Docker Compose** su un host Linux; k8s non nell'MVP | DevOps, deploy/ |
 | A4 | ✅ *confermata* — Agent MVP solo **Linux amd64/arm64** con systemd; Windows e OpenRC rimandati a F8+ | Agent, bootstrap |
-| A5 | ✅ *rivista v0.2* — Autenticazione MVP: **directory LDAP come container sidecar nello stack** (utenti e gruppi), ruoli Janus mappati sui gruppi LDAP, **TOTP gestito da Janus-Ops**, un account locale *break-glass* per l'emergenza. Collegamento ad AD/LDAP aziendale esterno: SHOULD successivo. Vedi ADR-008 | Auth, F0, deploy |
+| A5 | ✅ *rivista v0.2* — Autenticazione MVP: **directory LDAP come container sidecar nello stack** (utenti e gruppi), ruoli Janus mappati sui gruppi LDAP, **TOTP gestito da Janus-Ops, opzionale per utente** (*rivista v0.6*), un account locale *break-glass* per l'emergenza. Collegamento ad AD/LDAP aziendale esterno: SHOULD successivo. Vedi ADR-008 | Auth, F0, deploy |
 | A6 | ✅ *rivista v0.2* — LLM: modelli **self-hosted su host esterni allo stack** (Ollama / vLLM / SGLang), endpoint OpenAI-compatible configurabile; **nessun provider cloud**. All'AI è consentito l'accesso a **tutti i dati operativi** (log, metriche, audit, inventory). Restano esclusi solo i segreti del vault | AI, sicurezza |
 | A7 | Il server Janus-Ops può raggiungere direttamente (o via jump host) le API Proxmox e gli host SSH | F1, F5 |
 | A8 | ✅ *decisa v0.3* — Janus-Ops è rilasciato sotto **Apache-2.0** (`LICENSE`, `NOTICE`). Le dipendenze devono avere una licenza compatibile; per TimescaleDB vedi C12. Ansible (GPLv3) è invocato come processo esterno via ansible-runner (Apache-2.0), non incluso nel codice di Janus-Ops | Supply chain |
@@ -72,7 +76,11 @@ Punti delle specifiche che vanno corretti, chiariti o ridimensionati prima di sc
 |---|---|---|---|
 | FR-01 | Inventory unificato di nodi con tag, gruppi, ambiente (`prod/lab/dmz`) e capability attivabili | MUST | F0 |
 | FR-02 | Vault cifrato per chiavi SSH, password sudo, token API | MUST | F0 |
-| FR-03 | Login con utenti della directory LDAP sidecar, ruoli (Admin, Operator, Auditor) mappati sui gruppi LDAP, TOTP obbligatorio | MUST | F0 |
+| FR-03 | Login con utenti della directory LDAP sidecar, ruoli mappati sui gruppi LDAP. **AMEND Product Owner (v0.6)**: TOTP **opzionale** per utente (era obbligatorio), su richiesta dell'utente | MUST | F0 |
+| FR-08 | Amministratore iniziale creato da `.env` al primo avvio, solo se assente | MUST | F0 |
+| FR-09 | Gestione utenti dalla UI: crea, modifica, ruoli, disabilita, reset password, reset 2FA, elimina | MUST | F0 |
+| FR-10b | Ruoli configurabili: gruppo LDAP + insieme di permessi; ruoli custom; chi legge l'audit log è un permesso (`audit.read`) | MUST | F0 |
+| FR-11b | TOTP funzionante senza accesso a internet (proxy aziendali, air-gapped) | MUST | F0 |
 | FR-06 | Account locale *break-glass*, usabile anche con LDAP non disponibile, ogni uso segnalato nell'audit | MUST | F0 |
 | FR-07 | Collegamento opzionale ad AD/LDAP aziendale esterno al posto del sidecar | SHOULD | F8 |
 | FR-04 | Audit log di ogni azione privilegiata, consultabile e filtrabile | MUST | F0 |
@@ -269,6 +277,12 @@ janus-ops/
 - *Decisione*: **(a)**. Build multi-stage: Node 24 per l'export della UI → uv per il virtualenv → runtime `python:3.12-slim`, utente non-root `10001`.
 - *Conseguenze*: TLS fuori dall'immagine (Caddy nella stack di riferimento); i ruoli futuri (worker, scheduler, agent-gateway) saranno sottocomandi di `janus-ops` sulla stessa immagine; i binari dell'agent (F2) potranno essere inclusi nell'immagine per l'auto-update air-gapped.
 
+**ADR-010 — Ruoli e permessi configurabili (v0.6)**
+- *Contesto*: l'utente chiede che l'accesso all'audit log (e in generale ai moduli) sia configurabile dalla gestione utenti.
+- *Opzioni*: (a) ruoli fissi in codice (stato v0.5) — semplice ma ogni cambio richiede un rilascio; (b) **permessi definiti nel codice, ruoli nel database** — ogni ruolo = gruppo LDAP + insieme di permessi, modificabili dalla UI; (c) policy engine (es. OPA/Casbin) — potente ma sproporzionato per l'MVP.
+- *Decisione*: **(b)**. Catalogo permessi in `rbac.py` (`audit.read`, `users.read`, `users.manage`, `roles.manage`; cresce con i moduli). Ruoli built-in `admin` (tutti i permessi, non modificabile), `operator`, `auditor`; ruoli custom creabili. Più ruoli = unione dei permessi.
+- *Conseguenze*: la sessione salva i ruoli al login; i permessi sono ricalcolati a ogni richiesta, quindi una modifica vale subito anche per chi è collegato. Anti-escalation: solo un admin può assegnare/togliere il ruolo admin o agire su un admin; nessuno può eliminarsi, disabilitarsi o togliersi admin. Chi ha `roles.manage` può però darsi altri permessi: per questo di default ce l'ha solo admin. `JANUS_LDAP_GROUP_*` rimossi (AMEND ADR-008).
+
 **ADR-007 — Integrazione AI**
 - *Decisione*: client OpenAI-compatible verso endpoint **self-hosted esterni** (A6), con tool **read-only** esposti dal backend (get_logs, get_metrics, get_audit, get_inventory). LiteLLM solo se serve il routing tra più endpoint/modelli; altrimenti SDK diretto `[VERIFY in F7]`. Le azioni sono prodotte come *Action Plan* strutturato e passano dal normale flusso RBAC + approvazione.
 - *Conseguenze*: nessuna redazione dei dati operativi (consentiti da A6); i segreti del vault non sono mai raggiungibili dai tool; ogni prompt/risposta registrato nell'audit; più endpoint configurabili (es. modello piccolo per triage, grande per RCA).
@@ -284,6 +298,8 @@ janus-ops/
   - **Provisioning**: il job `ldap-init` usa `/app/bootstrap.sh` dell'immagine lldap (idempotente) per creare gruppi e account di servizio. Il `curl` dell'immagine non usa il DNS di Docker: il nome del servizio viene risolto con `getent`.
   - **Sessioni**: token casuale da 256 bit in cookie `HttpOnly; Secure; SameSite=Strict`, solo lo SHA-256 nel DB; durata 8 h, inattività 1 h; logout e rotazione break-glass revocano le sessioni.
   - **Protezioni**: max 5 errori per username e 30 per IP in 15 minuti (in memoria, processo singolo come da A2); scritture `/api` con Origin/Referer diverso dall'host rifiutate (CSRF); password vuote rifiutate prima del bind; username limitati a `[A-Za-z0-9._@-]{1,64}`.
+  - **Gestione utenti (v0.6)**: account `janus-manager` nel gruppo `lldap_admin`; utenti e gruppi via API GraphQL di lldap (HTTP con la libreria standard), password via LDAP Password Modify (RFC 3062), perché lldap salva le password con OPAQUE e GraphQL non può impostarle. Con una directory esterna (`JANUS_LLDAP_HTTP_URL` non impostato) la gestione utenti è in sola lettura, la disabilitazione lato Janus resta possibile.
+  - **TOTP (v0.6)**: RFC 6238 implementato con la libreria standard (verificato con i vettori ufficiali), QR generato in locale (`segno`), segreti cifrati AES-256-GCM (`cryptography`) con `JANUS_SECRET_KEY` e legati all'utente; finestra ±1 passo, anti-replay, 10 codici di recupero monouso, 5 errori chiudono la sessione in attesa; dopo il secondo fattore viene emesso un token nuovo. Nessuna chiamata di rete: funziona dietro proxy aziendali e air-gapped.
   - **Break-glass**: un solo account locale (`JANUS_BREAKGLASS_USERNAME`), hash scrypt (stdlib), impostato con `janus-ops breakglass`; il suo nome non passa mai da LDAP.
 - *Conseguenze*: LDAP diventa una dipendenza del login, mitigata dall'account break-glass (FR-06). Il container LDAP non espone porte all'esterno del compose; la sua interfaccia web va pubblicata solo dietro il reverse proxy e solo per gli Admin `OPEN`. Il volume dati LDAP entra nella procedura di backup.
 
@@ -305,8 +321,10 @@ agent (batch ogni N s, buffer bbolt) → gateway (validazione, insert batch) →
 
 | Entità | Campi chiave | Note |
 |---|---|---|
-| `user` | id, ldap_dn, username, totp_secret (cifrato), is_breakglass, pwd hash (argon2id, solo break-glass), last_login | Profilo locale creato al primo login LDAP |
-| `role_mapping` | ldap_group_dn, role | Gruppi LDAP → ruoli Janus. **AMEND Data Engineer (v0.5)**: non usata nell'MVP, la mappatura è in configurazione (`JANUS_LDAP_GROUP_*`); servirà quando la mappatura sarà modificabile da UI (Settings) |
+| `user` | id, ldap_dn, username, totp_secret_enc, totp_enabled, totp_last_step, is_breakglass, pwd hash (scrypt, solo break-glass), is_active, last_login | Profilo locale creato al primo login LDAP |
+| `role`, `role_permission` | name, description, ldap_group (unico), builtin; (role, permission) | **AMEND Data Engineer (v0.6)**: sostituiscono `role_mapping` (migrazione `0002`) |
+| `user_session` | token_hash, roles[], stage (`mfa_pending`/`full`), mfa_failures, scadenze | `0002`: più ruoli per sessione e passo TOTP |
+| `totp_recovery_code` | user_id, code_hash (SHA-256), used_at | Codici monouso |
 | `node` | id, name, fqdn/ip, environment, parent_id, created_by | `parent_id` → dipendenze (FR-32) |
 | `node_capability` | node_id, type (`agent/ssh/proxmox/docker/snmp`), config jsonb, credential_id | |
 | `tag`, `node_tag`, `group`, `node_group` | | Inventory Ansible dinamico |
@@ -371,9 +389,12 @@ Razionale dell'ordine: F1 dà valore immediato senza agent e costruisce i matton
 | Break-glass (`janus-ops breakglass`) | ✅ | Test di integrazione + prova nello stack Compose |
 | Audit con hash chain (scrittura e verifica) | ✅ | `verify_chain` nei test; trigger append-only |
 | Pagina di login, guardia sulle pagine, utente e logout nella sidebar | ✅ | ESLint, `tsc`, export statico; prova HTTPS via Caddy |
-| TOTP (enrolment, verifica al login) | ⏳ | FR-03 |
+| Amministratore iniziale da `.env` (`janus-ops setup`, solo se assente) | ✅ | Test di integrazione + stack Compose (rilancio idempotente) |
+| Gestione utenti (API + pagina Users & roles) | ✅ | Test: ciclo di vita completo, validazioni, anti-escalation, anti-lockout |
+| Ruoli e permessi configurabili, ruoli custom (ADR-010) | ✅ | Test: permesso `audit.read` concesso/revocato con effetto immediato su sessioni attive |
+| TOTP opzionale (setup con QR, login in due passi, recovery, reset admin) | ✅ | Vettori RFC 6238; test di integrazione; prova HTTPS via Caddy |
+| Consultazione audit (API + UI, filtri, verifica catena) | ✅ | AC-03 |
 | Inventory CRUD, vault | ⏳ | AC-01 |
-| Consultazione audit (API + UI) | ⏳ | AC-03 |
 | Command palette `Ctrl+K` | ⏳ | FR-05 |
 
 Rimandati alla fase che li usa, per la regola "nessun componente senza requisito": **Redis** e
@@ -398,6 +419,9 @@ Trust boundary: Browser ⇄ Server · Agent ⇄ Server · Server ⇄ target (SSH
 | S — Login LDAP aggirato | LDAP injection nei filtri, bind anonimo o con password vuota | Escaping dei filtri, rifiuto delle password vuote, bind anonimo disabilitato | Basso |
 | I — Credenziali LDAP esposte | Traffico in chiaro, password dell'account di servizio | LDAP raggiungibile solo sulla rete interna del compose (LDAPS se il traffico esce dall'host), account di servizio read-only da secret | Basso |
 | D — LDAP non disponibile | Container fermo o corrotto | Account break-glass, healthcheck, backup del volume LDAP | Basso |
+| E — Escalation via gestione utenti | Chi ha `users.manage` si assegna admin | Solo admin assegna/toglie admin o modifica un admin; test dedicati | Basso |
+| E — Account `janus-manager` compromesso | È amministratore della directory | Password solo in `.env` (600) e nel container app; mai esposta; rete `backend` interna | Medio (intrinseco) |
+| I — Perdita di `JANUS_SECRET_KEY` | Backup del DB senza la chiave | Seed TOTP illeggibili → reset 2FA da admin; chiave da salvare insieme al DB (README) | Basso |
 | D — Flood dagli agent | Agent compromesso o buggato | Rate limit per agent, dimensione massima batch, backpressure | Basso |
 | E — RCE di massa dal server | Server compromesso → exec su tutta la flotta | Policy locale sull'agent non sovrascrivibile da remoto, RBAC, approvazione per broadcast | **Alto: è intrinseco al prodotto** — documentarlo |
 | E — Prompt injection via log | Log contenenti istruzioni per l'AI | Tool read-only, nessuna esecuzione senza umano, action plan mostrato per intero | Medio |
@@ -489,10 +513,9 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F0 in corso (login LDAP completato)
-  Delivered:   piano v0.5, schema F0–F3, backend + login LDAP/sessioni/ruoli/break-glass/audit,
-               UI con login, immagine unica, compose con ldap-init, Makefile, CI, overview Docker Hub
-  Open:        ruoli ammessi alla consultazione dell'audit (proposta: admin + auditor) da confermare;
-               CSP per l'UI esportata; [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, yamux, Taskiq
-  Next:        TOTP (enrolment con QR, verifica al login, codici di recupero)
+  Phase:       Engineer — F0 in corso (identità e accessi completati)
+  Delivered:   piano v0.6 (ADR-001..010), schema F0–F3 + 0002, login LDAP, admin iniziale da .env,
+               gestione utenti/ruoli/permessi, TOTP opzionale, viewer audit, UI, compose, CI
+  Open:        CSP per l'UI esportata; [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, yamux, Taskiq
+  Next:        inventory (nodi, tag, gruppi, capability) e vault credenziali
 ```

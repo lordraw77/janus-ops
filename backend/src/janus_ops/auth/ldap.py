@@ -16,8 +16,6 @@ from ldap3.utils.dn import parse_dn
 
 from janus_ops.config import Settings
 
-ROLE_ORDER = ("admin", "operator", "auditor")  # highest privilege first
-
 
 class InvalidCredentials(Exception):
     """Unknown user or wrong password (deliberately indistinguishable)."""
@@ -47,18 +45,6 @@ def group_cn(dn: str) -> str | None:
     except (LDAPException, IndexError, ValueError):
         return None
     return value.lower() if attr.lower() == "cn" else None
-
-
-def role_for_groups(groups: frozenset[str], settings: Settings) -> str | None:
-    mapping = {
-        "admin": settings.ldap_group_admin.lower(),
-        "operator": settings.ldap_group_operator.lower(),
-        "auditor": settings.ldap_group_auditor.lower(),
-    }
-    for role in ROLE_ORDER:
-        if mapping[role] in groups:
-            return role
-    return None
 
 
 def _first(attrs: dict[str, Any], name: str) -> str | None:

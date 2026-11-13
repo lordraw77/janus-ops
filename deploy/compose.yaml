@@ -2,10 +2,17 @@
 # adds compose.build.yaml to build it locally. Variables: deploy/.env.example.
 name: janus-ops
 
-# Settings shared by the app and the migration job
+# Settings shared by the app and the setup job
 x-janus-env: &janus-env
   JANUS_DATABASE_URL: postgresql+asyncpg://janus:${POSTGRES_PASSWORD:?run make env}@db:5432/janus
   JANUS_LOG_LEVEL: ${JANUS_LOG_LEVEL:-INFO}
+  JANUS_LDAP_URL: ldap://ldap:3890
+  JANUS_LDAP_BASE_DN: ${LDAP_BASE_DN:-dc=janus-ops,dc=local}
+  JANUS_LDAP_BIND_DN: uid=janus-svc,ou=people,${LDAP_BASE_DN:-dc=janus-ops,dc=local}
+  JANUS_LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:?run make env}
+  # User and group administration from the UI (account janus-manager, group lldap_admin)
+  JANUS_LLDAP_HTTP_URL: http://ldap:17170
+  JANUS_LDAP_MANAGER_PASSWORD: ${LDAP_MANAGER_PASSWORD:?run make env}
 
 services:
   proxy:
@@ -33,17 +40,12 @@ services:
       <<: *janus-env
       # Only the proxy can reach this container (no published port)
       JANUS_FORWARDED_ALLOW_IPS: "*"
-      JANUS_LDAP_URL: ldap://ldap:3890
-      JANUS_LDAP_BASE_DN: ${LDAP_BASE_DN:-dc=janus-ops,dc=local}
-      JANUS_LDAP_BIND_DN: uid=janus-svc,ou=people,${LDAP_BASE_DN:-dc=janus-ops,dc=local}
-      JANUS_LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:?run make env}
+      JANUS_SECRET_KEY: ${JANUS_SECRET_KEY:?run make env}
       JANUS_SESSION_TTL_S: ${JANUS_SESSION_TTL_S:-28800}
       JANUS_SESSION_IDLE_S: ${JANUS_SESSION_IDLE_S:-3600}
       JANUS_BREAKGLASS_USERNAME: ${JANUS_BREAKGLASS_USERNAME:-breakglass}
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      ldap-init:
+      setup:
         condition: service_completed_successfully
     read_only: true
     tmpfs: [/tmp]
@@ -51,14 +53,21 @@ services:
     security_opt: ["no-new-privileges:true"]
     networks: [edge, backend]
 
-  migrate:
+  # One-shot: database migrations, then the initial administrator (created only if missing)
+  setup:
     image: ${JANUS_IMAGE:-lordraw77/janus-ops}:${JANUS_VERSION:-0.1.0}
-    command: ["migrate"]
+    command: ["setup"]
     restart: "no"
-    environment: *janus-env
+    environment:
+      <<: *janus-env
+      JANUS_ADMIN_USERNAME: ${JANUS_ADMIN_USERNAME:-janus-admin}
+      JANUS_ADMIN_PASSWORD: ${JANUS_ADMIN_PASSWORD:-}
+      JANUS_ADMIN_EMAIL: ${JANUS_ADMIN_EMAIL:-}
     depends_on:
       db:
         condition: service_healthy
+      ldap-init:
+        condition: service_completed_successfully
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -99,8 +108,9 @@ services:
     # ldap_ui: an internal-only network cannot publish the admin UI port
     networks: [backend, ldap_ui]
 
-  # One-shot, idempotent: creates the janus-* groups and the read-only service account
-  # with lldap's own bootstrap script. Users are managed in the lldap admin UI.
+  # One-shot, idempotent: creates the janus-* groups, the read-only service account
+  # (janus-svc, sign-in lookups) and the manager account (janus-manager, user administration)
+  # with lldap's own bootstrap script.
   ldap-init:
     image: lldap/lldap:v0.6.3
     restart: "no"
@@ -110,12 +120,14 @@ services:
         set -eu
         B=/tmp/bootstrap
         mkdir -p "$$B/users" "$$B/groups" "$$B/schemas"
-        for g in lldap_strict_readonly janus-admins janus-operators janus-auditors; do
+        for g in lldap_strict_readonly lldap_admin janus-admins janus-operators janus-auditors; do
           printf '{"name": "%s"}\n' "$$g" >> "$$B/groups/groups.json"
         done
         umask 077
         printf '%s' "$$SVC_PASSWORD" > "$$B/svc-password"
         printf '{"id": "janus-svc", "email": "janus-svc@janus-ops.invalid", "displayName": "Janus-Ops service account", "password_file": "%s", "groups": ["lldap_strict_readonly"]}\n' "$$B/svc-password" > "$$B/users/janus-svc.json"
+        printf '%s' "$$MANAGER_PASSWORD" > "$$B/manager-password"
+        printf '{"id": "janus-manager", "email": "janus-manager@janus-ops.invalid", "displayName": "Janus-Ops directory manager", "password_file": "%s", "groups": ["lldap_admin"]}\n' "$$B/manager-password" > "$$B/users/janus-manager.json"
         # The image's curl cannot use Docker's DNS: resolve the service name with getent
         LDAP_IP="$$(getent hosts ldap | awk '{print $$1; exit}')"
         [ -n "$$LDAP_IP" ] || { echo "cannot resolve ldap" >&2; exit 1; }
@@ -125,6 +137,7 @@ services:
       LLDAP_ADMIN_USERNAME: admin
       LLDAP_ADMIN_PASSWORD: ${LLDAP_ADMIN_PASSWORD:?run make env}
       SVC_PASSWORD: ${LDAP_BIND_PASSWORD:?run make env}
+      MANAGER_PASSWORD: ${LDAP_MANAGER_PASSWORD:?run make env}
       USER_CONFIGS_DIR: /tmp/bootstrap/users
       GROUP_CONFIGS_DIR: /tmp/bootstrap/groups
       USER_SCHEMAS_DIR: /tmp/bootstrap/schemas

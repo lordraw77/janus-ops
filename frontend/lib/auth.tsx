@@ -3,19 +3,23 @@
 import { useRouter } from "next/navigation";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 
-export type Role = "admin" | "operator" | "auditor";
+export type Permission = "audit.read" | "users.read" | "users.manage" | "roles.manage";
 
 export type SessionUser = {
   username: string;
   display_name: string | null;
-  role: Role;
+  roles: string[];
+  permissions: Permission[];
   method: "ldap" | "breakglass";
+  totp_enabled: boolean;
 };
 
 type SessionResponse = { user: SessionUser; expires_at: string };
 
 type AuthContextValue = {
   user: SessionUser;
+  can: (permission: Permission) => boolean;
+  refresh: () => void;
   logout: () => Promise<void>;
 };
 
@@ -34,6 +38,7 @@ type GateState = { kind: "checking" } | { kind: "error" } | { kind: "ready"; use
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [state, setState] = useState<GateState>({ kind: "checking" });
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +54,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, version]);
+
+  const refresh = useCallback(() => setVersion((v) => v + 1), []);
 
   const logout = useCallback(async () => {
     await fetch("/api/v1/auth/logout", { method: "POST" });
@@ -61,16 +68,34 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
   if (state.kind === "error") {
     return (
-      <div className="p-6 text-sm">
-        The Janus-Ops API is not reachable. Reload the page to retry.
-      </div>
+      <div className="p-6 text-sm">The Janus-Ops API is not reachable. Reload the page to retry.</div>
     );
   }
-  return <AuthContext.Provider value={{ user: state.user, logout }}>{children}</AuthContext.Provider>;
+  const value: AuthContextValue = {
+    user: state.user,
+    can: (permission) => state.user.permissions.includes(permission),
+    refresh,
+    logout,
+  };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used inside <AuthGate>");
   return ctx;
+}
+
+/** Page-level guard: shows a notice instead of the page when a permission is missing. */
+export function RequirePermission({ permission, children }: { permission: Permission; children: ReactNode }) {
+  const { can } = useAuth();
+  if (!can(permission)) {
+    return (
+      <div className="rounded-lg border border-line bg-surface p-4 text-sm text-fg-secondary">
+        You do not have access to this page. Ask an administrator for the{" "}
+        <code className="font-mono text-xs">{permission}</code> permission.
+      </div>
+    );
+  }
+  return <>{children}</>;
 }

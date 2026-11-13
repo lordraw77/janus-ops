@@ -26,8 +26,8 @@ self-hosted TLS, and a planned Go agent that only opens outbound connections.
 | Module | Status |
 |---|---|
 | Control plane, web UI shell, database schema | ✅ available |
-| LDAP sign-in (username + password), roles, break-glass account, audit log | ✅ available |
-| TOTP, inventory, credential vault | 🚧 phase F0 |
+| LDAP sign-in, user / role / permission management, optional TOTP, break-glass, audit log | ✅ available |
+| Inventory, credential vault | 🚧 phase F0 |
 | SSH bastion (web terminal, SFTP) | phase F1 |
 | `janus-agent`, telemetry, NOC dashboard | phase F2 |
 | Alerting: thresholds, ack, downtimes, dependencies, notifications | phase F3 |
@@ -54,14 +54,15 @@ The entrypoint is `janus-ops`:
 |---|---|
 | `serve` (default) | Start the HTTP server (API + web UI) |
 | `migrate` | Apply database migrations up to the latest revision, then exit. Idempotent |
+| `setup` | `migrate`, then create the initial administrator from `JANUS_ADMIN_*` if it does not exist |
 | `breakglass` | Create the local emergency admin or rotate its password (prompts; `--password-stdin` for scripts) |
 | `version` | Print the version and exit |
 
 ## Quick start (Docker Compose)
 
 The reference stack runs **Caddy** (TLS) · **janus-ops** · **TimescaleDB** (PostgreSQL 16) ·
-**lldap** (user directory), plus two one-shot jobs: **migrate** (database schema) and
-**ldap-init** (creates the `janus-*` groups and a read-only service account).
+**lldap** (user directory), plus two one-shot jobs: **ldap-init** (creates the `janus-*` groups
+and two service accounts) and **setup** (database schema and initial administrator).
 
 ```bash
 mkdir janus-ops && cd janus-ops
@@ -70,10 +71,13 @@ curl -fsSLO "$base/compose.yaml"
 curl -fsSLO "$base/Caddyfile"
 curl -fsSL -o .env "$base/.env.example"
 
-# Fill the five required secrets with random hex values
-for key in POSTGRES_PASSWORD LLDAP_JWT_SECRET LLDAP_KEY_SEED LLDAP_ADMIN_PASSWORD LDAP_BIND_PASSWORD; do
+# Fill the required secrets with random hex values
+for key in POSTGRES_PASSWORD LLDAP_JWT_SECRET LLDAP_KEY_SEED LLDAP_ADMIN_PASSWORD \
+           LDAP_BIND_PASSWORD LDAP_MANAGER_PASSWORD JANUS_SECRET_KEY; do
   sed -i "s|^${key}=\$|${key}=$(openssl rand -hex 32)|" .env
 done
+# Password of the initial administrator "janus-admin" (or write your own, min. 12 chars)
+sed -i "s|^JANUS_ADMIN_PASSWORD=\$|JANUS_ADMIN_PASSWORD=$(openssl rand -hex 10)|" .env
 chmod 600 .env
 
 docker compose up -d --wait
@@ -90,24 +94,37 @@ curl -k https://localhost/api/v1/ready
 # {"status":"ok","version":"0.1.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
 ```
 
-### Create users and sign in
+### First sign-in, users and roles
 
-Users sign in with their **LDAP username and password**. The LDAP group sets the role:
+Sign in at **https://localhost/login/** as `janus-admin` with the `JANUS_ADMIN_PASSWORD` from
+`.env` (`grep JANUS_ADMIN_PASSWORD .env`). The account is created only if missing, so a password
+changed later in the UI is never overwritten.
 
-| LDAP group | Role |
+Then open **Users & roles** to create users, set passwords, assign roles, disable access, reset
+2FA or delete accounts. Users and groups live in lldap; Janus-Ops manages them through a dedicated
+`janus-manager` account.
+
+Each role maps to an LDAP group and holds a set of permissions (the union applies with several
+roles). Built-in roles: **admin** (`janus-admins`, every permission), **operator**
+(`janus-operators`), **auditor** (`janus-auditors`, `audit.read` + `users.read`). Permissions:
+
+| Permission | Allows |
 |---|---|
-| `janus-admins` | admin |
-| `janus-operators` | operator |
-| `janus-auditors` | auditor |
+| `audit.read` | view the audit log and verify its hash chain |
+| `users.read` | view users, roles and permissions |
+| `users.manage` | create, edit, disable, delete users; reset passwords and 2FA |
+| `roles.manage` | create and delete roles; change permissions and LDAP groups |
 
-1. Open the **lldap** admin UI, published on `127.0.0.1:17170` only. From your workstation:
-   `ssh -L 17170:127.0.0.1:17170 <server>`, then http://localhost:17170
-   (user `admin`, password `LLDAP_ADMIN_PASSWORD` from `.env`).
-2. Create a user, set its password and add it to one of the groups above.
-3. Sign in at **https://localhost/login/**.
+Who can read the audit log is a checkbox in the roles table. Only admins can grant the admin role.
+Sessions last 8 hours with a 1-hour inactivity timeout; 5 failed attempts lock a username for
+15 minutes.
 
-The highest role wins; users in no `janus-*` group are refused. Sessions last 8 hours with a
-1-hour inactivity timeout; 5 failed attempts lock a username for 15 minutes.
+### Two-factor authentication (optional)
+
+Each user can enable TOTP from **My account**: scan the QR code with any authenticator app and
+save the recovery codes. It works **behind corporate proxies and air-gapped**: the QR code is drawn
+by the server and codes depend only on the clock (keep NTP in sync). Seeds are encrypted with
+`JANUS_SECRET_KEY`: back it up together with the database volume.
 
 ### Break-glass account
 
@@ -151,7 +168,10 @@ Variables read by the `janus-ops` process:
 | `JANUS_LDAP_USER_BASE_DN` | `ou=people,<base DN>` | Where users live |
 | `JANUS_LDAP_USER_FILTER` | `(&(objectClass=person)(uid={username}))` | User search filter |
 | `JANUS_LDAP_BIND_DN` / `JANUS_LDAP_BIND_PASSWORD` | — | Read-only service account (required with LDAP) |
-| `JANUS_LDAP_GROUP_ADMIN` / `_OPERATOR` / `_AUDITOR` | `janus-admins` / `janus-operators` / `janus-auditors` | Group CN for each role |
+| `JANUS_LLDAP_HTTP_URL` | — | lldap GraphQL endpoint; unset = users are read-only (external directory) |
+| `JANUS_LDAP_MANAGER_USER` / `JANUS_LDAP_MANAGER_PASSWORD` | `janus-manager` / — | lldap account in `lldap_admin`, used for user administration |
+| `JANUS_ADMIN_USERNAME` / `JANUS_ADMIN_PASSWORD` / `JANUS_ADMIN_EMAIL` | `janus-admin` / — / `<user>@janus-ops.invalid` | Initial administrator created by `setup` if missing |
+| `JANUS_SECRET_KEY` | — | 64 hex chars, encrypts TOTP seeds; unset = TOTP unavailable |
 | `JANUS_LDAP_TIMEOUT_S` | `5` | LDAP timeout, whole seconds |
 | `JANUS_LDAP_CA_FILE` | system CAs | CA bundle to verify `ldaps://` servers |
 | `JANUS_SESSION_TTL_S` / `JANUS_SESSION_IDLE_S` | `28800` / `3600` | Session lifetime / inactivity timeout, seconds |
@@ -172,6 +192,9 @@ Variables used by the Compose stack (`.env`):
 | `LLDAP_ADMIN_PASSWORD` | — (required) | lldap `admin` password |
 | `LLDAP_UI_PORT` | `17170` | lldap admin UI port, bound to `127.0.0.1` |
 | `LDAP_BIND_PASSWORD` | — (required) | Password of the read-only service account `janus-svc` |
+| `LDAP_MANAGER_PASSWORD` | — (required) | Password of the manager account `janus-manager` |
+| `JANUS_SECRET_KEY` | — (required) | Encryption key for secrets at rest (64 hex chars) |
+| `JANUS_ADMIN_USERNAME` / `JANUS_ADMIN_PASSWORD` / `JANUS_ADMIN_EMAIL` | `janus-admin` / — / — | Initial administrator (empty password = not created) |
 | `JANUS_SESSION_TTL_S` / `JANUS_SESSION_IDLE_S` / `JANUS_BREAKGLASS_USERNAME` | see above | Passed to the app |
 | `TZ` | `Etc/UTC` | Time zone of the lldap container |
 
@@ -180,7 +203,10 @@ Variables used by the Compose stack (`.env`):
 | Path | Description |
 |---|---|
 | `/` | Web UI (sign-in at `/login/`) |
-| `/api/v1/auth/login` · `/logout` · `/me` | Sign-in (JSON username + password, sets an HttpOnly session cookie), sign-out, current user |
+| `/api/v1/auth/login` · `/login/totp` · `/logout` · `/me` | Sign-in (password, then TOTP code if enabled; HttpOnly session cookie), sign-out, current user |
+| `/api/v1/auth/totp/*` | TOTP self-service: setup, enable, disable, recovery codes |
+| `/api/v1/users` · `/api/v1/roles` | User and role/permission administration |
+| `/api/v1/audit` · `/audit/verify` | Audit log (paged, filterable) and hash-chain verification |
 | `/api/v1/health` | Liveness: the process is up |
 | `/api/v1/ready` | Readiness: database reachable, TimescaleDB loaded, schema up to date (`503` otherwise) |
 | `/api/docs` | OpenAPI documentation |

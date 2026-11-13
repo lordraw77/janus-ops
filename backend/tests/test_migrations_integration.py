@@ -29,7 +29,9 @@ pytestmark = [
 
 EXPECTED_TABLES = {
     "app_user",
-    "role_mapping",
+    "role",
+    "role_permission",
+    "totp_recovery_code",
     "user_session",
     "credential",
     "node",
@@ -95,6 +97,28 @@ def test_round_trip_is_reversible() -> None:
     assert tables() == set()
     command.upgrade(cfg, "head")  # idempotent re-apply after a full downgrade
     assert tables() == EXPECTED_TABLES
+
+
+def test_0002_downgrades_to_0001() -> None:
+    cfg = alembic_config(DB_URL)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0001")
+    after = tables()
+    assert "role_mapping" in after
+    assert not {"role", "role_permission", "totp_recovery_code"} & after
+    command.upgrade(cfg, "head")
+    assert tables() == EXPECTED_TABLES
+
+
+def test_builtin_roles_seeded(migrated: None) -> None:
+    rows = run_sql("SELECT name, ldap_group, builtin FROM role ORDER BY name")
+    assert rows == [
+        ("admin", "janus-admins", True),
+        ("auditor", "janus-auditors", True),
+        ("operator", "janus-operators", True),
+    ]
+    perms = run_sql("SELECT role, permission FROM role_permission ORDER BY 1, 2")
+    assert perms == [("auditor", "audit.read"), ("auditor", "users.read")]
 
 
 def test_hypertables_and_policies(migrated: None) -> None:

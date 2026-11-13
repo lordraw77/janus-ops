@@ -1,0 +1,1 @@
+{"id": "janus-manager", "email": "janus-manager@example.org", "password": "manager-password-1234", "displayName": "Janus manager", "groups": ["lldap_admin"]}

@@ -52,7 +52,7 @@ Requirements: Docker with Compose v2, `make`, a Linux host. From a clone of this
 
 ```bash
 make env          # creates deploy/.env with random secrets; on upgrades adds only new ones
-make docker/run   # builds the image and starts proxy, app, migrations, TimescaleDB, lldap
+make docker/run   # builds the image and starts proxy, app, setup, TimescaleDB, lldap
 ```
 
 Open **https://localhost/**. The certificate comes from Caddy's local CA (`JANUS_TLS=internal`),
@@ -66,29 +66,59 @@ Stop with `make docker/stop`; data volumes are kept. All variables are documente
 [deploy/.env.example](deploy/.env.example). To run the published image without cloning the
 repository, see the [Docker Hub overview](docs/dockerhub/OVERVIEW.md).
 
-### Users and sign-in
+### First sign-in
 
-Janus-Ops signs users in with **username and password from the LDAP directory** (lldap, in the
-stack). At first start the one-shot `ldap-init` job creates three groups and a read-only service
-account (`janus-svc`) that Janus-Ops uses to look users up:
+`make env` generates an **initial administrator**: user `janus-admin`, password in
+`deploy/.env` (`JANUS_ADMIN_PASSWORD`). At first start the `setup` job creates it in the
+directory. It is created only if missing: change its password later from the UI, `.env` will not
+overwrite it. Sign in at https://localhost/login/.
 
-| LDAP group | Janus-Ops role |
+### Users, roles and permissions
+
+Users sign in with **username and password from the LDAP directory** (lldap, in the stack). Admins
+manage everything from **Users & roles** in the UI: create users, set passwords, assign roles,
+disable access, reset two-factor authentication, delete.
+
+Each **role** is mapped to an LDAP group and has a set of **permissions**; users with several roles
+get the union. The built-in roles:
+
+| Role | LDAP group | Default permissions |
+|---|---|---|
+| admin | `janus-admins` | all (fixed) |
+| operator | `janus-operators` | — |
+| auditor | `janus-auditors` | `audit.read`, `users.read` |
+
+| Permission | Allows |
 |---|---|
-| `janus-admins` | admin |
-| `janus-operators` | operator |
-| `janus-auditors` | auditor |
+| `audit.read` | view the audit log and verify its hash chain |
+| `users.read` | view users, roles and permissions |
+| `users.manage` | create, edit, disable and delete users; reset passwords and 2FA |
+| `roles.manage` | create and delete roles; change their permissions and LDAP group |
 
-1. Open the lldap admin UI. It listens on `127.0.0.1:17170` only; from your workstation:
-   `ssh -L 17170:127.0.0.1:17170 <server>`, then http://localhost:17170
-   (user `admin`, password `LLDAP_ADMIN_PASSWORD` in `deploy/.env`).
-2. Create a user, set its password and add it to one of the groups above.
-3. Sign in at https://localhost/login/.
+Who can read the audit log is therefore a checkbox in the roles table. Admins can create custom
+roles (the LDAP group is created for them). Permission changes apply immediately, also to
+signed-in users; role membership is read at sign-in. Only admins can grant the admin role or
+change administrators, and nobody can delete, disable or demote themselves.
 
-A user in several groups gets the highest role; a user in none is refused. The role is read at
-sign-in, so group changes apply at the next login. Sessions last 8 hours and end after 1 hour of
-inactivity (`JANUS_SESSION_TTL_S`, `JANUS_SESSION_IDLE_S`). After 5 failed attempts a username is
-locked for 15 minutes. Every sign-in, failure and sign-out is written to the audit log.
-Two-factor authentication (TOTP) is the next step on the roadmap.
+Behind the scenes Janus-Ops uses two lldap service accounts created by the `ldap-init` job:
+`janus-svc` (read-only, sign-in lookups) and `janus-manager` (`lldap_admin`, user administration).
+The lldap admin UI stays available on `127.0.0.1:17170` for advanced directory work.
+
+Sessions last 8 hours and end after 1 hour of inactivity (`JANUS_SESSION_TTL_S`,
+`JANUS_SESSION_IDLE_S`). After 5 failed attempts a username is locked for 15 minutes. Every
+sign-in, failure, sign-out and administrative change is written to the audit log.
+
+### Two-factor authentication (optional)
+
+Each user can turn on TOTP from **My account** (click your name in the sidebar): scan the QR code
+with any authenticator app, confirm a code, save the 10 recovery codes. From then on sign-in asks
+for a code after the password.
+
+TOTP works **behind corporate proxies and in air-gapped networks**: codes are computed from a
+shared secret and the clock, the QR code is drawn by the server, nothing contacts the internet.
+Keep the server clock in sync (NTP); one 30-second step of drift is tolerated. Seeds are encrypted
+with `JANUS_SECRET_KEY`: back it up with the database. A user who loses the phone signs in with a
+recovery code, or an admin resets their 2FA from Users & roles.
 
 ### Break-glass account
 
@@ -210,8 +240,9 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 ## Project status & roadmap
 
 > 🚧 **Pre-alpha (0.1.0).** Available today: the single `lordraw77/janus-ops` image, LDAP
-> sign-in with roles, break-glass account, sessions and hash-chained audit log, the full F0–F3
-> database schema, the Compose stack and CI. Next: TOTP, then inventory and vault to close F0.
+> sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
+> audit log with viewer, the F0–F3 database schema, the Compose stack and CI.
+> Next: inventory and credential vault to close F0.
 
 | Phase | Scope |
 |---|---|

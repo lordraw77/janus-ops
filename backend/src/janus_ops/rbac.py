@@ -1,0 +1,78 @@
+"""Roles and permissions (stored in the `role` / `role_permission` tables).
+
+Permissions are defined here, in code, because each one guards a code path. Roles are data:
+admins create them, map them to an LDAP group and pick their permissions in the UI.
+The built-in `admin` role always holds every permission and cannot be edited.
+"""
+
+from dataclasses import dataclass
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+ADMIN_ROLE = "admin"
+
+PERMISSIONS: dict[str, str] = {
+    "audit.read": "View the audit log and verify its integrity",
+    "users.read": "View users, roles and permissions",
+    "users.manage": "Create, edit, disable and delete users; reset passwords and TOTP",
+    "roles.manage": "Create and delete roles; change their permissions and LDAP group",
+}
+
+ROLE_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,31}$"
+
+
+@dataclass(frozen=True)
+class Role:
+    name: str
+    description: str
+    ldap_group: str
+    builtin: bool
+    permissions: frozenset[str]
+
+
+async def list_roles(conn: AsyncConnection) -> list[Role]:
+    rows = await conn.execute(
+        text(
+            "SELECT r.name, r.description, r.ldap_group, r.builtin,"
+            " coalesce(array_agg(p.permission) FILTER (WHERE p.permission IS NOT NULL), '{}')"
+            " AS permissions"
+            " FROM role r LEFT JOIN role_permission p ON p.role = r.name"
+            " GROUP BY r.name ORDER BY r.builtin DESC, r.name"
+        )
+    )
+    return [
+        Role(
+            name=r.name,
+            description=r.description,
+            ldap_group=r.ldap_group,
+            builtin=r.builtin,
+            permissions=frozenset(PERMISSIONS)
+            if r.name == ADMIN_ROLE
+            else frozenset(p for p in r.permissions if p in PERMISSIONS),
+        )
+        for r in rows
+    ]
+
+
+async def roles_for_groups(conn: AsyncConnection, groups: frozenset[str]) -> list[str]:
+    """Roles whose LDAP group CN is among the user's groups (case-insensitive)."""
+    if not groups:
+        return []
+    rows = await conn.execute(
+        text("SELECT name FROM role WHERE lower(ldap_group) = ANY(:groups) ORDER BY name"),
+        {"groups": sorted(g.lower() for g in groups)},
+    )
+    return [r.name for r in rows]
+
+
+async def permissions_for(conn: AsyncConnection, roles: tuple[str, ...]) -> frozenset[str]:
+    if ADMIN_ROLE in roles:
+        return frozenset(PERMISSIONS)
+    if not roles:
+        return frozenset()
+    rows = await conn.execute(
+        text("SELECT DISTINCT permission FROM role_permission WHERE role = ANY(:roles)"),
+        {"roles": list(roles)},
+    )
+    return frozenset(r.permission for r in rows if r.permission in PERMISSIONS)

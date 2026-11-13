@@ -10,11 +10,13 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from janus_ops import __version__, health
+from janus_ops.admin import audit_log, roles, users
 from janus_ops.auth.ldap import DirectoryBackend, LdapDirectory
 from janus_ops.auth.router import router as auth_router
 from janus_ops.auth.service import AuthService
 from janus_ops.config import Settings, get_settings
 from janus_ops.db import create_engine, schema_head
+from janus_ops.directory import LldapAdmin
 
 API_PREFIX = "/api/v1"
 
@@ -63,6 +65,7 @@ def create_app(
         app.state.settings = settings
         app.state.schema_head = schema_head()
         app.state.auth = AuthService(engine, settings, directory)
+        app.state.directory_admin = LldapAdmin(settings) if settings.directory_managed else None
         try:
             yield
         finally:
@@ -95,6 +98,8 @@ def create_app(
 
     app.include_router(health.router, prefix=API_PREFIX)
     app.include_router(auth_router, prefix=API_PREFIX)
+    for admin_router in (users.router, roles.router, audit_log.router):
+        app.include_router(admin_router, prefix=API_PREFIX)
     for router in extra_routers:
         app.include_router(router, prefix=API_PREFIX)
 

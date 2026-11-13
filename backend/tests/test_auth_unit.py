@@ -4,9 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from janus_ops.auth.ldap import group_cn, role_for_groups
+from janus_ops.auth import totp
+from janus_ops.auth.ldap import group_cn
 from janus_ops.auth.passwords import hash_password, verify_password
 from janus_ops.auth.ratelimit import LoginRateLimiter
+from janus_ops.crypto import DecryptionError, SecretBox
+from janus_ops.rbac import PERMISSIONS
 
 from .conftest import make_settings
 
@@ -87,25 +90,6 @@ def test_group_cn(dn: str, cn: str | None) -> None:
     assert group_cn(dn) == cn
 
 
-@pytest.mark.parametrize(
-    ("groups", "role"),
-    [
-        ({"janus-auditors", "janus-admins"}, "admin"),
-        ({"janus-auditors", "janus-operators"}, "operator"),
-        ({"janus-auditors"}, "auditor"),
-        ({"developers"}, None),
-        (set(), None),
-    ],
-)
-def test_highest_role_wins(groups: set[str], role: str | None) -> None:
-    assert role_for_groups(frozenset(groups), make_settings()) == role
-
-
-def test_group_names_are_configurable() -> None:
-    settings = make_settings(ldap_group_admin="Domain-Admins")
-    assert role_for_groups(frozenset({"domain-admins"}), settings) == "admin"
-
-
 # ---------------------------------------------------------------- LDAP settings
 LDAP_OK = {
     "ldap_url": "ldap://ldap:3890",
@@ -181,3 +165,133 @@ def test_cross_origin_read_allowed(client: TestClient) -> None:
 def test_me_and_logout_require_session(client: TestClient) -> None:
     assert client.get("/api/v1/auth/me").status_code == 401
     assert client.post("/api/v1/auth/logout").status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/api/v1/users"),
+        ("post", "/api/v1/users"),
+        ("patch", "/api/v1/users/alice"),
+        ("delete", "/api/v1/users/alice"),
+        ("post", "/api/v1/users/alice/password"),
+        ("delete", "/api/v1/users/alice/totp"),
+        ("get", "/api/v1/roles"),
+        ("post", "/api/v1/roles"),
+        ("patch", "/api/v1/roles/operator"),
+        ("delete", "/api/v1/roles/x"),
+        ("get", "/api/v1/audit"),
+        ("get", "/api/v1/audit/verify"),
+        ("get", "/api/v1/auth/totp"),
+        ("post", "/api/v1/auth/totp/setup"),
+        ("post", "/api/v1/auth/login/totp"),
+    ],
+)
+def test_admin_and_totp_endpoints_require_session(
+    client: TestClient, method: str, path: str
+) -> None:
+    kwargs = {"json": {"code": "123456"}} if method in ("post", "patch") else {}
+    r = getattr(client, method)(path, **kwargs)
+    assert r.status_code in (401, 422), (path, r.status_code)
+    if r.status_code == 422:  # body validated first: retry with a valid-looking body
+        r = getattr(client, method)(path, json={"code": "123456", "password": "x" * 12})
+    assert r.status_code in (401, 422)
+
+
+# ---------------------------------------------------------------- TOTP (RFC 6238)
+RFC_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # base32 of b"12345678901234567890"
+
+
+@pytest.mark.parametrize(
+    ("unix_time", "code"),
+    [
+        (59, "287082"),
+        (1111111109, "081804"),
+        (1111111111, "050471"),
+        (1234567890, "005924"),
+        (2000000000, "279037"),
+    ],
+)
+def test_totp_rfc6238_vectors(unix_time: int, code: str) -> None:
+    assert totp.code_at(RFC_SECRET, totp.current_step(unix_time)) == code
+
+
+def test_totp_accepts_one_step_of_drift_only() -> None:
+    now = 1_700_000_000.0
+    step = totp.current_step(now)
+    for delta in (-1, 0, 1):
+        assert totp.verify(
+            RFC_SECRET, totp.code_at(RFC_SECRET, step + delta), last_step=None, now=now
+        )
+    for delta in (-2, 2):
+        code = totp.code_at(RFC_SECRET, step + delta)
+        assert totp.verify(RFC_SECRET, code, last_step=None, now=now) is None
+
+
+def test_totp_rejects_replay() -> None:
+    now = 1_700_000_000.0
+    step = totp.current_step(now)
+    code = totp.code_at(RFC_SECRET, step)
+    assert totp.verify(RFC_SECRET, code, last_step=None, now=now) == step
+    assert totp.verify(RFC_SECRET, code, last_step=step, now=now) is None
+
+
+@pytest.mark.parametrize("code", ["", "12345", "1234567", "abcdef", "12 34 5"])
+def test_totp_rejects_malformed_codes(code: str) -> None:
+    assert totp.verify(RFC_SECRET, code, last_step=None) is None
+
+
+def test_totp_secret_and_uri() -> None:
+    secret = totp.new_secret()
+    assert len(secret) == 32 and secret.isalnum()
+    uri = totp.provisioning_uri(secret, "alice")
+    assert uri.startswith("otpauth://totp/Janus-Ops%3Aalice?")
+    assert f"secret={secret}" in uri and "issuer=Janus-Ops" in uri
+
+
+def test_totp_qr_is_local_svg() -> None:
+    svg = totp.qr_svg(totp.provisioning_uri(totp.new_secret(), "alice"))
+    assert svg.lstrip().startswith("<?xml") or "<svg" in svg[:200]
+    assert "http://" not in svg.replace("http://www.w3.org", "")  # no external resources
+
+
+def test_recovery_codes_unique_and_hashed_case_insensitively() -> None:
+    codes = totp.new_recovery_codes()
+    assert len(codes) == len(set(codes)) == totp.RECOVERY_CODES
+    assert totp.hash_recovery_code(codes[0]) == totp.hash_recovery_code(f" {codes[0].upper()} ")
+
+
+# ---------------------------------------------------------------- secrets at rest
+KEY = "11" * 32
+
+
+def test_secretbox_round_trip_bound_to_owner() -> None:
+    box = SecretBox(KEY)
+    blob = box.encrypt(b"seed", b"user-1")
+    assert b"seed" not in blob
+    assert box.decrypt(blob, b"user-1") == b"seed"
+    with pytest.raises(DecryptionError):
+        box.decrypt(blob, b"user-2")  # copied to another user's row
+    with pytest.raises(DecryptionError):
+        SecretBox("22" * 32).decrypt(blob, b"user-1")  # wrong key
+    with pytest.raises(DecryptionError):
+        box.decrypt(blob[:-1] + bytes([blob[-1] ^ 1]), b"user-1")  # tampered
+
+
+@pytest.mark.parametrize("key", ["", "zz" * 32, "11" * 16, "11" * 33])
+def test_secret_key_setting_validated(key: str) -> None:
+    with pytest.raises(ValidationError, match="64 hexadecimal"):
+        make_settings(secret_key=key)
+
+
+def test_manager_settings_require_ldap() -> None:
+    with pytest.raises(ValidationError, match="JANUS_LDAP_MANAGER_PASSWORD"):
+        make_settings(**LDAP_OK, lldap_http_url="http://ldap:17170")
+    s = make_settings(**LDAP_OK, lldap_http_url="http://ldap:17170", ldap_manager_password="m")
+    assert s.directory_managed
+    assert s.user_dn("zoe") == "uid=zoe,ou=people,dc=x"
+
+
+def test_permission_catalogue_is_well_formed() -> None:
+    assert {"audit.read", "users.read", "users.manage", "roles.manage"} <= set(PERMISSIONS)
+    assert all(k.count(".") == 1 and k == k.lower() for k in PERMISSIONS)

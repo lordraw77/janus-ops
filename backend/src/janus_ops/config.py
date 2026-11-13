@@ -43,13 +43,30 @@ class Settings(BaseSettings):
     )
     ldap_bind_dn: str | None = Field(default=None, description="Read-only service account")
     ldap_bind_password: SecretStr | None = None
-    ldap_group_admin: str = "janus-admins"
-    ldap_group_operator: str = "janus-operators"
-    ldap_group_auditor: str = "janus-auditors"
     ldap_timeout_s: int = Field(default=5, ge=1, le=60)  # ldap3 needs whole seconds
     ldap_ca_file: Path | None = Field(
         default=None, description="CA bundle to verify ldaps:// servers; default system CAs"
     )
+
+    # --- Directory management (lldap): user/group administration from the UI.
+    # Unset = users are managed outside Janus-Ops (e.g. corporate AD), pages are read-only.
+    lldap_http_url: str | None = Field(
+        default=None, description="lldap web/GraphQL endpoint, e.g. http://ldap:17170"
+    )
+    ldap_manager_user: str = Field(
+        default="janus-manager", description="lldap account in group lldap_admin"
+    )
+    ldap_manager_password: SecretStr | None = None
+
+    # --- Initial administrator, created in the directory by `janus-ops setup` if missing
+    admin_username: str = Field(default="janus-admin", pattern=r"^[a-z0-9][a-z0-9._-]{1,63}$")
+    admin_password: SecretStr | None = Field(
+        default=None, description="Unset = no initial admin is created"
+    )
+    admin_email: str | None = None
+
+    # --- Encryption key for secrets at rest (TOTP seeds): 64 hex chars = 32 bytes
+    secret_key: SecretStr | None = Field(default=None, description="Unset = TOTP cannot be enabled")
 
     # --- Sessions
     session_ttl_s: int = Field(default=8 * 3600, ge=300, le=7 * 86400)
@@ -79,6 +96,38 @@ class Settings(BaseSettings):
         if "{username}" not in self.ldap_user_filter:
             raise ValueError("JANUS_LDAP_USER_FILTER must contain {username}")
         return self
+
+    @model_validator(mode="after")
+    def _manager_complete(self) -> "Settings":
+        if self.lldap_http_url is None:
+            return self
+        if self.ldap_url is None or self.ldap_manager_password is None:
+            raise ValueError(
+                "JANUS_LLDAP_HTTP_URL needs JANUS_LDAP_URL and JANUS_LDAP_MANAGER_PASSWORD"
+            )
+        if not self.lldap_http_url.startswith(("http://", "https://")):
+            raise ValueError("JANUS_LLDAP_HTTP_URL must start with http:// or https://")
+        return self
+
+    @field_validator("secret_key")
+    @classmethod
+    def _secret_key_format(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None:
+            raw = value.get_secret_value()
+            try:
+                ok = len(bytes.fromhex(raw)) == 32
+            except ValueError:
+                ok = False
+            if not ok:
+                raise ValueError("must be 64 hexadecimal characters (32 bytes)")
+        return value
+
+    @property
+    def directory_managed(self) -> bool:
+        return self.lldap_http_url is not None
+
+    def user_dn(self, user_id: str) -> str:
+        return f"uid={user_id},{self.ldap_users_dn}"
 
     @property
     def ldap_users_dn(self) -> str:

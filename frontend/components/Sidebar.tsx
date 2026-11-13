@@ -12,24 +12,21 @@ import {
   Sparkles,
   SquareTerminal,
   TriangleAlert,
+  UserCog,
+  Users,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { useAuth } from "@/lib/auth";
-
-const ROLE_STYLE: Record<string, string> = {
-  admin: "border-primary/40 text-primary",
-  operator: "border-telemetry/40 text-telemetry",
-  auditor: "border-ai/40 text-ai",
-};
+import { RoleBadge } from "@/components/ui";
+import { type Permission, useAuth } from "@/lib/auth";
 
 type NavItem = {
   label: string;
   icon: LucideIcon;
   /** Route of an implemented page, or the roadmap phase that delivers it */
-  target: { href: string } | { phase: string };
+  target: { href: string; permission?: Permission } | { phase: string };
   ai?: boolean;
 };
 
@@ -43,17 +40,19 @@ const NAV: NavItem[] = [
   { label: "Ansible & Workflows", icon: Workflow, target: { phase: "F6" } },
   { label: "SSH Bastion", icon: SquareTerminal, target: { phase: "F1" } },
   { label: "Janus AI Copilot", icon: Sparkles, target: { phase: "F7" }, ai: true },
-  { label: "Audit", icon: ScrollText, target: { phase: "F0" } },
+  { label: "Users & roles", icon: Users, target: { href: "/admin/users/", permission: "users.read" } },
+  { label: "Audit log", icon: ScrollText, target: { href: "/audit/", permission: "audit.read" } },
   { label: "Settings", icon: Settings, target: { phase: "F0" } },
 ];
 
 function isActive(pathname: string, href: string): boolean {
-  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+  const path = pathname.endsWith("/") ? pathname : `${pathname}/`;
+  return href === "/" ? pathname === "/" : path.startsWith(href);
 }
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { user, can, logout } = useAuth();
 
   return (
     <aside className="flex w-56 shrink-0 flex-col justify-between border-r border-line bg-surface p-3">
@@ -72,6 +71,7 @@ export function Sidebar() {
         <nav aria-label="Main" className="space-y-1 text-xs">
           {NAV.map(({ label, icon: Icon, target, ai }) => {
             if ("href" in target) {
+              if (target.permission && !can(target.permission)) return null;
               const active = isActive(pathname, target.href);
               return (
                 <Link
@@ -114,16 +114,17 @@ export function Sidebar() {
           </div>
         )}
         <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="truncate text-xs font-semibold" title={user.username}>
+          <Link href="/account/" className="min-w-0 rounded hover:text-primary" title="My account">
+            <div className="flex items-center gap-1 truncate text-xs font-semibold">
+              <UserCog className="h-3 w-3 shrink-0" aria-hidden />
               {user.display_name ?? user.username}
             </div>
-            <span
-              className={`mt-0.5 inline-block rounded border px-1.5 font-mono text-[10px] uppercase ${ROLE_STYLE[user.role] ?? ""}`}
-            >
-              {user.role}
-            </span>
-          </div>
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {user.roles.map((r) => (
+                <RoleBadge key={r} role={r} />
+              ))}
+            </div>
+          </Link>
           <button
             type="button"
             onClick={() => void logout()}
