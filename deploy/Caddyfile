@@ -1,0 +1,14 @@
+# TLS termination in front of Janus-Ops.
+# JANUS_TLS=internal  -> certificate from Caddy's local CA (default; works air-gapped)
+# JANUS_TLS=<email>   -> public certificate via ACME (needs internet + public DNS)
+{$JANUS_DOMAIN} {
+	tls {$JANUS_TLS}
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	reverse_proxy janus-ops:8000
+}

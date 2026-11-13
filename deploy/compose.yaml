@@ -1,0 +1,152 @@
+# Janus-Ops stack. Runs the published image; from a source checkout `make docker/run`
+# adds compose.build.yaml to build it locally. Variables: deploy/.env.example.
+name: janus-ops
+
+# Settings shared by the app and the migration job
+x-janus-env: &janus-env
+  JANUS_DATABASE_URL: postgresql+asyncpg://janus:${POSTGRES_PASSWORD:?run make env}@db:5432/janus
+  JANUS_LOG_LEVEL: ${JANUS_LOG_LEVEL:-INFO}
+
+services:
+  proxy:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    ports:
+      - "${JANUS_HTTP_PORT:-80}:80"
+      - "${JANUS_HTTPS_PORT:-443}:443"
+    environment:
+      JANUS_DOMAIN: ${JANUS_DOMAIN:-localhost}
+      JANUS_TLS: ${JANUS_TLS:-internal}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      janus-ops:
+        condition: service_healthy
+    networks: [edge]
+
+  janus-ops:
+    image: ${JANUS_IMAGE:-lordraw77/janus-ops}:${JANUS_VERSION:-0.1.0}
+    restart: unless-stopped
+    environment:
+      <<: *janus-env
+      # Only the proxy can reach this container (no published port)
+      JANUS_FORWARDED_ALLOW_IPS: "*"
+      JANUS_LDAP_URL: ldap://ldap:3890
+      JANUS_LDAP_BASE_DN: ${LDAP_BASE_DN:-dc=janus-ops,dc=local}
+      JANUS_LDAP_BIND_DN: uid=janus-svc,ou=people,${LDAP_BASE_DN:-dc=janus-ops,dc=local}
+      JANUS_LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:?run make env}
+      JANUS_SESSION_TTL_S: ${JANUS_SESSION_TTL_S:-28800}
+      JANUS_SESSION_IDLE_S: ${JANUS_SESSION_IDLE_S:-3600}
+      JANUS_BREAKGLASS_USERNAME: ${JANUS_BREAKGLASS_USERNAME:-breakglass}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ldap-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [edge, backend]
+
+  migrate:
+    image: ${JANUS_IMAGE:-lordraw77/janus-ops}:${JANUS_VERSION:-0.1.0}
+    command: ["migrate"]
+    restart: "no"
+    environment: *janus-env
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+  db:
+    image: timescale/timescaledb:2.32.0-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: janus
+      POSTGRES_DB: janus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make env}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "janus", "-d", "janus", "-h", "127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    networks: [backend]
+
+  ldap:
+    image: lldap/lldap:v0.6.3
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      LLDAP_LDAP_BASE_DN: ${LDAP_BASE_DN:-dc=janus-ops,dc=local}
+      LLDAP_JWT_SECRET: ${LLDAP_JWT_SECRET:?run make env}
+      LLDAP_KEY_SEED: ${LLDAP_KEY_SEED:?run make env}
+      LLDAP_LDAP_USER_PASS: ${LLDAP_ADMIN_PASSWORD:?run make env}
+    ports:
+      # Directory admin UI: loopback only, reach it through an SSH tunnel (ADR-008)
+      - "127.0.0.1:${LLDAP_UI_PORT:-17170}:17170"
+    volumes:
+      - ldap_data:/data
+    # ldap_ui: an internal-only network cannot publish the admin UI port
+    networks: [backend, ldap_ui]
+
+  # One-shot, idempotent: creates the janus-* groups and the read-only service account
+  # with lldap's own bootstrap script. Users are managed in the lldap admin UI.
+  ldap-init:
+    image: lldap/lldap:v0.6.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        B=/tmp/bootstrap
+        mkdir -p "$$B/users" "$$B/groups" "$$B/schemas"
+        for g in lldap_strict_readonly janus-admins janus-operators janus-auditors; do
+          printf '{"name": "%s"}\n' "$$g" >> "$$B/groups/groups.json"
+        done
+        umask 077
+        printf '%s' "$$SVC_PASSWORD" > "$$B/svc-password"
+        printf '{"id": "janus-svc", "email": "janus-svc@janus-ops.invalid", "displayName": "Janus-Ops service account", "password_file": "%s", "groups": ["lldap_strict_readonly"]}\n' "$$B/svc-password" > "$$B/users/janus-svc.json"
+        # The image's curl cannot use Docker's DNS: resolve the service name with getent
+        LDAP_IP="$$(getent hosts ldap | awk '{print $$1; exit}')"
+        [ -n "$$LDAP_IP" ] || { echo "cannot resolve ldap" >&2; exit 1; }
+        export LLDAP_URL="http://$$LDAP_IP:17170"
+        exec /app/bootstrap.sh
+    environment:
+      LLDAP_ADMIN_USERNAME: admin
+      LLDAP_ADMIN_PASSWORD: ${LLDAP_ADMIN_PASSWORD:?run make env}
+      SVC_PASSWORD: ${LDAP_BIND_PASSWORD:?run make env}
+      USER_CONFIGS_DIR: /tmp/bootstrap/users
+      GROUP_CONFIGS_DIR: /tmp/bootstrap/groups
+      USER_SCHEMAS_DIR: /tmp/bootstrap/schemas
+      GROUP_SCHEMAS_DIR: /tmp/bootstrap/schemas
+    depends_on:
+      ldap:
+        condition: service_healthy
+    # The lldap image's healthcheck probes a server this job does not run
+    healthcheck:
+      disable: true
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [backend]
+
+networks:
+  edge:
+  backend:
+    internal: true
+  ldap_ui:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pg_data:
+  ldap_data:

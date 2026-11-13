@@ -10,6 +10,13 @@
 >
 > **v0.3** — licenza **Apache-2.0** (A8), grafia del brand **Janus-Ops** (C15), favicon e varianti del
 > logo generate dal master, `res/` come unica cartella degli asset di design (§8). Nessuna domanda aperta.
+>
+> **v0.4** — avvio F0: immagine unica `lordraw77/janus-ops` (ADR-009, AMEND ADR-006), schema DDL
+> F0–F3 come migrazione Alembic `0001`, scaffold backend/frontend/deploy/CI, overview Docker Hub
+> (`docs/dockerhub/`). Avanzamento in §5.1.
+>
+> **v0.5** — login LDAP con username e password, ruoli dai gruppi, sessioni, break-glass, audit con
+> hash chain, pagina di login (AC-02, AC-02b, AC-02c verificati). Dettagli implementativi in ADR-008.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -194,28 +201,32 @@ perché comunica solo via Redis/PG (scalabilità oltre A2).
 
 ### 3.2 Struttura del repository
 
+Stato attuale (v0.4). Le cartelle marcate *(F…)* arrivano con la fase indicata.
+
 ```
 janus-ops/
 ├── backend/
-│   ├── app/
-│   │   ├── core/          config, db, security, rbac, audit, vault
-│   │   ├── modules/       inventory, auth, ssh, agents, monitoring,
-│   │   │                  alerting, containers, proxmox, automation, ai, workflows
-│   │   ├── gateway/       agent tunnel
-│   │   └── workers/
-│   ├── migrations/        Alembic
-│   └── tests/
+│   ├── pyproject.toml, uv.lock     dipendenze pinnate (uv)
+│   ├── src/janus_ops/
+│   │   ├── cli.py                  janus-ops serve | migrate | version
+│   │   ├── config.py               Settings da variabili JANUS_*
+│   │   ├── db.py, health.py        engine async, /health, /ready
+│   │   ├── main.py                 app factory, header di sicurezza, UI statica
+│   │   ├── logsetup.py             log JSON su stdout
+│   │   ├── migrations/             Alembic (SQL scritto a mano, niente autogenerate)
+│   │   └── modules/  (F0+)         auth, inventory, vault, audit, ssh, monitoring, ...
+│   └── tests/                      unit + integration (TimescaleDB reale)
 ├── frontend/
-│   ├── app/               App Router
-│   ├── components/        ui (shadcn), noc, terminal, editors
-│   └── lib/               api client, ws, stores
-├── agent/
-│   ├── cmd/janus-agent/
-│   └── internal/          tunnel, telemetry, buffer, dockerproxy, exec, pty, update, policy
-├── proto/                 contratti messaggi agent ⇄ server (protobuf)
-├── deploy/                compose.yaml, reverse proxy config, .env.example
-├── docs/                  specs, PLAN, adr/, runbooks/
-├── res/                   brand & design resources
+│   ├── app/, components/           App Router, Sidebar, StatusBadge
+│   └── scripts/sync-assets.mjs     copia icone e logo da res/ in public/
+├── agent/  (F2)                    janus-agent in Go
+├── proto/  (F2)                    contratti agent ⇄ server
+├── deploy/                         compose.yaml, compose.build.yaml, Caddyfile, .env.example
+├── scripts/                        gen-env.sh, integration-test.sh, release.sh
+├── docs/                           specs, PLAN, dockerhub/
+├── res/                            brand & design resources
+├── Dockerfile, .dockerignore       immagine unica (ADR-009)
+├── .github/workflows/ci.yml        lint, test, integration, build; push su tag v*
 └── Makefile
 ```
 
@@ -250,6 +261,13 @@ janus-ops/
 - *Opzioni*: (a) Next.js come SPA prevalentemente client-side, API FastAPI stessa origine via reverse proxy, sessione in cookie httpOnly; (b) Next.js come BFF con proxy delle API — più codice, doppia auth.
 - *Decisione*: **(a)**. Niente segreti né logica di autorizzazione nel layer Next.
 - *Conseguenze*: CSRF token per richieste mutanti; WebSocket autenticati con lo stesso cookie + verifica Origin.
+- **AMEND Architect (v0.4)**: il frontend è compilato con `output: 'export'` (file statici) e servito dal processo FastAPI, non da un server Next.js — per permettere l'immagine unica (ADR-009). Conseguenze: niente SSR, Server Actions né rotte dinamiche senza `generateStaticParams`; le pagine di dettaglio useranno parametri in query string o routing client-side. Nessun requisito ne dipende, perché con (a) tutto il rendering era già lato client.
+
+**ADR-009 — Packaging: immagine unica**
+- *Contesto*: un solo repository Docker Hub (`lordraw77/janus-ops`) e un deploy semplice per ambienti air-gapped.
+- *Opzioni*: (a) **immagine unica**: API + UI esportata, stessa immagine anche per `migrate` e per i futuri worker (comando diverso) — un artefatto, una versione; (b) immagini separate `-api` e `-frontend` — scalano separatamente, ma due repository e un container Node in più senza benefici, dato che l'UI non fa SSR.
+- *Decisione*: **(a)**. Build multi-stage: Node 24 per l'export della UI → uv per il virtualenv → runtime `python:3.12-slim`, utente non-root `10001`.
+- *Conseguenze*: TLS fuori dall'immagine (Caddy nella stack di riferimento); i ruoli futuri (worker, scheduler, agent-gateway) saranno sottocomandi di `janus-ops` sulla stessa immagine; i binari dell'agent (F2) potranno essere inclusi nell'immagine per l'auto-update air-gapped.
 
 **ADR-007 — Integrazione AI**
 - *Decisione*: client OpenAI-compatible verso endpoint **self-hosted esterni** (A6), con tool **read-only** esposti dal backend (get_logs, get_metrics, get_audit, get_inventory). LiteLLM solo se serve il routing tra più endpoint/modelli; altrimenti SDK diretto `[VERIFY in F7]`. Le azioni sono prodotte come *Action Plan* strutturato e passano dal normale flusso RBAC + approvazione.
@@ -259,7 +277,14 @@ janus-ops/
 - *Contesto*: A5 richiede LDAP come container sidecar nello stack, in modo che utenti e gruppi siano gestiti fuori dal DB applicativo.
 - *Opzioni*: (a) **lldap** — server LDAP leggero con interfaccia web per utenti e gruppi; un solo container, poca configurazione, ma implementa solo un sottoinsieme di LDAP `[VERIFY: attributi di gruppo/memberOf, supporto LDAPS]`; (b) **OpenLDAP** (immagine Bitnami o simile `[VERIFY: immagine mantenuta]`) — LDAP completo, ma gestione schemi e ACL onerosa e nessuna interfaccia inclusa; (c) **389-DS / FreeIPA** — directory enterprise complete, troppo pesanti per un sidecar.
 - *Decisione*: **(a) lldap**, dietro un'interfaccia `DirectoryBackend` basata su LDAP standard (bind + search). Così passare a OpenLDAP o a un AD esterno (FR-07) richiede solo configurazione.
-- *Dettagli*: login tramite bind LDAP con DN dell'utente, filtri costruiti con escaping; ruoli dai gruppi `janus-admins`, `janus-operators`, `janus-auditors` (nomi configurabili); TOTP e sessioni gestiti da Janus-Ops; account di servizio in sola lettura per la ricerca, con password da secret/env; client Python **ldap3** in thread pool `[VERIFY: alternativa async mantenuta]`.
+- *Dettagli (implementati, v0.5)*:
+  - **Flusso**: bind con l'account di servizio `janus-svc` (gruppo `lldap_strict_readonly`) → ricerca dell'utente con filtro configurabile e valore escapato → esattamente un risultato, altrimenti credenziali non valide → bind con il DN dell'utente e la password inserita → gruppi da `memberOf`.
+  - **Ruoli**: dal CN dei gruppi (`JANUS_LDAP_GROUP_*`, default `janus-admins` / `janus-operators` / `janus-auditors`); vince il ruolo più alto; nessun gruppo = accesso negato (403 `no_role`). Il ruolo è fotografato nella sessione al login.
+  - **Client**: **ldap3** 2.9.1 (Python puro) in thread pool. Alternative valutate: *bonsai* (async e mantenuto, ma senza wheel Linux → compilazione con libldap nell'immagine) e *python-ldap* (estensione C, stesso problema). **Rischio residuo**: ultima release di ldap3 nel 2021 e uso di API pyasn1 deprecate (warning filtrati nei test). Mitigazioni: versioni bloccate in `uv.lock`, test di integrazione su lldap reale in CI, interfaccia `DirectoryBackend` per sostituirlo.
+  - **Provisioning**: il job `ldap-init` usa `/app/bootstrap.sh` dell'immagine lldap (idempotente) per creare gruppi e account di servizio. Il `curl` dell'immagine non usa il DNS di Docker: il nome del servizio viene risolto con `getent`.
+  - **Sessioni**: token casuale da 256 bit in cookie `HttpOnly; Secure; SameSite=Strict`, solo lo SHA-256 nel DB; durata 8 h, inattività 1 h; logout e rotazione break-glass revocano le sessioni.
+  - **Protezioni**: max 5 errori per username e 30 per IP in 15 minuti (in memoria, processo singolo come da A2); scritture `/api` con Origin/Referer diverso dall'host rifiutate (CSRF); password vuote rifiutate prima del bind; username limitati a `[A-Za-z0-9._@-]{1,64}`.
+  - **Break-glass**: un solo account locale (`JANUS_BREAKGLASS_USERNAME`), hash scrypt (stdlib), impostato con `janus-ops breakglass`; il suo nome non passa mai da LDAP.
 - *Conseguenze*: LDAP diventa una dipendenza del login, mitigata dall'account break-glass (FR-06). Il container LDAP non espone porte all'esterno del compose; la sua interfaccia web va pubblicata solo dietro il reverse proxy e solo per gli Admin `OPEN`. Il volume dati LDAP entra nella procedura di backup.
 
 ### 3.4 Flussi principali
@@ -281,7 +306,7 @@ agent (batch ogni N s, buffer bbolt) → gateway (validazione, insert batch) →
 | Entità | Campi chiave | Note |
 |---|---|---|
 | `user` | id, ldap_dn, username, totp_secret (cifrato), is_breakglass, pwd hash (argon2id, solo break-glass), last_login | Profilo locale creato al primo login LDAP |
-| `role_mapping` | ldap_group_dn, role | Gruppi LDAP → ruoli Janus |
+| `role_mapping` | ldap_group_dn, role | Gruppi LDAP → ruoli Janus. **AMEND Data Engineer (v0.5)**: non usata nell'MVP, la mappatura è in configurazione (`JANUS_LDAP_GROUP_*`); servirà quando la mappatura sarà modificabile da UI (Settings) |
 | `node` | id, name, fqdn/ip, environment, parent_id, created_by | `parent_id` → dipendenze (FR-32) |
 | `node_capability` | node_id, type (`agent/ssh/proxmox/docker/snmp`), config jsonb, credential_id | |
 | `tag`, `node_tag`, `group`, `node_group` | | Inventory Ansible dinamico |
@@ -303,7 +328,14 @@ agent (batch ogni N s, buffer bbolt) → gateway (validazione, insert batch) →
 | `ai_conversation`, `action_plan` | status (draft/approved/rejected/executed) | |
 
 Consistenza: transazionale (PG) per inventory/vault/audit; eventual (≤ ciclo check) per gli stati di monitoring.
-Migrazioni: Alembic, up/down, reversibili; schema DDL completo prodotto in F0.
+Migrazioni: Alembic, up/down, reversibili. Lo **schema DDL F0–F3** è nella migrazione
+[`0001_initial_schema.py`](../backend/src/janus_ops/migrations/versions/0001_initial_schema.py):
+ogni indice ha un commento con il pattern di query che lo giustifica. Scelte rilevanti: enumerazioni come
+`text` + `CHECK` (niente `ALTER TYPE`), hypertable `metric_point` (compressione 7 g, retention 30 g) e
+`check_result` (compressione 7 g, retention 90 g) senza FK verso le tabelle padre, `audit_event`
+append-only tramite trigger (UPDATE/DELETE/TRUNCATE bloccati), al massimo un problema aperto per check
+e un solo account break-glass (indici unici parziali). Continuous aggregates rimandati a F2, quando
+esisteranno le query delle dashboard. Le tabelle di F4+ arriveranno con migrazioni dedicate.
 
 ---
 
@@ -313,7 +345,7 @@ Ogni fase termina con un rilascio installabile e i propri criteri di accettazion
 
 | Fase | Contenuto | Uscita |
 |---|---|---|
-| **F0 Foundations** | Monorepo, Makefile, CI (lint/test per linguaggio), compose (proxy, api, worker, PG+TS, Redis, LDAP sidecar, frontend), login LDAP + TOTP + break-glass, RBAC da gruppi LDAP, inventory CRUD, vault, audit con hash chain, UI shell (sidebar, command palette, design tokens Obsidian Graphite) | AC-01, AC-02, AC-02b, AC-02c |
+| **F0 Foundations** | Monorepo, Makefile, CI (lint/test per linguaggio), compose (proxy, app, migrate, PG+TS, LDAP sidecar), login LDAP + TOTP + break-glass, RBAC da gruppi LDAP, inventory CRUD, vault, audit con hash chain, UI shell (sidebar, command palette, design tokens Obsidian Graphite) | AC-01, AC-02, AC-02b, AC-02c |
 | **F1 SSH Bastion** | AsyncSSH ⇄ WS ⇄ xterm.js, credenziali dal vault, multi-tab, SFTP, ProxyJump, recording | AC-03 |
 | **F2 Agent & Telemetry** | Agent Go (tunnel, telemetria, buffer), gateway, enrollment mTLS, bootstrap SSH, ingest Timescale, NOC dashboard (hexagon, node cards) | AC-04, AC-05 |
 | **F3 Alerting** | Check engine, isteresi, problems, ack, downtime, dipendenze, flapping, notifiche, discovery | AC-06..08 |
@@ -324,6 +356,28 @@ Ogni fase termina con un rilascio installabile e i propri criteri di accettazion
 | **F8+** | Workflow visuale, GitOps, SNMP, PTY/exec via agent, auto-update firmato, NTLM, AD/LDAP esterno, OIDC, agent Windows | |
 
 Razionale dell'ordine: F1 dà valore immediato senza agent e costruisce i mattoni (vault, WS, audit) riusati
+
+### 5.1 Avanzamento F0
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Monorepo, Makefile, `.env.example`, script | ✅ | `make help`; `make env` idempotente |
+| Schema DDL F0–F3 (migrazione `0001`) | ✅ | 13 test di integrazione su TimescaleDB 2.32 reale: round trip up/down/up, hypertable e policy, trigger append-only, vincoli |
+| Backend: config, log JSON, `/health`, `/ready`, CLI | ✅ | 21 unit test, ruff, mypy strict |
+| UI shell (sidebar dal mockup, token, favicon, stato del control plane) | ✅ | ESLint, `tsc`, export statico |
+| Immagine unica + Compose (Caddy, app, migrate, TimescaleDB, lldap) | ✅ | Stack avviata: HTTPS, `/ready` = ok, migrazione ripetuta senza effetti |
+| CI GitHub Actions + publish Docker Hub su tag | ✅ | actionlint, shellcheck; prima esecuzione al push |
+| Login LDAP (username + password), ruoli da gruppi, sessioni, `require_role` | ✅ | 26 test di integrazione su lldap + TimescaleDB reali, inclusi AC-02b (cambio gruppo via API lldap) e AC-02c (LDAP spento) |
+| Break-glass (`janus-ops breakglass`) | ✅ | Test di integrazione + prova nello stack Compose |
+| Audit con hash chain (scrittura e verifica) | ✅ | `verify_chain` nei test; trigger append-only |
+| Pagina di login, guardia sulle pagine, utente e logout nella sidebar | ✅ | ESLint, `tsc`, export statico; prova HTTPS via Caddy |
+| TOTP (enrolment, verifica al login) | ⏳ | FR-03 |
+| Inventory CRUD, vault | ⏳ | AC-01 |
+| Consultazione audit (API + UI) | ⏳ | AC-03 |
+| Command palette `Ctrl+K` | ⏳ | FR-05 |
+
+Rimandati alla fase che li usa, per la regola "nessun componente senza requisito": **Redis** e
+**worker/scheduler** (F2–F3), **agent-gateway** (F2).
 da tutto il resto; F2–F3 sono il cuore "Checkmk"; Docker prima di Proxmox perché riusa il tunnel appena costruito.
 
 ---
@@ -360,6 +414,7 @@ nessun segreto in immagini/log, validazione input con Pydantic su ogni boundary.
 |---|---|---|---|
 | Scope creep (8 moduli) | Alta | Alto | Fasi rilasciabili, WON'T espliciti |
 | Complessità tunnel agent (multiplexing, proxy) | Media | Alto | Spike tecnico all'inizio di F2 con proxy reale |
+| ldap3 non più rilasciato (ultima release 2021) | Media | Medio | Versioni bloccate, test su lldap reale in CI, sostituibile dietro `DirectoryBackend` (ADR-008) |
 | Performance ingest Timescale | Bassa (con A2) | Medio | Batch insert, test di carico in F2 |
 | Compatibilità API Proxmox tra versioni | Media | Medio | Test contro PVE 8.x `[VERIFY: versioni target]` |
 | Qualità diagnosi AI con LLM locali | Media | Medio | Prompt e tool deterministici, metriche di valutazione |
@@ -434,11 +489,10 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Architect (v0.3) — piano chiuso, pronto per F0
-  Delivered:   analisi specs, requisiti + AC MVP, componenti, ADR-001..008, data model logico,
-               threat model, roadmap F0–F8, asset res/ (logo, favicon, mockup, token),
-               README, LICENSE Apache-2.0, NOTICE, .gitignore
-  Open:        [VERIFY] su Proxmoxer async, aiodocker ssh, NTLM Go, yamux, Taskiq,
-               lldap (memberOf/LDAPS), ldap3 vs async, versioni Next.js/PVE, icone Next.js
-  Next:        DDL completo + scaffold F0 (monorepo, compose con LDAP sidecar, Makefile, CI)
+  Phase:       Engineer — F0 in corso (login LDAP completato)
+  Delivered:   piano v0.5, schema F0–F3, backend + login LDAP/sessioni/ruoli/break-glass/audit,
+               UI con login, immagine unica, compose con ldap-init, Makefile, CI, overview Docker Hub
+  Open:        ruoli ammessi alla consultazione dell'audit (proposta: admin + auditor) da confermare;
+               CSP per l'UI esportata; [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, yamux, Taskiq
+  Next:        TOTP (enrolment con QR, verifica al login, codici di recupero)
 ```

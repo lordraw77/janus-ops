@@ -1,0 +1,76 @@
+# Janus-Ops — developer and release entry points. `make help` lists the targets.
+SHELL := /usr/bin/env bash
+.SHELLFLAGS := -euo pipefail -c
+.DEFAULT_GOAL := help
+
+VERSION   := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/janus_ops/__init__.py)
+IMAGE     ?= lordraw77/janus-ops
+COMPOSE   := docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml --env-file deploy/.env
+
+.PHONY: help
+help: ## Show this help
+	@grep -hE '^[a-zA-Z/_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# ---------------------------------------------------------------- local development
+.PHONY: deps
+deps: ## Install backend (uv) and frontend (npm) dependencies
+	cd backend && uv sync --frozen
+	cd frontend && npm ci --no-audit --no-fund
+
+.PHONY: build
+build: deps ## Build the web UI static export (frontend/out)
+	cd frontend && npm run build
+
+.PHONY: lint
+lint: ## Lint and type-check backend and frontend
+	cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy
+	cd frontend && npm run lint && npm run typecheck
+
+.PHONY: test
+test: ## Unit tests (no external services)
+	cd backend && uv run pytest -m "not integration"
+
+.PHONY: test/integration
+test/integration: ## Integration tests against a throwaway TimescaleDB container
+	scripts/integration-test.sh
+
+.PHONY: run
+run: ## Run the backend locally (needs JANUS_DATABASE_URL); UI dev server: make run/ui
+	cd backend && uv run janus-ops serve
+
+.PHONY: run/ui
+run/ui: ## Next.js dev server on :3000, proxying /api to the local backend
+	cd frontend && npm run dev
+
+# ---------------------------------------------------------------- docker
+.PHONY: env
+env: ## Create deploy/.env with random secrets (never overwrites)
+	scripts/gen-env.sh
+
+deploy/.env:
+	@echo "deploy/.env missing: run 'make env' first" >&2; exit 1
+
+.PHONY: docker/build
+docker/build: ## Build the image $(IMAGE):$(VERSION)
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
+
+.PHONY: docker/run
+docker/run: deploy/.env ## Build and start the full stack (proxy, app, db, ldap)
+	JANUS_VERSION=$(VERSION) $(COMPOSE) up -d --build
+
+.PHONY: docker/stop
+docker/stop: deploy/.env ## Stop the stack (volumes are kept)
+	$(COMPOSE) down
+
+.PHONY: breakglass
+breakglass: deploy/.env ## Create the break-glass admin or rotate its password (prompts)
+	$(COMPOSE) run --rm --no-deps janus-ops breakglass
+
+.PHONY: logs
+logs: deploy/.env ## Follow the stack logs
+	$(COMPOSE) logs -f --tail=100
+
+# ---------------------------------------------------------------- release
+.PHONY: release
+release: ## Tag v$(VERSION) and push the tag; CI publishes the image to Docker Hub
+	scripts/release.sh "$(VERSION)"

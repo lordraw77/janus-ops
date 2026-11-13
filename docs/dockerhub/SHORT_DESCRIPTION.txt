@@ -1,0 +1,1 @@
+Unified infra ops portal: monitoring, Docker, Proxmox VE, SSH, Ansible and AI in one pane of glass

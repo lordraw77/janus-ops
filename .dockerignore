@@ -1,0 +1,21 @@
+# Only what the Dockerfile copies: backend/, frontend/, res/
+*
+!backend/
+!frontend/
+!res/
+
+# ...minus local build output, caches and secrets
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/node_modules
+**/.next
+**/out
+frontend/public
+**/.env
+**/.env.*
+**/*.pem
+**/*.key

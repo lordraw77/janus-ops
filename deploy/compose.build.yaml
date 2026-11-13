@@ -1,0 +1,8 @@
+# Source checkouts only: build the janus-ops image locally instead of pulling it.
+# Used by `make docker/run` together with compose.yaml.
+services:
+  janus-ops:
+    build:
+      context: ..
+      args:
+        VERSION: ${JANUS_VERSION:-0.1.0}

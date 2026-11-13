@@ -1,0 +1,1 @@
+{"id": "janus-svc", "email": "janus-svc@example.org", "password": "svc-password-1234", "displayName": "Janus service", "groups": ["lldap_strict_readonly"]}

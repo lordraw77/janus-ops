@@ -1,0 +1,70 @@
+[project]
+name = "janus-ops"
+dynamic = ["version"]
+description = "Janus-Ops control plane: unified infrastructure operations portal"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.20.1",
+    "asyncpg>=0.32.0",
+    "fastapi>=0.162.6",
+    "ldap3>=2.9.1",
+    "pydantic>=2.14.3",
+    "pydantic-settings>=2.16.3",
+    "sqlalchemy[asyncio]>=2.1.8",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+janus-ops = "janus_ops.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+    "types-ldap3>=2.9.13.20261107",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/janus_ops/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/janus_ops"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = [
+    # ldap3 2.9.1 imports pyasn1 names deprecated upstream (residual risk, docs/PLAN.md ADR-008)
+    "ignore:tagMap is deprecated:DeprecationWarning:ldap3",
+    "ignore:typeMap is deprecated:DeprecationWarning:ldap3",
+]
+markers = [
+    "integration: needs a real PostgreSQL + TimescaleDB (set JANUS_TEST_DATABASE_URL)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "SIM", "RUF", "ASYNC"]
+ignore = ["S104"]  # binding to 0.0.0.0 is intended inside the container
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["janus_ops"]
+plugins = ["pydantic.mypy"]

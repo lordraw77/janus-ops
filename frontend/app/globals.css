@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* Obsidian Graphite NOC — source of truth: res/design-tokens.json */
+@theme {
+  --color-canvas: #090a0f;
+  --color-surface: #12141d;
+  --color-elevated: #1b1e2b;
+  --color-line: #262a3b;
+  --color-line-strong: #334155;
+
+  --color-primary: #10b981;
+  --color-primary-hover: #059669;
+  --color-telemetry: #22d3ee;
+  --color-ai: #818cf8;
+
+  --color-fg: #f1f5f9;
+  --color-fg-secondary: #cbd5e1;
+  --color-fg-nav: #94a3b8;
+  --color-fg-muted: #64748b;
+
+  --color-ok: #10b981;
+  --color-warn: #f59e0b;
+  --color-crit: #ef4444;
+  --color-unknown: #8b5cf6;
+  --color-offline: #475569;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-fg);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-line-strong);
+}
