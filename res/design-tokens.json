@@ -1,0 +1,53 @@
+{
+  "theme": "Janus-Ops Obsidian Graphite NOC",
+  "layoutReference": "Hybrid Prototype 1 (Checkmk Hexagon Top + Dockhand Node Grid + Checkmk Unhandled Problems)",
+  "logoConcept": "Concept D - Swiss-Blade Server Multitool (Master Artwork)",
+  "colors": {
+    "surface": {
+      "canvas": "#090A0F",
+      "surface": "#12141D",
+      "elevated": "#1B1E2B",
+      "border": "#262A3B",
+      "borderStrong": "#334155"
+    },
+    "brand": {
+      "primary": "#10B981",
+      "primaryHover": "#059669",
+      "telemetry": "#22D3EE",
+      "ai": "#818CF8"
+    },
+    "text": {
+      "primary": "#F1F5F9",
+      "secondary": "#CBD5E1",
+      "nav": "#94A3B8",
+      "muted": "#64748B"
+    },
+    "semantic": {
+      "ok": {
+        "bg": "#10B981",
+        "fg": "#090A0F",
+        "subtleBg": "rgba(16, 185, 129, 0.14)"
+      },
+      "warn": {
+        "bg": "#F59E0B",
+        "fg": "#090A0F",
+        "subtleBg": "rgba(245, 158, 11, 0.14)"
+      },
+      "crit": {
+        "bg": "#EF4444",
+        "fg": "#FFFFFF",
+        "subtleBg": "rgba(239, 68, 68, 0.16)"
+      },
+      "unknown": {
+        "bg": "#8B5CF6",
+        "fg": "#FFFFFF",
+        "subtleBg": "rgba(139, 92, 246, 0.16)"
+      },
+      "offline": {
+        "bg": "#475569",
+        "fg": "#F1F5F9",
+        "subtleBg": "rgba(71, 85, 105, 0.16)"
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Janus-Ops — Control Plane UI Preview</title>
+  <link rel="icon" href="../favicons/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="../favicons/favicon-32x32.png" />
+  <link rel="apple-touch-icon" href="../favicons/apple-touch-icon.png" />
+  <!-- Preview only: the real app must not load anything from a CDN (air-gapped). -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body { background-color: #090A0F; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; }</style>
+</head>
+<body class="min-h-screen flex">
+  <aside class="w-56 bg-[#12141D] border-r border-[#262A3B] p-3 flex flex-col justify-between">
+    <div>
+      <div class="flex items-center gap-2.5 px-2 py-2 mb-4 border-b border-[#262A3B]">
+        <img src="../logos/janus-ops-logo-256.png" alt="Janus-Ops" class="w-10 h-10 object-contain" />
+        <div>
+          <div class="font-bold text-sm">Janus-<span class="text-[#10B981]">Ops</span></div>
+          <div class="text-[10px] font-mono text-[#64748B]">NOC CONTROL PLANE</div>
+        </div>
+      </div>
+      <nav class="space-y-1 text-xs">
+        <div class="px-2.5 py-2 rounded bg-[#1B1E2B] text-[#10B981] border border-[#262A3B]">Dashboard</div>
+        <div class="px-2.5 py-2 rounded text-[#94A3B8]">Containers</div>
+        <div class="px-2.5 py-2 rounded text-[#94A3B8]">Proxmox VE</div>
+        <div class="px-2.5 py-2 rounded text-[#94A3B8]">Ansible &amp; Workflows</div>
+        <div class="px-2.5 py-2 rounded text-[#94A3B8]">SSH Bastion</div>
+        <div class="px-2.5 py-2 rounded text-[#818CF8]">Janus AI Copilot</div>
+      </nav>
+    </div>
+    <div class="text-[11px] font-mono text-[#64748B] px-2 pt-3 border-t border-[#262A3B]">Obsidian Graphite v1.0</div>
+  </aside>
+  <main class="flex-1 p-6">
+    <h1 class="text-lg font-semibold mb-4">Janus-Ops — Master Design System Preview</h1>
+    <div class="rounded-lg border border-dashed border-[#334155] max-w-5xl w-full aspect-video flex items-center justify-center text-sm text-[#64748B] font-mono">
+      Dashboard render not available — layout reference: docs/PLAN.md §8.3
+    </div>
+  </main>
+</body>
+</html>
