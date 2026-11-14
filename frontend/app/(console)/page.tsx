@@ -96,8 +96,8 @@ function Noc() {
   return (
     <>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_1fr]">
-        <HexagonHealth hosts={dash.hosts} />
-        <AttentionTable items={dash.attention} />
+        <HexagonHealth hosts={dash.hosts} services={dash.services} />
+        <AttentionTable items={dash.attention} handled={dash.handled} />
       </div>
       {nodes.length === 0 ? (
         <p className="text-sm text-fg-muted">

@@ -52,6 +52,7 @@ export type NodeCardData = {
   parent_id: string | null;
   agent: AgentStatus | "none";
   state: HostState;
+  downtime: boolean;
   last_seen_at: string | null;
   latest: {
     cpu_pct: number | null;
@@ -68,17 +69,21 @@ export type NodeCardData = {
 };
 
 export type Attention = {
+  problem_id: string;
   node_id: string;
   node_name: string;
-  severity: "warn" | "crit";
-  kind: string;
+  check_name: string;
+  severity: "warn" | "crit" | "unknown";
   message: string;
-  since: string | null;
+  since: string;
+  flapping: boolean;
 };
 
 export type Dashboard = {
   generated_at: string;
   hosts: Record<HostState | "downtime", number>;
+  services: Record<"ok" | "warn" | "crit" | "unknown" | "pending", number>;
+  handled: number;
   nodes: NodeCardData[];
   attention: Attention[];
 };

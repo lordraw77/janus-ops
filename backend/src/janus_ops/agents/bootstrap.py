@@ -109,6 +109,7 @@ class Plan:
     agent_dir: Path
     ca_pem: str | None = None
     proxy: str | None = None
+    allow_docker: bool = False
     steps: list[str] = field(default_factory=list)
     arch: str = ""
 
@@ -127,12 +128,12 @@ def render_config(plan: Plan) -> str:
     if plan.proxy:
         lines.append(f"proxy: {json.dumps(plan.proxy)}")
     lines += [
-        "# Local policy (C9): the server cannot change it. Exec, PTY and Docker streams arrive",
-        "# in later releases and stay refused unless enabled here.",
+        "# Local policy (C9): the server cannot change it. allow_docker relays the Docker",
+        "# Engine API socket (container management, F4); exec and PTY stay refused.",
         "policy:",
         "  allow_exec: false",
         "  allow_pty: false",
-        "  allow_docker: false",
+        f"  allow_docker: {'true' if plan.allow_docker else 'false'}",
         "",
     ]
     return "\n".join(lines)

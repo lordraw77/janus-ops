@@ -27,6 +27,8 @@ type Config struct {
 	IntervalS   int          `yaml:"interval_s"`
 	StateDir    string       `yaml:"state_dir"`
 	Policy      proto.Policy `yaml:"policy"`
+	// Docker Engine API socket, relayed only when policy.allow_docker is true
+	DockerSocket string `yaml:"docker_socket"`
 	// Root of procfs and sysfs: changed only by tests and containerised agents.
 	ProcRoot string `yaml:"proc_root"`
 	SysRoot  string `yaml:"sys_root"`
@@ -76,6 +78,9 @@ func (c *Config) validate() error {
 	}
 	if c.StateDir == "" {
 		c.StateDir = "/var/lib/janus-agent"
+	}
+	if c.DockerSocket == "" {
+		c.DockerSocket = "/var/run/docker.sock"
 	}
 	if c.ProcRoot == "" {
 		c.ProcRoot = "/proc"

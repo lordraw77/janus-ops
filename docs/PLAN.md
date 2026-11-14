@@ -43,6 +43,17 @@
 > SSH, telemetria con buffer su disco e ingest idempotente in TimescaleDB, dashboard NOC (esagono,
 > node card, "needs attention") e pagina nodo con grafici. Migrazione `0007`, permesso
 > `agents.manage` (operator). Avanzamento in §5.3.
+>
+> **v0.12** — **fase F3**: motore dei check (agent, metriche, systemd, porte, TCP e HTTP dal server)
+> con isteresi, stati soft/hard e flapping; problemi, ack, downtime, dipendenze padre/figlio;
+> notifiche e-mail (SMTP con o senza login), Telegram, webhook firmato, Discord, Slack, ntfy;
+> discovery dei check. Migrazione `0008`, permessi `monitoring.manage` (operator) e
+> `notifications.manage` (admin). Avanzamento in §5.4.
+>
+> **v0.13** — **fase F4**: container Docker via tunnel dell'agent (stream multiplexati, policy
+> locale `allow_docker`) o via SSH (inoltro del socket Unix); elenco, stack Compose, inspect,
+> log in diretta, statistiche, azioni, exec nel browser. Migrazione `0009`, permessi
+> `containers.manage` e `containers.exec` (operator). Avanzamento in §5.5.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -462,6 +473,43 @@ Decisioni (Security):
 - **Una connessione per nodo**: una nuova connessione con la stessa chiave chiude la precedente (`replaced`); una chiave già registrata su un altro nodo (VM clonata) è rifiutata.
 - **Redis non introdotto**: la dashboard interroga l'API ogni 10 s (NFR-04 ≤ 30 s rispettato); Redis arriverà se servirà con il worker di F3.
 
+### 5.5 Avanzamento F4
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Stream multiplexati sul WebSocket dell'agent (frame binari, feature `streams` annunciata nell'hello) | ✅ | Test Go (relay, rifiuto per policy, socket assente); test Python del mux; agent vecchi non ricevono frame binari (`agent_outdated`) |
+| Docker via agent solo con `allow_docker: true` nella policy locale, scelto all'installazione via SSH | ✅ | Test; E2E sul nodo `docker` reale: rifiuto prima, accesso dopo la reinstallazione |
+| Docker via SSH (`direct-streamlocal` a `/var/run/docker.sock`, connessioni riusate) | ✅ | E2E sul nodo reale |
+| Container: elenco, inspect (solo nomi delle variabili d'ambiente), log e log in diretta, statistiche, start/stop/restart/kill/pause/remove | ✅ | Test con Docker simulato attraverso il gateway; E2E in lettura su Docker 29 reale |
+| Stack Compose dalle label: elenco servizi, start/stop/restart dell'intero progetto | ✅ | Test; E2E (7 stack) |
+| Exec nel browser (xterm.js), audit di inizio e fine con comando e durata | ✅ | E2E: `echo` eseguito in un container reale |
+| Deploy di stack da file Compose | ⏳ | Richiede la CLI compose sul nodo o un parser lato server: rimandato |
+
+Decisioni (Security):
+- **Docker = root sul nodo**: per questo è opt-in nella policy locale dell'agent (C9), scritto solo da chi installa via SSH; il server non può attivarlo da remoto.
+- **Nessuna API Docker grezza esposta**: il browser chiama endpoint Janus-Ops; il server sceglie le chiamate. Nomi di container e progetti validati; variabili d'ambiente mostrate senza valori.
+- **Permessi separati**: `containers.manage` (azioni) e `containers.exec` (shell, come `ssh.connect`); la lettura usa `inventory.read`. Ogni azione ed exec nell'audit.
+- **Flusso**: al massimo 64 stream per agent; uno stream con troppi dati in coda viene chiuso per non bloccare il tunnel (manca un controllo di flusso per stream `OPEN`).
+
+### 5.4 Avanzamento F3
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Stati OK/WARN/CRIT/UNKNOWN, soglie, isteresi su N cicli (FR-30, AC-06) | ✅ | Test unitari della macchina a stati; integrazione: CRIT 2 cicli → soft, nessun problema né notifica; 3 cicli → hard, problema e webhook; recovery notificata una sola volta |
+| Tipi di check: agent, metrica (anche media su finestra, serie peggiore), systemd, porta in ascolto, TCP e HTTP(S) dal server | ✅ | Test; E2E: TCP verso porta chiusa → CRIT in 10 s |
+| Ack con commento; peggioramento dello stato annulla l'ack; downtime per nodo, check o gruppo (FR-31, AC-08) | ✅ | Test: nessuna notifica in downtime, notifica alla fine del downtime se il problema è ancora aperto |
+| Dipendenze padre/figlio: figli UNREACHABLE, nessuna notifica (FR-32, AC-07) | ✅ | Test con nodo padre giù; il dispatcher ricontrolla il padre al momento dell'invio |
+| Flapping (FR-33) | ✅ | Ultimi 21 risultati: inizio ≥ 50 % di cambi, fine < 25 %; notifiche sospese |
+| Notifiche (FR-34): e-mail con e senza autenticazione, Telegram, webhook con firma HMAC, Discord, Slack, ntfy; regole per stato, ambiente, nodi, tipo di check, escalation | ✅ | Test con server HTTP e SMTP locali; E2E con i canali reali dell'utente (mail, Telegram, Discord, ntfy): problema e recovery consegnati |
+| Discovery dei check (FR-35) | ✅ | Proposte da capability, file system, porte in ascolto e systemd; applicate ai nodi reali (62 check) |
+| Problemi, downtime e notifiche nella UI; check nella pagina nodo; dashboard con problemi non gestiti e conteggio servizi | ✅ | Screenshot |
+
+Decisioni:
+- **Motore nel processo API** (A2, come il reaper SFTP): nessun worker né Redis finché non serve; disattivabile con `JANUS_MONITORING_ENABLED=false`.
+- **Dispatcher come riconciliatore**: confronta i problemi con `notification_delivery`; un riavvio non perde né ripete notifiche, le escalation sono regole con ritardo, 3 tentativi per invio.
+- **Segreti dei canali nel vault** (ADR-004, AAD legata al canale), in sola scrittura; mai nei log, nell'audit o nelle risposte. Solo librerie standard per i mittenti (proxy da `HTTPS_PROXY`).
+- **Check eseguiti dal server** (TCP, HTTP): partono dalla rete del server Janus-Ops; utili per nodi senza agent (es. NAS, apparati).
+
 ### 5.2 Avanzamento F1
 
 | Elemento | Stato | Verifica |
@@ -605,7 +653,7 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F2 completata (AC-04 verificato solo su Debian amd64)
+  Phase:       Engineer — F4 completata; F2 con AC-04 verificato solo su Debian amd64
   Delivered:   piano v0.11, migrazioni 0001–0007, F0–F2: bastion SSH web, SFTP, snippet;
                agent Go (tunnel WSS, telemetria, buffer), enrollment con chiave ed25519,
                bootstrap SSH, ingest Timescale idempotente, dashboard NOC e pagina nodo
@@ -614,5 +662,5 @@ STATE
                AC-04 su Rocky e arm64; E2E dietro squid (NFR-02); test di carico (NFR-05);
                continuous aggregates; installazione manuale dell'agent senza SSH;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        F3 — check engine, isteresi, problemi, ack, downtime, dipendenze, notifiche
+  Next:        F5 — Proxmox VE: cluster, VM/LXC, backup
 ```

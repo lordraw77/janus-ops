@@ -26,7 +26,8 @@ The private key never leaves the node.
     "signature": "<base64>", "enroll_token": "<only until enrolled>",
     "version": "0.2.0", "arch": "amd64", "os": "Ubuntu 24.04.3 LTS", "kernel": "6.8.0-…",
     "hostname": "docker", "interval_s": 10,
-    "policy": {"allow_exec": false, "allow_pty": false, "allow_docker": false}}
+    "policy": {"allow_exec": false, "allow_pty": false, "allow_docker": false},
+    "features": ["streams"]}
    ```
 
    `signature` = ed25519 over the UTF-8 bytes of
@@ -104,6 +105,24 @@ characters) and `user` are optional; kernel threads have no `cmd`.
 | `system.uptime_s` | | s |
 | `proc.count` | | |
 | `systemd.failed_units` | | |
+
+## Streams (F4)
+
+Feature `streams`, announced by the agent in `hello.features` (older agents are never sent
+binary frames). Binary WebSocket frames: `[type: 1 byte][stream id: 4 bytes big-endian][payload]`.
+
+| Type | Direction | Payload |
+|---|---|---|
+| 1 `OPEN` | server → agent | JSON `{"kind": "docker"}` |
+| 4 `OPEN_OK` | agent → server | — |
+| 5 `OPEN_FAIL` | agent → server | reason: `docker_not_allowed`, `docker_unavailable`, `unknown_kind`, `too_many_streams` |
+| 2 `DATA` | both | bytes (at most 32 KiB per frame) |
+| 3 `CLOSE` | both | optional reason |
+
+Kind `docker` relays the Docker Engine API socket (`docker_socket`, default
+`/var/run/docker.sock`) only when the local policy has `allow_docker: true`. The agent never
+interprets the bytes; the server decides which API calls are made. At most 64 open streams;
+a stream whose write backlog overflows is closed so that it cannot stall the tunnel.
 
 ## Local policy (C9)
 

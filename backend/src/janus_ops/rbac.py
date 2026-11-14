@@ -24,6 +24,10 @@ PERMISSIONS: dict[str, str] = {
     "sftp.transfer": "Browse, download, upload, rename and delete files on nodes over SFTP",
     "snippets.manage": "Create, edit and delete shared command snippets",
     "agents.manage": "Install, revoke and uninstall the Janus agent on nodes (runs as root)",
+    "monitoring.manage": "Create and change checks, schedule downtimes, acknowledge problems",
+    "notifications.manage": "Configure notification channels (with their secrets) and rules",
+    "containers.manage": "Start, stop, restart and remove containers and Compose stacks",
+    "containers.exec": "Open interactive shells inside containers",
 }
 
 ROLE_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,31}$"

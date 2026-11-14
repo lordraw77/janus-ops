@@ -1,6 +1,6 @@
 /** Small Obsidian Graphite building blocks shared by the console pages. */
 
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 
 type Variant = "primary" | "secondary" | "danger";
 
@@ -101,10 +101,13 @@ export function Modal({
   title,
   onClose,
   children,
+  wide = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** logs, terminals */
+  wide?: boolean;
 }) {
   return (
     <div
@@ -114,7 +117,7 @@ export function Modal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-4"
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
-      <div className="w-full max-w-md rounded-lg border border-line bg-surface p-5 shadow-2xl">
+      <div className={`w-full ${wide ? "max-w-5xl" : "max-w-md"} rounded-lg border border-line bg-surface p-5 shadow-2xl`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-fg-muted hover:text-fg">
@@ -124,5 +127,29 @@ export function Modal({
         {children}
       </div>
     </div>
+  );
+}
+
+export const SELECT_CLASS =
+  "w-full rounded border border-line bg-canvas px-3 py-1.5 text-sm outline-none focus:border-primary";
+
+export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select {...props} className={`${SELECT_CLASS} ${props.className ?? ""}`} />;
+}
+
+export function StateBadge({ state, soft }: { state: string | null; soft?: boolean }) {
+  const styles: Record<string, string> = {
+    ok: "bg-ok text-canvas",
+    warn: "bg-warn text-canvas",
+    crit: "bg-crit text-white",
+    unknown: "bg-unknown text-white",
+  };
+  return (
+    <span
+      title={soft ? "Soft state: not confirmed yet (check cycles)" : undefined}
+      className={`inline-block min-w-12 rounded px-1.5 py-0.5 text-center font-mono text-[10px] font-semibold ${state ? styles[state] : "bg-offline text-fg"} ${soft ? "opacity-60" : ""}`}
+    >
+      {state ? state.toUpperCase() : "PENDING"}
+    </span>
   );
 }

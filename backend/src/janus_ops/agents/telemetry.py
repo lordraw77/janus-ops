@@ -1,10 +1,9 @@
 """/api/v1/telemetry: NOC dashboard summary and per-node charts (FR-24).
 
-Until the check engine (F3) exists, "needs attention" is computed live from the latest values
-with fixed thresholds; it is not stored and sends no notification.
+Host states come from each node's connectivity check (kind `host`), service counts from the
+other checks, "needs attention" from open problems nobody handles yet (F3).
 """
 
-import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
@@ -42,9 +41,6 @@ LATEST = [
 FRESH = timedelta(minutes=5)
 SPARK_RANGE = timedelta(minutes=30)
 SPARK_BUCKET = timedelta(minutes=1)
-
-# fixed until F3 makes them configurable checks: (warn, crit)
-THRESHOLDS = {"fs.used_pct": (85.0, 95.0), "mem.used_pct": (90.0, 97.0)}
 
 
 class Point(BaseModel):
@@ -129,23 +125,30 @@ class NodeCard(BaseModel):
     parent_id: uuid.UUID | None
     agent: str  # status, or "none" without the agent capability
     state: Literal["up", "down", "unreachable", "unmonitored"]
+    downtime: bool = False
     last_seen_at: datetime | None
     latest: Latest
     cpu_spark: list[float | None]
 
 
 class Attention(BaseModel):
+    """An open problem nobody handles yet (not acknowledged, not in downtime, reachable)."""
+
+    problem_id: uuid.UUID
     node_id: uuid.UUID
     node_name: str
-    severity: Literal["warn", "crit"]
-    kind: str
+    check_name: str
+    severity: Literal["warn", "crit", "unknown"]
     message: str
-    since: datetime | None = None
+    since: datetime
+    flapping: bool
 
 
 class Dashboard(BaseModel):
     generated_at: datetime
     hosts: dict[str, int]
+    services: dict[str, int]
+    handled: int  # open problems acknowledged, in downtime or unreachable
     nodes: list[NodeCard]
     attention: list[Attention]
 
@@ -170,13 +173,6 @@ def _latest(values: dict[str, list[tuple[dict[str, str], float]]]) -> Latest:
         labels, pct = max(fs, key=lambda item: item[1])
         latest.disk_pct, latest.disk_mount = pct, labels.get("mount")
     return latest
-
-
-def _severity(name: str, value: float | None) -> Literal["warn", "crit"] | None:
-    if value is None:
-        return None
-    warn, crit = THRESHOLDS[name]
-    return "crit" if value >= crit else "warn" if value >= warn else None
 
 
 @router.get("/dashboard", response_model=Dashboard)
@@ -215,33 +211,84 @@ async def dashboard(request: Request, _: Reader) -> Dashboard:
             idx = int((r.bucket - start) / SPARK_BUCKET)
             if 0 <= idx < slots:
                 sparks.setdefault(str(r.node_id), [None] * slots)[idx] = round(r.v, 1)
-        failed_units = {
-            str(r.node_id): r.units
+        # host state = hard state of the node's connectivity check (FR-30, FR-32)
+        host_checks = {
+            str(r.node_id): r
             for r in await conn.execute(
                 text(
-                    "SELECT node_id, facts -> 'failed_units' AS units FROM agent"
-                    " WHERE jsonb_array_length(coalesce(facts -> 'failed_units', '[]')) > 0"
+                    "SELECT c.node_id, s.hard_state, coalesce(s.unreachable, false) AS unreachable"
+                    " FROM service_check c JOIN check_state s ON s.check_id = c.id"
+                    " WHERE c.kind = 'host' AND c.enabled"
                 )
             )
         }
+        in_downtime = {
+            str(r.node_id)
+            for r in await conn.execute(
+                text(
+                    "SELECT DISTINCT n.id AS node_id FROM node n JOIN downtime d"
+                    " ON d.starts_at <= now() AND d.ends_at > now() AND (d.node_id = n.id"
+                    " OR d.group_id IN (SELECT group_id FROM node_group_member m"
+                    " WHERE m.node_id = n.id))"
+                )
+            )
+        }
+        services = {"ok": 0, "warn": 0, "crit": 0, "unknown": 0, "pending": 0}
+        for r in await conn.execute(
+            text(
+                "SELECT coalesce(s.hard_state, 'pending') AS state, count(*) AS n"
+                " FROM service_check c LEFT JOIN check_state s ON s.check_id = c.id"
+                " WHERE c.enabled AND c.kind <> 'host' GROUP BY 1"
+            )
+        ):
+            services[r.state] = r.n
+        problems = list(
+            await conn.execute(
+                text(
+                    "SELECT p.id, p.state, p.opened_at, p.acknowledged_at, c.name AS check_name,"
+                    " c.node_id, n.name AS node_name, s.last_output,"
+                    " coalesce(s.unreachable, false) AS unreachable,"
+                    " coalesce(s.is_flapping, false) AS flapping,"
+                    " EXISTS (SELECT 1 FROM downtime d WHERE d.starts_at <= now()"
+                    "  AND d.ends_at > now() AND (d.check_id = c.id OR d.node_id = c.node_id"
+                    "  OR d.group_id IN (SELECT group_id FROM node_group_member m"
+                    "  WHERE m.node_id = c.node_id))) AS in_downtime"
+                    " FROM problem p JOIN service_check c ON c.id = p.check_id"
+                    " JOIN node n ON n.id = c.node_id LEFT JOIN check_state s ON s.check_id = c.id"
+                    " WHERE p.closed_at IS NULL"
+                    " ORDER BY CASE p.state WHEN 'crit' THEN 0 WHEN 'unknown' THEN 1 ELSE 2 END,"
+                    " p.opened_at DESC"
+                )
+            )
+        )
 
     agent_status = {
         str(r.id): status_of(r, hub) if r.capability_enabled is not None else "none" for r in nodes
     }
 
-    def base_state(node_id: str) -> str:
-        status = agent_status.get(node_id, "none")
-        return {"online": "up", "offline": "down"}.get(status, "unmonitored")
+    parents = {str(r.id): str(r.parent_id) for r in nodes if r.parent_id}
+
+    def state_of(node_id: str) -> str:
+        host = host_checks.get(node_id)
+        if host is not None:
+            if host.hard_state == "ok":
+                return "up"
+            return "unreachable" if host.unreachable else "down"
+        # no evaluated connectivity check (yet): fall back to the agent connection
+        state = {"online": "up", "offline": "down"}.get(
+            agent_status.get(node_id, ""), "unmonitored"
+        )
+        parent = parents.get(node_id)
+        if state == "down" and parent and state_of(parent) == "down":
+            state = "unreachable"
+        return state
 
     cards: list[NodeCard] = []
-    attention: list[Attention] = []
     for r in nodes:
         nid = str(r.id)
-        state = base_state(nid)
-        parent = str(r.parent_id) if r.parent_id else None
-        if state == "down" and parent and base_state(parent) == "down":
-            state = "unreachable"  # its parent is down: probably not its own fault (FR-32)
-        latest = _latest(values.get(nid, {})) if state == "up" else Latest()
+        state = state_of(nid)
+        online = agent_status[nid] == "online"
+        latest = _latest(values.get(nid, {})) if online else Latest()
         cards.append(
             NodeCard(
                 node_id=r.id,
@@ -251,53 +298,38 @@ async def dashboard(request: Request, _: Reader) -> Dashboard:
                 parent_id=r.parent_id,
                 agent=agent_status[nid],
                 state=state,
+                downtime=nid in in_downtime,
                 last_seen_at=r.last_seen_at,
                 latest=latest,
-                cpu_spark=sparks.get(nid, []) if state == "up" else [],
+                cpu_spark=sparks.get(nid, []) if online else [],
             )
         )
-        if state == "down":
-            attention.append(
-                Attention(
-                    node_id=r.id,
-                    node_name=r.name,
-                    severity="crit",
-                    kind="agent_offline",
-                    message="Agent not connected",
-                    since=r.last_seen_at,
-                )
-            )
-        if state != "up":
+    attention: list[Attention] = []
+    handled = 0
+    for p in problems:
+        if p.acknowledged_at or p.in_downtime or p.unreachable:
+            handled += 1
             continue
-        for metric, value, label in (
-            ("fs.used_pct", latest.disk_pct, f"File system {latest.disk_mount}"),
-            ("mem.used_pct", latest.mem_pct, "Memory"),
-        ):
-            if severity := _severity(metric, value):
-                attention.append(
-                    Attention(
-                        node_id=r.id,
-                        node_name=r.name,
-                        severity=severity,
-                        kind=metric,
-                        message=f"{label} at {value:.0f}%",
-                    )
-                )
-        if units := failed_units.get(nid):
-            names = units if isinstance(units, list) else json.loads(units)
-            attention.append(
-                Attention(
-                    node_id=r.id,
-                    node_name=r.name,
-                    severity="warn",
-                    kind="systemd_failed",
-                    message="Failed units: "
-                    + ", ".join(str(u) for u in names[:5])
-                    + (f" (+{len(names) - 5})" if len(names) > 5 else ""),
-                )
+        attention.append(
+            Attention(
+                problem_id=p.id,
+                node_id=p.node_id,
+                node_name=p.node_name,
+                check_name=p.check_name,
+                severity=p.state,
+                message=p.last_output or "",
+                since=p.opened_at,
+                flapping=p.flapping,
             )
-    hosts = {"up": 0, "down": 0, "unreachable": 0, "unmonitored": 0, "downtime": 0}
+        )
+    hosts = {"up": 0, "down": 0, "unreachable": 0, "unmonitored": 0, "downtime": len(in_downtime)}
     for card in cards:
         hosts[card.state] += 1
-    attention.sort(key=lambda a: (a.severity != "crit", a.node_name))
-    return Dashboard(generated_at=now, hosts=hosts, nodes=cards, attention=attention)
+    return Dashboard(
+        generated_at=now,
+        hosts=hosts,
+        services=services,
+        handled=handled,
+        nodes=cards,
+        attention=attention,
+    )

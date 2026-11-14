@@ -39,6 +39,8 @@ type fakeServer struct {
 	key      atomic.Value // ed25519.PublicKey once enrolled
 	ackAfter int          // drop the connection without acking the first N batches
 	refuse   websocket.StatusCode
+	// session replaces the default message loop after the welcome (stream tests)
+	session func(ctx context.Context, c *websocket.Conn)
 
 	mu      sync.Mutex
 	samples []int64 // timestamps received, in order
@@ -100,6 +102,10 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		enrolled = true
 	}
 	send(proto.Welcome{T: "welcome", V: 1, IntervalS: 10, Enrolled: enrolled})
+	if f.session != nil {
+		f.session(ctx, c)
+		return
+	}
 	for {
 		_, data, err := c.Read(ctx)
 		if err != nil {

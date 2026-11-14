@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { type FormEvent, Suspense, useEffect, useState } from "react";
 
+import { ChecksCard } from "@/components/Checks";
 import { LineChart, type LineSeries } from "@/components/LineChart";
 import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
 import {
@@ -145,10 +146,15 @@ function InstallDialog({ agent, onClose, onDone }: { agent: AgentDetail; onClose
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const proxy = String(new FormData(e.currentTarget).get("proxy") ?? "").trim();
+    const form = new FormData(e.currentTarget);
+    const proxy = String(form.get("proxy") ?? "").trim();
+    const allowDocker = form.get("allow_docker") === "on";
     setBusy(true);
     setError(null);
-    const r = await api(`/agents/${agent.node_id}/bootstrap`, { method: "POST", body: { proxy: proxy || null } });
+    const r = await api(`/agents/${agent.node_id}/bootstrap`, {
+      method: "POST",
+      body: { proxy: proxy || null, allow_docker: allowDocker },
+    });
     setBusy(false);
     if (!r.ok) return setError(message(r.code));
     onDone();
@@ -169,6 +175,13 @@ function InstallDialog({ agent, onClose, onDone }: { agent: AgentDetail; onClose
         <Field label="HTTP(S) proxy" hint="Optional, e.g. http://proxy.example:3128. Empty = direct (or HTTPS_PROXY of the service).">
           <TextInput name="proxy" maxLength={512} placeholder="http://proxy:3128" />
         </Field>
+        <label className="flex items-start gap-2 text-xs text-fg-secondary">
+          <input type="checkbox" name="allow_docker" defaultChecked={agent.policy?.allow_docker ?? false} className="mt-0.5" />
+          <span>
+            Allow Docker: the agent relays the Docker Engine API (containers, logs, exec). This is root-equivalent
+            access to the node; it is written in the node&apos;s local policy, which the server cannot change later.
+          </span>
+        </label>
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" disabled={busy}>
@@ -381,6 +394,7 @@ function NodeView({ id }: { id: string }) {
         </div>
       </div>
       <AgentCard agent={a} reload={agent.reload} />
+      <ChecksCard nodeId={a.node_id} nodeName={a.node_name} />
       {a.enrolled_at && <Charts nodeId={a.node_id} />}
       <Facts agent={a} />
     </div>

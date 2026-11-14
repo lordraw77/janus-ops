@@ -43,7 +43,12 @@ type Hello struct {
 	Hostname    string `json:"hostname"`
 	IntervalS   int    `json:"interval_s"`
 	Policy      Policy `json:"policy"`
+	// Features this agent supports; the server uses nothing an agent did not announce.
+	Features []string `json:"features"`
 }
+
+// Features of this agent version.
+var Features = []string{"streams"}
 
 type Welcome struct {
 	T         string `json:"t"`

@@ -224,6 +224,7 @@ func (a *Agent) handshake(ctx context.Context, c *websocket.Conn) (proto.Welcome
 		EnrollToken: a.Cfg.EnrollToken, Version: a.Version, Arch: runtime.GOARCH,
 		OS: info.OS, Kernel: info.Kernel, Hostname: info.Hostname,
 		IntervalS: int(time.Duration(a.interval.Load()) / time.Second), Policy: a.Cfg.Policy,
+		Features: proto.Features,
 	}
 	if err := write(hctx, c, hello); err != nil {
 		return w, err
@@ -282,11 +283,27 @@ func (a *Agent) session(ctx context.Context) error {
 }
 
 func (a *Agent) readLoop(ctx context.Context, c *websocket.Conn, acks chan<- uint64) error {
+	m := newMux(c, a.Cfg.Policy, a.Cfg.DockerSocket, a.Log)
+	defer m.closeAll()
 	for {
-		t, data, err := read(ctx, c)
+		kind, raw, err := c.Read(ctx)
 		if err != nil {
+			if status := websocket.CloseStatus(err); status >= 4000 {
+				return &refusal{close: status, code: closeReason(err)}
+			}
 			return err
 		}
+		if kind == websocket.MessageBinary {
+			if err := m.handle(ctx, raw); err != nil {
+				return err
+			}
+			continue
+		}
+		var env proto.Envelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return fmt.Errorf("bad message from server: %w", err)
+		}
+		t, data := env.T, raw
 		switch t {
 		case "ack":
 			var ack proto.Ack

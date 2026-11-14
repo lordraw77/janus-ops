@@ -14,7 +14,11 @@ export type Permission =
   | "ssh.connect"
   | "sftp.transfer"
   | "snippets.manage"
-  | "agents.manage";
+  | "agents.manage"
+  | "monitoring.manage"
+  | "notifications.manage"
+  | "containers.manage"
+  | "containers.exec";
 
 export type SessionUser = {
   username: string;

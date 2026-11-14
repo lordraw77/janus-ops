@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Bell,
   Boxes,
   Container,
   KeyRound,
@@ -37,8 +38,8 @@ const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, target: { href: "/" } },
   { label: "Inventory", icon: Server, target: { href: "/inventory/", permission: "inventory.read" } },
   { label: "Credentials", icon: KeyRound, target: { href: "/credentials/", permission: "inventory.read" } },
-  { label: "Problems", icon: TriangleAlert, target: { phase: "F3" } },
-  { label: "Containers", icon: Container, target: { phase: "F4" } },
+  { label: "Problems", icon: TriangleAlert, target: { href: "/problems/", permission: "inventory.read" } },
+  { label: "Containers", icon: Container, target: { href: "/containers/", permission: "inventory.read" } },
   { label: "Proxmox VE", icon: Boxes, target: { phase: "F5" } },
   { label: "Ansible & Workflows", icon: Workflow, target: { phase: "F6" } },
   {
@@ -49,6 +50,7 @@ const NAV: NavItem[] = [
   { label: "Janus AI Copilot", icon: Sparkles, target: { phase: "F7" }, ai: true },
   { label: "Users & roles", icon: Users, target: { href: "/admin/users/", permission: "users.read" } },
   { label: "Audit log", icon: ScrollText, target: { href: "/audit/", permission: "audit.read" } },
+  { label: "Notifications", icon: Bell, target: { href: "/notifications/", permission: "notifications.manage" } },
   { label: "Settings", icon: Settings, target: { phase: "F0" } },
 ];
 

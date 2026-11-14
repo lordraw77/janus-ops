@@ -31,8 +31,8 @@ self-hosted TLS, and a Go agent that only opens outbound connections.
 | SSH bastion: web terminal, jump host, host key pinning, session recording and replay | ✅ available |
 | SFTP browser, command broadcast, snippets | ✅ available |
 | `janus-agent` (SSH bootstrap, outbound-only), telemetry, NOC dashboard | ✅ available |
-| Alerting: thresholds, ack, downtimes, dependencies, notifications | phase F3 |
-| Docker containers & Compose stacks | phase F4 |
+| Alerting: checks, hysteresis, ack, downtimes, dependencies, notifications (mail, Telegram, webhook, Discord, Slack, ntfy) | ✅ available |
+| Docker containers & Compose stacks (via agent or SSH): logs, stats, actions, shell | ✅ available |
 | Proxmox VE clusters, VM/LXC, backup audit | phase F5 |
 | Ansible automation | phase F6 |
 | AI Copilot on self-hosted models | phase F7 |
@@ -123,6 +123,9 @@ inventory). Permissions:
 | `sftp.transfer` | browse and transfer files over SFTP (operator and admin by default) |
 | `snippets.manage` | manage shared command snippets (admin by default) |
 | `agents.manage` | install, revoke, uninstall the agent on nodes (operator and admin by default) |
+| `monitoring.manage` | checks, downtimes, acknowledgements (operator and admin by default) |
+| `notifications.manage` | notification channels and rules (admin by default) |
+| `containers.manage` / `containers.exec` | container and stack actions / shells in containers (operator and admin by default) |
 
 Who can read the audit log is a checkbox in the roles table. Only admins can grant the admin role.
 Sessions last 8 hours with a 1-hour inactivity timeout; 5 failed attempts lock a username for
@@ -249,6 +252,11 @@ Variables used by the Compose stack (`.env`):
 | `/api/v1/agent/ws` | Agent gateway (WebSocket; ed25519 challenge, one-time enrollment token) |
 | `/api/v1/agents` · `/{node}/bootstrap` · `/revoke` · `/uninstall` | Agent status and lifecycle over SSH |
 | `/api/v1/telemetry/dashboard` · `/telemetry/nodes/{node}` | NOC summary; per-node charts |
+| `/api/v1/checks` · `/nodes/{node}/discovery` | Checks, results, suggested checks |
+| `/api/v1/problems` · `/downtimes` | Problems (ack), downtimes |
+| `/api/v1/notifications/channels` · `/rules` · `/deliveries` | Notification channels (secrets write-only), rules, delivery log |
+| `/api/v1/containers/hosts` · `/{node}` · `/{node}/stacks` · `/{node}/c/{name}/…` | Docker hosts, containers, stacks, inspect, logs, stats, actions |
+| `/api/v1/containers/logs/ws` · `/containers/exec/ws` | Live logs; shell in a container (WebSocket) |
 | `/api/v1/health` | Liveness: the process is up |
 | `/api/v1/ready` | Readiness: database reachable, TimescaleDB loaded, schema up to date (`503` otherwise) |
 | `/api/docs` | OpenAPI documentation |

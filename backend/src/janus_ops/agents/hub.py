@@ -6,6 +6,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from janus_ops.agents.mux import Mux
+
 CloseFn = Callable[[int, str], Awaitable[None]]
 
 
@@ -14,6 +16,7 @@ class Link:
     node_id: str
     remote_ip: str | None
     close: CloseFn
+    mux: Mux | None = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     connected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 

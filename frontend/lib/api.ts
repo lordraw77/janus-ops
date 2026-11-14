@@ -107,6 +107,23 @@ const MESSAGES: Record<string, string> = {
   ssh_auth_failed: "SSH authentication failed: check the node's credential.",
   ssh_host_key_mismatch: "The node's SSH host key changed: reset the pin in Host keys if expected.",
   ssh_no_credential: "The SSH capability has no credential.",
+  // containers
+  agent_offline: "The node's agent is not connected.",
+  agent_outdated: "The node's agent is too old for this: reinstall it from the node page (Reinstall / upgrade).",
+  docker_not_allowed: "The agent's local policy does not allow Docker: reinstall it with “Allow Docker”.",
+  docker_unavailable: "Docker is not running on the node (or its socket is not reachable).",
+  no_docker_capability: "This node has no Docker capability.",
+  agent_timeout: "The agent did not answer in time.",
+  agent_disconnected: "The agent disconnected.",
+  invalid_command: "Invalid command.",
+  // monitoring
+  node_required: "Choose a node.",
+  check_exists: "This node already has a check with that name.",
+  problem_closed: "The problem is already closed.",
+  target_not_found: "The node, check or group no longer exists.",
+  secret_required: "This channel needs its secret (token or URL).",
+  kind_fixed: "The kind of a channel cannot change: create a new one.",
+  channel_not_found: "The channel no longer exists.",
 };
 
 export function message(code: string, retryAfter?: number): string {

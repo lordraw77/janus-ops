@@ -12,6 +12,9 @@
 !**/.env.example
 *.local.yaml
 *.local.yml
+# notification channels and AI keys for local tests (deploy/.local)
+.local
+**/.local
 secrets/
 **/secrets/
 master.key

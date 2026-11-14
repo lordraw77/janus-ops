@@ -1,0 +1,307 @@
+"""Check kinds, their parameters and how one evaluation turns into a raw state.
+
+Kinds:
+- host:    the node's agent is connected (Agent connectivity)
+- metric:  a telemetry series compared with warn/crit thresholds (worst matching series wins)
+- systemd: no failed unit (any, or one named unit), from the agent's facts
+- port:    something listens on a port, from the agent's facts
+- tcp:     the server can open a TCP connection to the node (no agent needed); latency thresholds
+- http:    the server gets an expected HTTP status (no agent needed); latency thresholds
+"""
+
+import asyncio
+import contextlib
+import json
+import re
+import ssl
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from janus_ops.agents.ingest import LABEL_KEY, NAME
+
+State = Literal["ok", "warn", "crit", "unknown"]
+Kind = Literal["host", "metric", "systemd", "port", "tcp", "http"]
+FACTS_STALE = timedelta(minutes=3)
+METRIC_STALE = timedelta(minutes=5)
+MAX_OUTPUT = 1000
+
+
+class _Params(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class HostParams(_Params):
+    pass
+
+
+class MetricParams(_Params):
+    metric: str = Field(pattern=NAME.pattern)
+    labels: dict[str, str] = Field(default_factory=dict, max_length=4)
+    # 0 = latest value; otherwise the average over this many seconds
+    window_s: int = Field(default=0, ge=0, le=3600)
+
+    @field_validator("labels")
+    @classmethod
+    def _labels(cls, value: dict[str, str]) -> dict[str, str]:
+        for k, v in value.items():
+            if not LABEL_KEY.match(k) or len(v) > 128:
+                raise ValueError("invalid label")
+        return value
+
+
+class SystemdParams(_Params):
+    unit: str | None = Field(default=None, pattern=r"^[A-Za-z0-9@:._\\-]{1,256}$")
+
+
+class PortParams(_Params):
+    port: int = Field(ge=1, le=65535)
+    proto: Literal["tcp", "udp"] = "tcp"
+
+
+class TcpParams(_Params):
+    port: int = Field(ge=1, le=65535)
+    host: str | None = Field(default=None, max_length=253)
+    timeout_s: float = Field(default=5, gt=0, le=30)
+
+
+class HttpParams(_Params):
+    url: str = Field(max_length=2048, pattern=r"^https?://\S+$")
+    expect_status: str = Field(default="200-399", pattern=r"^\d{3}(-\d{3})?(,\d{3}(-\d{3})?)*$")
+    contains: str | None = Field(default=None, max_length=256)
+    verify_tls: bool = True
+    timeout_s: float = Field(default=10, gt=0, le=60)
+
+
+PARAMS: dict[str, type[_Params]] = {
+    "host": HostParams,
+    "metric": MetricParams,
+    "systemd": SystemdParams,
+    "port": PortParams,
+    "tcp": TcpParams,
+    "http": HttpParams,
+}
+# kinds whose value can be compared with thresholds
+THRESHOLDS = {"metric", "tcp", "http"}
+# kinds that need the agent
+NEEDS_AGENT = {"host", "metric", "systemd", "port"}
+
+
+@dataclass
+class Result:
+    state: State
+    output: str
+    perf: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Check:
+    id: str
+    node_id: str
+    node_name: str
+    address: str
+    kind: str
+    params: dict[str, Any]
+    comparison: str | None
+    warn: float | None
+    crit: float | None
+
+
+def grade(value: float, comparison: str | None, warn: float | None, crit: float | None) -> State:
+    if comparison is None:
+        return "ok"
+
+    def over(limit: float | None) -> bool:
+        if limit is None:
+            return False
+        return value > limit if comparison == "gt" else value < limit
+
+    return "crit" if over(crit) else "warn" if over(warn) else "ok"
+
+
+def _fmt(v: float) -> str:
+    return f"{v:.0f}" if abs(v) >= 100 else f"{v:.2f}".rstrip("0").rstrip(".")
+
+
+async def _metric(conn: AsyncConnection, c: Check) -> Result:
+    p = MetricParams.model_validate(c.params)
+    if p.window_s:
+        sql = (
+            "SELECT s.labels, avg(pt.value) AS value FROM metric_series s"
+            " JOIN metric_point pt ON pt.series_id = s.id"
+            " WHERE s.node_id = :node AND s.name = :name AND s.labels @> CAST(:labels AS jsonb)"
+            " AND pt.time > now() - CAST(:window AS interval) GROUP BY s.id, s.labels"
+        )
+    else:
+        sql = (
+            "SELECT s.labels, pt.value FROM metric_series s JOIN LATERAL ("
+            " SELECT value FROM metric_point WHERE series_id = s.id"
+            " AND time > now() - CAST(:window AS interval) ORDER BY time DESC LIMIT 1) pt ON true"
+            " WHERE s.node_id = :node AND s.name = :name AND s.labels @> CAST(:labels AS jsonb)"
+        )
+    window = timedelta(seconds=p.window_s) if p.window_s else METRIC_STALE
+    rows = list(
+        await conn.execute(
+            text(sql),
+            {"node": c.node_id, "name": p.metric, "labels": json.dumps(p.labels), "window": window},
+        )
+    )
+    if not rows:
+        return Result("unknown", f"No recent data for {p.metric}")
+    rank = {"ok": 0, "warn": 1, "crit": 2}
+    graded = [
+        (grade(r.value, c.comparison, c.warn, c.crit), r.labels, float(r.value)) for r in rows
+    ]
+    # worst state first, then the most extreme value in the threshold's direction
+    sign = -1 if c.comparison == "lt" else 1
+    state, labels, value = max(graded, key=lambda g: (rank[g[0]], sign * g[2]))
+    where = ", ".join(f"{k}={v}" for k, v in labels.items())
+    label = f"{p.metric}{{{where}}}" if where else p.metric
+    unit = "%" if p.metric.endswith("_pct") else ""
+    limits = ""
+    if c.comparison:
+        op = ">" if c.comparison == "gt" else "<"
+        limits = f" (warn {op} {_fmt(c.warn) if c.warn is not None else '-'},"
+        limits += f" crit {op} {_fmt(c.crit) if c.crit is not None else '-'})"
+    avg = f" avg {p.window_s}s" if p.window_s else ""
+    return Result(state, f"{label}{avg} = {_fmt(value)}{unit}{limits}", {"value": value})
+
+
+async def _facts(conn: AsyncConnection, node_id: str) -> dict[str, Any] | None:
+    row = (
+        await conn.execute(
+            text("SELECT facts, facts_at FROM agent WHERE node_id = :id"), {"id": node_id}
+        )
+    ).first()
+    if row is None or row.facts is None or row.facts_at < datetime.now(UTC) - FACTS_STALE:
+        return None
+    facts: dict[str, Any] = row.facts
+    return facts
+
+
+async def _systemd(conn: AsyncConnection, c: Check) -> Result:
+    p = SystemdParams.model_validate(c.params)
+    facts = await _facts(conn, c.node_id)
+    if facts is None:
+        return Result("unknown", "No recent facts from the agent")
+    failed: list[str] = facts.get("failed_units", [])
+    if p.unit:
+        if p.unit in failed:
+            return Result("crit", f"{p.unit} failed")
+        return Result("ok", f"{p.unit} not failed")
+    if failed:
+        shown = ", ".join(failed[:10]) + (f" (+{len(failed) - 10})" if len(failed) > 10 else "")
+        return Result("crit", f"{len(failed)} failed: {shown}", {"failed": len(failed)})
+    return Result("ok", "No failed units", {"failed": 0})
+
+
+async def _port(conn: AsyncConnection, c: Check) -> Result:
+    p = PortParams.model_validate(c.params)
+    facts = await _facts(conn, c.node_id)
+    if facts is None:
+        return Result("unknown", "No recent facts from the agent")
+    owners = sorted(
+        {
+            sock.get("process") or "?"
+            for sock in facts.get("listening", [])
+            if sock.get("port") == p.port and sock.get("proto") == p.proto
+        }
+    )
+    if owners:
+        return Result("ok", f"{p.proto}/{p.port} listening ({', '.join(owners)})")
+    return Result("crit", f"Nothing listens on {p.proto}/{p.port}")
+
+
+async def _tcp(c: Check) -> Result:
+    p = TcpParams.model_validate(c.params)
+    host = p.host or c.address
+    start = time.monotonic()
+    try:
+        _, writer = await asyncio.wait_for(asyncio.open_connection(host, p.port), p.timeout_s)
+    except TimeoutError:
+        return Result("crit", f"{host}:{p.port} timed out after {p.timeout_s:g}s")
+    except OSError as exc:
+        return Result("crit", f"{host}:{p.port} {exc.strerror or type(exc).__name__}")
+    ms = (time.monotonic() - start) * 1000
+    writer.close()
+    with contextlib.suppress(OSError):
+        await writer.wait_closed()
+    state = grade(ms, c.comparison, c.warn, c.crit)
+    return Result(state, f"{host}:{p.port} connected in {ms:.0f} ms", {"latency_ms": ms})
+
+
+def _status_ok(status: int, spec: str) -> bool:
+    for part in spec.split(","):
+        lo, _, hi = part.partition("-")
+        if int(lo) <= status <= int(hi or lo):
+            return True
+    return False
+
+
+def _http_get(p: HttpParams) -> tuple[int, bytes, float]:
+    ctx = ssl.create_default_context()
+    if not p.verify_tls:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    # http(s) only: enforced by HttpParams.url
+    req = urllib.request.Request(p.url, headers={"User-Agent": "Janus-Ops check"})  # noqa: S310
+    start = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=p.timeout_s, context=ctx) as resp:  # noqa: S310
+            body = resp.read(1 << 20)
+            status = resp.status
+    except urllib.error.HTTPError as exc:
+        status, body = exc.code, b""
+    return status, body, (time.monotonic() - start) * 1000
+
+
+async def _http(c: Check) -> Result:
+    p = HttpParams.model_validate(c.params)
+    try:
+        status, body, ms = await asyncio.to_thread(_http_get, p)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        reason = getattr(exc, "reason", None) or exc
+        return Result("crit", f"{p.url}: {str(reason)[:200]}")
+    if not _status_ok(status, p.expect_status):
+        return Result("crit", f"HTTP {status} (expected {p.expect_status}) in {ms:.0f} ms")
+    if p.contains and p.contains.encode() not in body:
+        return Result("crit", f"HTTP {status}, body does not contain {p.contains!r}")
+    state = grade(ms, c.comparison, c.warn, c.crit)
+    return Result(state, f"HTTP {status} in {ms:.0f} ms", {"latency_ms": ms})
+
+
+async def evaluate(
+    conn: AsyncConnection, c: Check, agent_online: bool, last_seen: datetime | None
+) -> Result:
+    """One evaluation; never raises (an error is an UNKNOWN result)."""
+    try:
+        if c.kind == "host":
+            if agent_online:
+                return Result("ok", "Agent connected")
+            seen = last_seen.strftime("%Y-%m-%d %H:%M:%S UTC") if last_seen else "never"
+            return Result("crit", f"Agent not connected (last seen {seen})")
+        if c.kind == "metric":
+            return await _metric(conn, c)
+        if c.kind == "systemd":
+            return await _systemd(conn, c)
+        if c.kind == "port":
+            return await _port(conn, c)
+        if c.kind == "tcp":
+            return await _tcp(c)
+        if c.kind == "http":
+            return await _http(c)
+        return Result("unknown", f"Unknown check kind {c.kind}")
+    except Exception as exc:  # noqa: BLE001 - a broken check must not stop the engine
+        return Result("unknown", f"Check error: {type(exc).__name__}")
+
+
+def clip(output: str) -> str:
+    output = re.sub(r"\s+", " ", output).strip()
+    return output if len(output) <= MAX_OUTPUT else output[: MAX_OUTPUT - 1] + "…"

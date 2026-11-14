@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     agent_enroll_ttl_s: int = Field(default=900, ge=60, le=86400)
     agent_bootstrap_wait_s: int = Field(default=45, ge=0, le=300)
 
+    # --- Alerting (F3): check engine and notification dispatcher run in this process
+    monitoring_enabled: bool = Field(
+        default=True, description="Run checks and send notifications (off: API only, tests)"
+    )
+
     # --- Sessions
     session_ttl_s: int = Field(default=8 * 3600, ge=300, le=7 * 86400)
     session_idle_s: int = Field(default=3600, ge=60, le=86400)

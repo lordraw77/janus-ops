@@ -20,9 +20,14 @@ from janus_ops.auth.ldap import DirectoryBackend, LdapDirectory
 from janus_ops.auth.router import router as auth_router
 from janus_ops.auth.service import AuthService
 from janus_ops.config import Settings, get_settings
+from janus_ops.containers import router as containers
+from janus_ops.containers.access import DockerAccess
 from janus_ops.db import create_engine, schema_head
 from janus_ops.directory import LldapAdmin
 from janus_ops.inventory import credentials, groups, nodes
+from janus_ops.monitoring import engine as check_engine
+from janus_ops.monitoring import notify
+from janus_ops.monitoring import router as monitoring
 from janus_ops.terminal import router as terminal
 from janus_ops.terminal import sftp, snippets
 from janus_ops.vault import Vault
@@ -80,16 +85,25 @@ def create_app(
         app.state.sftp = sftp.SftpPool(engine, app.state.vault, settings)
         app.state.agents = AgentHub()
         app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
-        reaper = asyncio.create_task(sftp.reaper(app.state.sftp, engine))
+        app.state.docker = DockerAccess(engine, app.state.vault, settings, app.state.agents)
+        app.state.check_engine = check_engine.Engine(engine, app.state.agents)
+        app.state.dispatcher = notify.Dispatcher(engine, app.state.vault)
+        tasks = [asyncio.create_task(sftp.reaper(app.state.sftp, engine))]
+        if settings.monitoring_enabled:
+            tasks.append(asyncio.create_task(app.state.check_engine.run()))
+            tasks.append(asyncio.create_task(app.state.dispatcher.run()))
         if settings.recordings_dir is not None:
             settings.recordings_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
             yield
         finally:
-            reaper.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await reaper
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             app.state.sftp.close_all()
+            app.state.docker.close_all()
             await app.state.agents.close_all()
             await engine.dispose()
 
@@ -133,6 +147,8 @@ def create_app(
         gateway.router,
         agents.router,
         telemetry.router,
+        monitoring.router,
+        containers.router,
     ):
         app.include_router(module_router, prefix=API_PREFIX)
     for router in extra_routers:

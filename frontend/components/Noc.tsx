@@ -3,6 +3,7 @@
 import { FolderOpen, Server, Terminal } from "lucide-react";
 import Link from "next/link";
 
+import { StateBadge } from "@/components/ui";
 import { type Attention, type Dashboard, type NodeCardData, ago, formatDuration } from "@/lib/agents";
 import { useAuth } from "@/lib/auth";
 import { ENV_STYLE } from "@/lib/inventory";
@@ -15,7 +16,7 @@ const STATE_COLOR = {
 } as const;
 
 /** Host health: outer ring = share up, inner hexagon = worst state. */
-export function HexagonHealth({ hosts }: { hosts: Dashboard["hosts"] }) {
+export function HexagonHealth({ hosts, services }: { hosts: Dashboard["hosts"]; services: Dashboard["services"] }) {
   const monitored = hosts.up + hosts.down + hosts.unreachable;
   const pct = monitored > 0 ? Math.round((hosts.up / monitored) * 100) : null;
   const worst = hosts.down > 0 ? "crit" : hosts.unreachable > 0 ? "warn" : monitored > 0 ? "ok" : "offline";
@@ -28,7 +29,8 @@ export function HexagonHealth({ hosts }: { hosts: Dashboard["hosts"] }) {
     { label: "No agent", value: hosts.unmonitored, color: "var(--color-offline)" },
   ];
   return (
-    <section className="flex items-center gap-5 rounded-lg border border-line bg-surface p-4">
+    <section className="rounded-lg border border-line bg-surface p-4">
+      <div className="flex items-center gap-5">
       <div className="relative h-28 w-28 shrink-0">
         <svg viewBox="0 0 120 120" className="h-full w-full" aria-hidden>
           <polygon points="60,6 108,33 108,87 60,114 12,87 12,33" fill="none" stroke="var(--color-line-strong)" strokeWidth="4" />
@@ -56,6 +58,8 @@ export function HexagonHealth({ hosts }: { hosts: Dashboard["hosts"] }) {
           </div>
         ))}
       </dl>
+      </div>
+      <ServicesSummary services={services} />
     </section>
   );
 }
@@ -121,6 +125,9 @@ export function NodeCard({ node }: { node: NodeCardData }) {
       <div className="flex items-center gap-2 text-xs">
         <span className="inline-block h-2 w-2 rounded-full" style={{ background: STATE_COLOR[node.state] }} aria-hidden />
         <span>{STATE_LABEL[node.state]}</span>
+        {node.downtime && (
+          <span className="rounded border border-telemetry/40 px-1 font-mono text-[9px] text-telemetry">DOWNTIME</span>
+        )}
         <span className="ml-auto font-mono text-[11px] text-fg-muted">
           {node.state === "up" && l.uptime_s !== null
             ? `up ${formatDuration(l.uptime_s)}`
@@ -165,10 +172,15 @@ export function NodeCard({ node }: { node: NodeCardData }) {
   );
 }
 
-export function AttentionTable({ items }: { items: Attention[] }) {
+export function AttentionTable({ items, handled }: { items: Attention[]; handled: number }) {
   return (
     <section className="rounded-lg border border-line bg-surface p-4">
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-muted">Needs attention</h2>
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">Unhandled problems</h2>
+        <Link href="/problems/" className="text-[11px] text-primary hover:text-primary-hover">
+          {handled > 0 ? `+${handled} handled · ` : ""}All problems →
+        </Link>
+      </div>
       {items.length === 0 ? (
         <p className="text-sm text-fg-muted">Nothing to report.</p>
       ) : (
@@ -176,37 +188,56 @@ export function AttentionTable({ items }: { items: Attention[] }) {
           <thead className="text-left text-[11px] uppercase text-fg-muted">
             <tr>
               <th className="py-1 font-medium">State</th>
-              <th className="py-1 font-medium">Node</th>
-              <th className="py-1 font-medium">Problem</th>
+              <th className="py-1 font-medium">Node / check</th>
+              <th className="py-1 font-medium">Output</th>
               <th className="py-1 text-right font-medium">Since</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
             {items.map((a) => (
-              <tr key={`${a.node_id}-${a.kind}`}>
-                <td className="py-1.5">
-                  <span
-                    className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${a.severity === "crit" ? "bg-crit text-white" : "bg-warn text-canvas"}`}
-                  >
-                    {a.severity.toUpperCase()}
-                  </span>
+              <tr key={a.problem_id} className="align-top">
+                <td className="py-1.5 pr-2">
+                  <StateBadge state={a.severity} />
                 </td>
-                <td className="py-1.5">
+                <td className="py-1.5 pr-3">
                   <Link href={`/nodes/?id=${a.node_id}`} className="hover:text-primary">
                     {a.node_name}
                   </Link>
+                  <span className="text-fg-secondary"> / {a.check_name}</span>
+                  {a.flapping && <span className="ml-1 rounded border border-unknown/40 px-1 font-mono text-[9px] text-unknown">FLAPPING</span>}
                 </td>
-                <td className="py-1.5 text-fg-secondary">{a.message}</td>
-                <td className="py-1.5 text-right font-mono text-[11px] text-fg-muted">{a.since ? ago(a.since) : ""}</td>
+                <td className="py-1.5 pr-3 text-xs text-fg-secondary">{a.message}</td>
+                <td className="whitespace-nowrap py-1.5 text-right font-mono text-[11px] text-fg-muted">{ago(a.since)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <p className="mt-2 text-[10px] text-fg-muted">
-        Fixed thresholds until the check engine (F3): disk ≥ 85/95 %, memory ≥ 90/97 %, failed systemd
-        units, agent offline. No notifications are sent yet.
-      </p>
     </section>
+  );
+}
+
+export function ServicesSummary({ services }: { services: Dashboard["services"] }) {
+  const rows: [string, number, string][] = [
+    ["OK", services.ok, "var(--color-ok)"],
+    ["Warn", services.warn, "var(--color-warn)"],
+    ["Crit", services.crit, "var(--color-crit)"],
+    ["Unknown", services.unknown, "var(--color-unknown)"],
+    ["Pending", services.pending, "var(--color-offline)"],
+  ];
+  return (
+    <dl className="mt-3 grid grid-cols-5 gap-2 border-t border-line pt-3 text-center font-mono text-xs">
+      {rows.map(([label, value, color]) => (
+        <div key={label}>
+          <dd className="text-base font-bold tabular-nums" style={{ color: value > 0 && label !== "OK" && label !== "Pending" ? color : undefined }}>
+            {value}
+          </dd>
+          <dt className="flex items-center justify-center gap-1 text-[10px] text-fg-muted">
+            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+            {label}
+          </dt>
+        </div>
+      ))}
+    </dl>
   );
 }

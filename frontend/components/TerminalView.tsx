@@ -57,13 +57,19 @@ export function TerminalView({
   onStatus,
   onHandle,
   routeInput,
+  wsPath = "/api/v1/terminal/ws",
+  extraParams,
 }: {
   nodeId: string;
+  /** WebSocket endpoint with the terminal protocol (SSH by default; container exec too) */
+  wsPath?: string;
+  extraParams?: Record<string, string>;
   active: boolean;
   onStatus: (status: TerminalStatus) => void;
   onHandle?: (handle: TerminalHandle | null) => void;
   routeInput?: (data: string) => boolean;
 }) {
+  const extraKey = JSON.stringify(extraParams ?? {});
   const container = useRef<HTMLDivElement>(null);
   const fitRef = useRef<(() => void) | null>(null);
   const statusRef = useRef(onStatus);
@@ -104,8 +110,13 @@ export function TerminalView({
       fitRef.current = safeFit;
 
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const params = new URLSearchParams({ node_id: nodeId, cols: String(term.cols), rows: String(term.rows) });
-      const ws = new WebSocket(`${proto}//${window.location.host}/api/v1/terminal/ws?${params}`);
+      const params = new URLSearchParams({
+        ...JSON.parse(extraKey),
+        node_id: nodeId,
+        cols: String(term.cols),
+        rows: String(term.rows),
+      });
+      const ws = new WebSocket(`${proto}//${window.location.host}${wsPath}?${params}`);
       ws.binaryType = "arraybuffer";
       let ended = false;
 
@@ -163,7 +174,7 @@ export function TerminalView({
       disposed = true;
       cleanup();
     };
-  }, [nodeId]);
+  }, [nodeId, wsPath, extraKey]);
 
   // Re-fit when the tab becomes visible again
   useEffect(() => {

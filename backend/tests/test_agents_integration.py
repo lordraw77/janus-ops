@@ -88,6 +88,7 @@ class FakeAgent:
             "hostname": "fake",
             "interval_s": 10,
             "policy": {"allow_exec": False, "allow_pty": False, "allow_docker": False},
+            "features": ["streams"],
         }
         if self.token:
             body["enroll_token"] = self.token
@@ -246,11 +247,8 @@ def test_enroll_ingest_and_dashboard() -> None:
         assert card["latest"]["cpu_pct"] == 12.5 and card["latest"]["cpu_count"] == 4
         assert card["latest"]["disk_pct"] == 96 and card["latest"]["disk_mount"] == "/"
         assert any(v is not None for v in card["cpu_spark"])
-        mine = [a for a in dash["attention"] if a["node_id"] == node]
-        assert {(a["kind"], a["severity"]) for a in mine} == {
-            ("fs.used_pct", "crit"),
-            ("systemd_failed", "warn"),
-        }
+        # problems come from checks (F3): enrollment created only the Agent check, all OK
+        assert [a for a in dash["attention"] if a["node_id"] == node] == []
 
         chart = op.get(
             f"/api/v1/telemetry/nodes/{node}",
@@ -271,7 +269,6 @@ def test_enroll_ingest_and_dashboard() -> None:
         dash = op.get("/api/v1/telemetry/dashboard").json()
         card = next(n for n in dash["nodes"] if n["node_id"] == node)
         assert card["state"] == "down" and card["latest"]["cpu_pct"] is None
-        assert any(a["node_id"] == node and a["kind"] == "agent_offline" for a in dash["attention"])
         agent.token = None
         ws, welcome = agent.connect(op)
         assert welcome["enrolled"] is False

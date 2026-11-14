@@ -85,7 +85,7 @@ get the union. The built-in roles:
 | Role | LDAP group | Default permissions |
 |---|---|---|
 | admin | `janus-admins` | all (fixed) |
-| operator | `janus-operators` | `inventory.read`, `inventory.manage`, `ssh.connect`, `sftp.transfer`, `agents.manage` |
+| operator | `janus-operators` | `inventory.read`, `inventory.manage`, `ssh.connect`, `sftp.transfer`, `agents.manage`, `monitoring.manage`, `containers.manage`, `containers.exec` |
 | auditor | `janus-auditors` | `audit.read`, `users.read`, `inventory.read` |
 
 | Permission | Allows |
@@ -101,6 +101,10 @@ get the union. The built-in roles:
 | `sftp.transfer` | browse, download, upload, rename and delete files on nodes over SFTP |
 | `snippets.manage` | create, edit and delete shared command snippets |
 | `agents.manage` | install, revoke and uninstall the Janus agent on nodes (it runs as root) |
+| `monitoring.manage` | create and change checks, schedule downtimes, acknowledge problems |
+| `notifications.manage` | configure notification channels (with their secrets) and rules (admin by default) |
+| `containers.manage` | start, stop, restart, remove containers and Compose stacks |
+| `containers.exec` | open shells inside containers |
 
 Who can read the audit log is therefore a checkbox in the roles table. Admins can create custom
 roles (the LDAP group is created for them). Permission changes apply immediately, also to
@@ -184,6 +188,34 @@ The **Dashboard** shows a host-health hexagon, a card per node (CPU, RAM, disk, 
 and the items needing attention (agent offline, file system ≥ 85 %, memory ≥ 90 %, failed units).
 Thresholds are fixed until the alerting engine (F3). Each node page has charts over 1 h – 7 days.
 Protocol: [proto/agent-protocol.md](proto/agent-protocol.md).
+
+### Alerting
+
+Each node page lists its **checks**: agent connectivity (created when the agent enrolls), metric
+thresholds (CPU, memory, any file system or series, optionally averaged), failed systemd units,
+listening ports, and TCP or HTTP(S) probes run by the server (no agent needed). **Suggested checks**
+proposes them from what the agent reports. A check alerts after *N* consecutive bad results
+(soft → hard state); flapping checks are recognised and kept quiet.
+
+**Problems** lists open problems and history; acknowledge them with a comment, or schedule a
+**downtime** for a node, a check or a group. Children of a node that is down are *unreachable*
+and do not notify.
+
+**Notifications** (admins): channels for e-mail (SMTP with or without login, STARTTLS or TLS),
+Telegram, webhook (JSON, optional HMAC signature), Discord, Slack and ntfy, with a test button;
+rules choose the channel by state, environment, node and check kind, optionally after a delay
+(escalation). Secrets are stored encrypted and never shown again.
+
+### Containers
+
+Give a node the **Docker** capability. *Via agent*: install (or reinstall) the agent with
+**Allow Docker** — it then relays the Docker Engine API through its outbound tunnel; this is a
+root-equivalent permission, written in the node's local policy. *Via SSH*: the SSH user must be
+allowed to use Docker; Janus-Ops forwards `/var/run/docker.sock` over SSH.
+
+**Containers** shows each host's containers grouped by Compose project, with logs (also live),
+stats, start/stop/restart/pause/remove, start/stop/restart of a whole stack, and a shell in the
+browser. Environment variables are listed by name only. Every action and shell is audited.
 
 ### Two-factor authentication (optional)
 
@@ -320,8 +352,9 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 > sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
 > audit log, inventory and credential vault (phase F0), **web SSH bastion** with host key
 > pinning, session recording, SFTP browser, command broadcast and snippets (phase F1),
-> **Go agent with SSH bootstrap, telemetry and NOC dashboard** (phase F2), the Compose stack and
-> CI. Next: F3, alerting.
+> **Go agent with SSH bootstrap, telemetry and NOC dashboard** (phase F2), **alerting with checks,
+> problems, downtimes and notifications** (phase F3), **Docker containers and Compose stacks via the
+> agent or SSH** (phase F4), the Compose stack and CI. Next: F5, Proxmox VE.
 
 | Phase | Scope |
 |---|---|

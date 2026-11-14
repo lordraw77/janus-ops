@@ -43,6 +43,8 @@ def settings(**overrides: Any) -> Settings:
         "lldap_http_url": LLDAP_HTTP,
         "ldap_manager_password": "manager-password-1234",
         "secret_key": SECRET_KEY,
+        # check engine and notifications run on demand in tests (.tick()), not in the background
+        "monitoring_enabled": False,
     }
     values.update(overrides)
     return make_settings(**values)
