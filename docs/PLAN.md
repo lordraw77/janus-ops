@@ -25,6 +25,18 @@
 > **v0.7** — inventory (nodi, tag, gruppi, capability) e vault credenziali (ADR-004 implementato):
 > **fase F0 completata**, AC-01 verificato. Migrazione `0003`, permessi `inventory.*` e
 > `credentials.manage`.
+>
+> **v0.8** — F1 avviata: bastion SSH web (xterm.js ⇄ WebSocket ⇄ AsyncSSH) con credenziali dal
+> vault, jump host, pinning delle host key (TOFU), registrazione e replay delle sessioni,
+> permesso `ssh.connect`, migrazione `0004`. AC-03 verificato.
+>
+> **v0.9** — roadmap: segreti e chiavi in un secret manager esterno (OpenBao, HashiCorp Vault o
+> simili), FR-86 promosso da WON'T a SHOULD, proposta in ADR-011.
+>
+> **v0.10** — **fase F1 completata**: browser SFTP (FR-11), broadcast dei comandi su più terminali
+> e libreria di snippet (FR-12). Migrazione `0005` (tabella `snippet`), permessi `sftp.transfer`
+> (operator) e `snippets.manage` (solo admin di default). Migrazione `0006`: credenziale
+> Proxmox con utente e password (`proxmox_password`, utente con realm `root@pam`), oltre al token API.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -124,7 +136,7 @@ Punti delle specifiche che vanno corretti, chiariti o ridimensionati prima di sc
 | FR-83 | PTY e comandi remoti via tunnel agent | SHOULD | F8 |
 | FR-84 | Auto-update agent air-gapped firmato | SHOULD | F8 |
 | FR-85 | Agent Windows | WON'T (MVP) | F9+ |
-| FR-86 | Integrazione OpenBao/Vault esterno | WON'T (MVP) | F9+ |
+| FR-86 | Segreti e chiavi in un secret manager esterno (OpenBao, HashiCorp Vault o simili): chiave master (KEK) e/o contenuto dei segreti fuori da Janus-Ops. **AMEND Product Owner (v0.9)**: da WON'T a SHOULD, su richiesta dell'utente; disegno in ADR-011 | SHOULD | F8+ |
 | FR-87 | Multi-tenancy, HA del server | WON'T (MVP) | — |
 
 ### 2.2 Requisiti non funzionali
@@ -288,6 +300,19 @@ janus-ops/
 - *Decisione*: **(b)**. Catalogo permessi in `rbac.py` (`audit.read`, `users.read`, `users.manage`, `roles.manage`; cresce con i moduli). Ruoli built-in `admin` (tutti i permessi, non modificabile), `operator`, `auditor`; ruoli custom creabili. Più ruoli = unione dei permessi.
 - *Conseguenze*: la sessione salva i ruoli al login; i permessi sono ricalcolati a ogni richiesta, quindi una modifica vale subito anche per chi è collegato. Anti-escalation: solo un admin può assegnare/togliere il ruolo admin o agire su un admin; nessuno può eliminarsi, disabilitarsi o togliersi admin. Chi ha `roles.manage` può però darsi altri permessi: per questo di default ce l'ha solo admin. `JANUS_LDAP_GROUP_*` rimossi (AMEND ADR-008).
 
+**ADR-011 — Secret manager esterno: OpenBao / HashiCorp Vault (proposta, v0.9)**
+- *Contesto*: oggi (ADR-004) i segreti sono cifrati nel database con una chiave master (`JANUS_SECRET_KEY`) che sta nel file `.env`. L'utente chiede di poter tenere segreti e chiavi in un secret manager dedicato, come già fanno molte organizzazioni.
+- *Opzioni*:
+  (a) **KEK esterna** — il motore *Transit* di OpenBao/Vault cifra e decifra le chiavi dei singoli segreti (DEK); i segreti restano cifrati in Postgres. La chiave master non esce mai dal secret manager e non serve più in `.env`; la rotazione è quella di Transit (`rotate` + `rewrap`). Cambio minimo al modello attuale.
+  (b) **Segreti esterni** — il contenuto del segreto vive nel motore *KV v2* (es. `janus-ops/credentials/<id>`); Postgres tiene solo metadati e riferimento (mount, path, versione). Permette anche credenziali "a riferimento" verso segreti già gestiti da altri team, in sola lettura.
+  (c) restare solo sul vault locale — nessuna dipendenza, ma la chiave master resta un file da proteggere a mano.
+- *Decisione proposta*: **(a) e (b) entrambe disponibili, (c) resta il default**, selezionabili con `JANUS_SECRET_BACKEND=local|openbao-transit|openbao-kv` dietro l'interfaccia `SecretBackend` già prevista da ADR-004 (l'attuale classe `Vault` ne diventa l'implementazione `local`). Prima (a), più semplice e già sufficiente a togliere la chiave master da `.env`; poi (b).
+- *Prodotti*: **OpenBao** (fork di Vault della Linux Foundation, licenza MPL-2.0, compatibile con Apache-2.0) come riferimento e unico candidato a un eventuale sidecar nella stack; **HashiCorp Vault** con la stessa API (licenza BSL 1.1 dal 2023: utilizzabile dall'utente come servizio esterno, non distribuibile da noi nella stack); altri prodotti (Infisical, CyberArk Conjur, KMS cloud) tramite la stessa interfaccia, i KMS cloud solo dove non serve funzionare air-gapped.
+- *Accesso di Janus-Ops al secret manager*: AppRole (`role_id` + `secret_id` da file o variabile), token rinnovati automaticamente, TLS con CA configurabile, policy minime (solo `encrypt`/`decrypt` sulla chiave Transit; solo il prefisso `janus-ops/` su KV).
+- *Ambito*: credenziali del vault, seed TOTP, e in seguito la chiave privata della CA degli agent (F2) e i segreti delle notifiche (F3).
+- *Migrazione*: comando `janus-ops secrets migrate --to <backend>` che sposta o ricifra tutte le credenziali esistenti, idempotente e registrato nell'audit; ritorno indietro con lo stesso comando.
+- *Conseguenze*: il secret manager diventa una dipendenza di runtime: se non risponde, SSH e tutto ciò che usa credenziali falliscono con `vault_unavailable` (il login no, se il TOTP non è attivo). Nessuna cache del testo in chiaro; eventuale cache in memoria delle DEK decifrate per pochi minuti `OPEN`. Un OpenBao in produzione richiede gestione dell'unseal e backup propri: documentarlo; la modalità "dev" non è ammessa. `[VERIFY: client Python (hvac o HTTP diretto) e parità dell'API Transit/KV tra OpenBao e Vault]`
+
 **ADR-007 — Integrazione AI**
 - *Decisione*: client OpenAI-compatible verso endpoint **self-hosted esterni** (A6), con tool **read-only** esposti dal backend (get_logs, get_metrics, get_audit, get_inventory). LiteLLM solo se serve il routing tra più endpoint/modelli; altrimenti SDK diretto `[VERIFY in F7]`. Le azioni sono prodotte come *Action Plan* strutturato e passano dal normale flusso RBAC + approvazione.
 - *Conseguenze*: nessuna redazione dei dati operativi (consentiti da A6); i segreti del vault non sono mai raggiungibili dai tool; ogni prompt/risposta registrato nell'audit; più endpoint configurabili (es. modello piccolo per triage, grande per RCA).
@@ -376,7 +401,7 @@ Ogni fase termina con un rilascio installabile e i propri criteri di accettazion
 | **F5 Proxmox** | Client PVE, overview cluster, lifecycle VM/LXC, backup audit, console | |
 | **F6 Ansible** | Inventory dinamico, catalogo da Git, survey, run live, storico | |
 | **F7 AI Copilot** | Diagnose su problem, tool read-only, action plan + approvazione | |
-| **F8+** | Workflow visuale, GitOps, SNMP, PTY/exec via agent, auto-update firmato, NTLM, AD/LDAP esterno, OIDC, agent Windows | |
+| **F8+** | Workflow visuale, GitOps, SNMP, PTY/exec via agent, auto-update firmato, NTLM, AD/LDAP esterno, OIDC, agent Windows, **secret manager esterno OpenBao / HashiCorp Vault (ADR-011)** | FR-86 |
 
 Razionale dell'ordine: F1 dà valore immediato senza agent e costruisce i mattoni (vault, WS, audit) riusati
 
@@ -402,6 +427,30 @@ Razionale dell'ordine: F1 dà valore immediato senza agent e costruisce i matton
 | Inventory: nodi, tag, gruppi (variabili Ansible), dipendenze, capability validate | ✅ | AC-01; test su regole capability/credenziale, cicli, filtri, audit |
 | Vault credenziali (envelope encryption, segreti in sola scrittura) | ✅ | Test: cifratura legata alla riga, rotazione, nessun segreto in API/DB/audit; fingerprint uguale a `ssh-keygen` |
 | Command palette `Ctrl+K` | ⏳ | FR-05 |
+
+### 5.2 Avanzamento F1
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Terminale web 1-click con credenziali dal vault (FR-10) | ✅ | 12 test di integrazione con server SSH in-process; E2E via Caddy (WSS) verso OpenSSH reale |
+| Host key: pinning al primo uso prima dell'autenticazione, blocco su cambio, reset auditato | ✅ | Test chiave cambiata → `host_key_mismatch`; fingerprint uguale a `ssh-keygen` |
+| Jump host (ProxyJump, un livello) (FR-14) | ✅ | Test con tunnel attraverso il server di test |
+| Registrazione sessioni (asciicast v2, solo output) e replay in UI (FR-13) | ✅ | Test su header, eventi output/resize, permessi 0600, accesso proprio vs `audit.read` |
+| Audit apertura/chiusura/fallimenti (AC-03) | ✅ | Test su `ssh.session_started` / `ssh.session_ended` |
+| Chiusura terminali a logout, disabilitazione, permesso revocato, inattività; limite per utente | ✅ | Test logout e limite |
+| Multi-tab (FR-11, parte) | ✅ | UI |
+| Browser SFTP (FR-11): naviga, scarica, carica (drag & drop, progresso), rinomina, crea cartelle, elimina file e cartelle vuote | ✅ | 7 test di integrazione con SFTP in-process: round trip multi-chunk, nomi UTF-8, limite di upload (con e senza Content-Length), niente file troncati, riuso della connessione, chiusura al logout, audit |
+| Broadcast dei tasti su più terminali (FR-12) | ✅ | UI: tab selezionabili, evidenziati; avviso sempre visibile |
+| Libreria snippet personali e condivisi, eseguiti dal server (FR-12) | ✅ | Test: visibilità, permessi, nomi univoci per proprietario, esecuzione via WebSocket, audit con il testo inviato |
+
+Decisioni (Security):
+- **TOFU invece di known_hosts statici**: nessun inventario di chiavi da gestire a mano; la prima connessione è il punto debole (documentato). Mitigazione: fingerprint visibile nella scheda *Host keys* e nell'audit, da confrontare con `ssh-keygen -l` sul server. Preferenza ED25519 → ECDSA → RSA-SHA2; `ssh-rsa` (SHA-1) solo come ultima risorsa.
+- **Registrazione del solo output**: le password digitate (es. `sudo`) non vengono registrate.
+- **Origin obbligatorio sul WebSocket**: i cookie viaggiano anche su handshake cross-site, quindi senza Origin dello stesso host la connessione è rifiutata.
+- **SFTP come permesso separato** (`sftp.transfer`): trasferire file è esfiltrazione potenziale, distinta dall'aprire una shell. Il confine sui percorsi è l'account remoto, non Janus-Ops. Download, upload, rinomina, cancellazione e nuove cartelle sono nell'audit con il percorso; i listing no (rumorosi e senza effetti). Connessioni SSH riusate per (sessione Janus-Ops, nodo), chiuse dopo `JANUS_SFTP_IDLE_S` o alla fine della sessione; stessa verifica host key e jump host dei terminali.
+- **Upload atomico**: scritto su un nome temporaneo e rinominato a fine trasferimento; mai sovrascrittura senza richiesta esplicita; limite `JANUS_SFTP_MAX_UPLOAD_MB` controllato anche in streaming. Nessuna cancellazione ricorsiva dal browser.
+- **Snippet eseguiti dal server**: il browser invia solo l'id; il testo viene dal database, quindi l'audit (`ssh.snippet_run`) registra esattamente cosa è stato digitato e dove. Gli snippet condivisi richiedono `snippets.manage` (non concesso agli operator di default): uno snippet condiviso è codice che altri eseguiranno.
+- **Broadcast lato browser**: i tasti sono inoltrati dal browser a ciascun terminale selezionato, come una digitazione normale (registrata nell'output di ogni sessione); nessun nuovo canale server. Gli snippet lanciati in broadcast sono marcati `broadcast: true` nell'audit.
 
 Rimandati alla fase che li usa, per la regola "nessun componente senza requisito": **Redis** e
 **worker/scheduler** (F2–F3), **agent-gateway** (F2).
@@ -430,6 +479,8 @@ Trust boundary: Browser ⇄ Server · Agent ⇄ Server · Server ⇄ target (SSH
 | I — Perdita di `JANUS_SECRET_KEY` | Backup del DB senza la chiave | Seed TOTP illeggibili → reset 2FA da admin; chiave da salvare insieme al DB (README) | Basso |
 | D — Flood dagli agent | Agent compromesso o buggato | Rate limit per agent, dimensione massima batch, backpressure | Basso |
 | E — RCE di massa dal server | Server compromesso → exec su tutta la flotta | Policy locale sull'agent non sovrascrivibile da remoto, RBAC, approvazione per broadcast | **Alto: è intrinseco al prodotto** — documentarlo |
+| E — Errore umano in broadcast | Comando distruttivo inviato a più nodi | Broadcast esplicito per terminale, bordi evidenziati, avviso con il numero di terminali; snippet condivisi solo con `snippets.manage`; audit con testo | Medio |
+| I — Esfiltrazione file via SFTP | Utente con `sftp.transfer` scarica dati sensibili | Permesso dedicato, audit di ogni download con percorso e dimensione, permessi dell'account remoto | Medio (intrinseco alla funzione) |
 | E — Prompt injection via log | Log contenenti istruzioni per l'AI | Tool read-only, nessuna esecuzione senza umano, action plan mostrato per intero | Medio |
 | E — Escalation RBAC | Endpoint senza check | Deny-by-default, dipendenza FastAPI obbligatoria per ruolo, test per endpoint | Basso |
 
@@ -445,6 +496,7 @@ nessun segreto in immagini/log, validazione input con Pydantic su ogni boundary.
 | Scope creep (8 moduli) | Alta | Alto | Fasi rilasciabili, WON'T espliciti |
 | Complessità tunnel agent (multiplexing, proxy) | Media | Alto | Spike tecnico all'inizio di F2 con proxy reale |
 | ldap3 non più rilasciato (ultima release 2021) | Media | Medio | Versioni bloccate, test su lldap reale in CI, sostituibile dietro `DirectoryBackend` (ADR-008) |
+| Secret manager esterno non disponibile (ADR-011) | Bassa | Alto | Backend `local` di default; health check in `/ready`; messaggi chiari; documentare HA e unseal di OpenBao |
 | Performance ingest Timescale | Bassa (con A2) | Medio | Batch insert, test di carico in F2 |
 | Compatibilità API Proxmox tra versioni | Media | Medio | Test contro PVE 8.x `[VERIFY: versioni target]` |
 | Qualità diagnosi AI con LLM locali | Media | Medio | Prompt e tool deterministici, metriche di valutazione |
@@ -519,11 +571,12 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F0 completata (identità, accessi, inventory, vault)
-  Delivered:   piano v0.7 (ADR-001..010), migrazioni 0001–0003, login LDAP, admin da .env,
-               utenti/ruoli/permessi, TOTP opzionale, audit, inventory, vault, UI, compose, CI
-  Open:        CSP per l'UI esportata; rotazione KEK; [VERIFY] Proxmoxer async, aiodocker ssh,
-               NTLM Go, yamux, Taskiq
-  Next:        F1 — SSH bastion: terminale web (xterm.js ⇄ WebSocket ⇄ AsyncSSH) con credenziali
-               dal vault, jump host, registrazione sessioni, SFTP
+  Phase:       Engineer — F1 completata
+  Delivered:   piano v0.10, migrazioni 0001–0005, F0 e F1 complete: bastion SSH web con jump
+               host, pinning host key, registrazione/replay, browser SFTP, broadcast, snippet
+  Open:        CSP per l'UI esportata; rotazione KEK; retention delle registrazioni;
+               secret manager esterno (ADR-011, in roadmap F8+);
+               [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, yamux, Taskiq
+  Next:        F2 — agent Go (tunnel WSS, telemetria, buffer), enrollment mTLS, bootstrap SSH,
+               ingest Timescale, NOC dashboard
 ```

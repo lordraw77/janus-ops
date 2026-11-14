@@ -70,7 +70,7 @@ class SnmpConfig(_Config):
 RULES: dict[str, tuple[type[_Config], frozenset[str], bool]] = {
     "ssh": (SshConfig, frozenset({"ssh_key", "ssh_password"}), True),
     "agent": (AgentConfig, frozenset(), False),
-    "proxmox": (ProxmoxConfig, frozenset({"proxmox_token"}), True),
+    "proxmox": (ProxmoxConfig, frozenset({"proxmox_token", "proxmox_password"}), True),
     "docker": (DockerConfig, frozenset(), False),
     "snmp": (SnmpConfig, frozenset({"snmp_v3", "generic"}), True),
 }

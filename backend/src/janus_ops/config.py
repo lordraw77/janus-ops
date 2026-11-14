@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     # --- Encryption key for secrets at rest (TOTP seeds): 64 hex chars = 32 bytes
     secret_key: SecretStr | None = Field(default=None, description="Unset = TOTP cannot be enabled")
 
+    # --- SSH bastion (F1)
+    recordings_dir: Path | None = Field(
+        default=None, description="Where terminal recordings (.cast) are written; unset = off"
+    )
+    terminal_idle_s: int = Field(default=1800, ge=60, le=86400)
+    terminal_max_per_user: int = Field(default=10, ge=1, le=100)
+    ssh_connect_timeout_s: int = Field(default=10, ge=1, le=120)
+    sftp_max_upload_mb: int = Field(default=1024, ge=1, le=102400)
+    sftp_idle_s: int = Field(default=300, ge=30, le=3600)
+
     # --- Sessions
     session_ttl_s: int = Field(default=8 * 3600, ge=300, le=7 * 86400)
     session_idle_s: int = Field(default=3600, ge=60, le=86400)
@@ -139,6 +149,12 @@ class Settings(BaseSettings):
         if not value.get_secret_value().startswith("postgresql+asyncpg://"):
             raise ValueError("must start with postgresql+asyncpg://")
         return value
+
+    @field_validator("static_dir", "recordings_dir", "ldap_ca_file", mode="before")
+    @classmethod
+    def _empty_path_is_unset(cls, value: object) -> object:
+        # JANUS_RECORDINGS_DIR= (empty) must mean "off", not Path("") == current directory
+        return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("static_dir")
     @classmethod

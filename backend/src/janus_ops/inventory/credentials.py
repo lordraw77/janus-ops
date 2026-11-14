@@ -1,6 +1,7 @@
 """/api/v1/credentials: vault entries. Secrets are write-only: no endpoint returns them."""
 
 import json
+import re
 import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -25,6 +26,7 @@ Kind = Literal[
     "ssh_password",
     "sudo_password",
     "proxmox_token",
+    "proxmox_password",
     "docker_registry",
     "snmp_v3",
     "notification_secret",
@@ -66,6 +68,23 @@ class CredentialUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     username: str | None = Field(default=None, max_length=256)
     description: str | None = Field(default=None, max_length=1000)
+
+
+# Proxmox user ids carry their realm: root@pam, admin@pve; API tokens add "!<token id>"
+_PVE_USER = r"[^\s@:!]+@[A-Za-z0-9][A-Za-z0-9._-]*"
+USERNAME_RULES: dict[str, tuple[re.Pattern[str], str]] = {
+    "proxmox_password": (re.compile(rf"^{_PVE_USER}$"), "user@realm, e.g. root@pam"),
+    "proxmox_token": (
+        re.compile(rf"^{_PVE_USER}![A-Za-z][A-Za-z0-9._-]*$"),
+        "user@realm!token, e.g. root@pam!janus",
+    ),
+}
+
+
+def _check_username(kind: str, username: str | None) -> None:
+    rule = USERNAME_RULES.get(kind)
+    if rule is not None and not (username and rule[0].fullmatch(username)):
+        raise HTTPException(422, f"invalid_username:{rule[1]}")
 
 
 def _vault(request: Request) -> Vault:
@@ -142,6 +161,7 @@ async def create_credential(
     body: CredentialCreate, request: Request, session: Manager
 ) -> dict[str, str]:
     credential_id = str(uuid.uuid4())
+    _check_username(body.kind, body.username)
     payload, public = _prepare(body.kind, body)
     sealed = _seal(request, credential_id, payload)
     try:
@@ -223,7 +243,9 @@ async def update_credential(
     changes = body.model_dump(exclude_unset=True)
     if not changes:
         return Response(status_code=204)
-    await _kind(request, credential_id)
+    kind = await _kind(request, credential_id)
+    if "username" in changes:
+        _check_username(kind, changes["username"])
     sets = ", ".join(f"{k} = :{k}" for k in changes)  # keys come from the pydantic model only
     try:
         async with request.app.state.engine.begin() as conn:

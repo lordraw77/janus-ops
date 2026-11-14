@@ -40,7 +40,8 @@ LABEL org.opencontainers.image.title="Janus-Ops" \
       org.opencontainers.image.version="${VERSION}"
 
 RUN groupadd --system --gid 10001 janus \
- && useradd --system --uid 10001 --gid janus --home-dir /app --shell /usr/sbin/nologin janus
+ && useradd --system --uid 10001 --gid janus --home-dir /app --shell /usr/sbin/nologin janus \
+ && install -d -o 10001 -g 10001 -m 0700 /var/lib/janus-ops/recordings
 
 COPY --from=backend --chown=root:root /app/.venv /app/.venv
 COPY --from=ui --chown=root:root /src/frontend/out /app/static

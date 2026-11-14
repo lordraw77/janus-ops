@@ -12,6 +12,7 @@ const USERNAME_HINT: Record<string, string> = {
   ssh_key: "Default SSH user, e.g. root",
   ssh_password: "SSH user",
   proxmox_token: "Token id, e.g. root@pam!janus",
+  proxmox_password: "User with realm, e.g. root@pam or admin@pve",
   docker_registry: "Registry user",
   snmp_v3: "SNMPv3 user",
 };
@@ -19,6 +20,7 @@ const USERNAME_HINT: Record<string, string> = {
 const SECRET_LABEL: Record<string, string> = {
   ssh_key: "Private key (OpenSSH or PEM)",
   proxmox_token: "Token secret",
+  proxmox_password: "Password",
   generic: "Secret (e.g. SNMP v2c community)",
 };
 

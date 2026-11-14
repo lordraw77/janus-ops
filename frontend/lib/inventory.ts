@@ -17,6 +17,7 @@ export const KIND_LABELS: Record<string, string> = {
   ssh_password: "SSH password",
   sudo_password: "sudo password",
   proxmox_token: "Proxmox API token",
+  proxmox_password: "Proxmox user + password",
   docker_registry: "Docker registry",
   snmp_v3: "SNMPv3",
   notification_secret: "Notification secret",
@@ -62,7 +63,7 @@ export const ENVIRONMENTS = ["prod", "staging", "lab", "dmz"] as const;
 export const CAPABILITIES: Record<CapabilityKind, { label: string; credentials: string[]; required: boolean }> = {
   ssh: { label: "SSH target", credentials: ["ssh_key", "ssh_password"], required: true },
   agent: { label: "Janus agent", credentials: [], required: false },
-  proxmox: { label: "Proxmox node", credentials: ["proxmox_token"], required: true },
+  proxmox: { label: "Proxmox node", credentials: ["proxmox_token", "proxmox_password"], required: true },
   docker: { label: "Docker host", credentials: [], required: false },
   snmp: { label: "SNMP device", credentials: ["snmp_v3", "generic"], required: true },
 };

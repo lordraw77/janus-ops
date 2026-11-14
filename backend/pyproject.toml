@@ -8,6 +8,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "asyncpg>=0.32.0",
+    "asyncssh>=2.24.1",
     "cryptography[ssh]>=50.0.2",
     "fastapi>=0.162.6",
     "ldap3>=2.9.1",
@@ -43,6 +44,8 @@ packages = ["src/janus_ops"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+# a hanging test prints all stack traces after 120 s (does not kill it)
+faulthandler_timeout = 120
 filterwarnings = [
     # ldap3 2.9.1 imports pyasn1 names deprecated upstream (residual risk, docs/PLAN.md ADR-008)
     "ignore:tagMap is deprecated:DeprecationWarning:ldap3",

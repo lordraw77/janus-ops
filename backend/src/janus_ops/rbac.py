@@ -20,6 +20,9 @@ PERMISSIONS: dict[str, str] = {
     "inventory.read": "View nodes, tags, groups and credential names (never secrets)",
     "inventory.manage": "Create, edit and delete nodes, tags, groups and capabilities",
     "credentials.manage": "Create, replace and delete vault credentials",
+    "ssh.connect": "Open web SSH terminals on nodes with the SSH capability",
+    "sftp.transfer": "Browse, download, upload, rename and delete files on nodes over SFTP",
+    "snippets.manage": "Create, edit and delete shared command snippets",
 }
 
 ROLE_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,31}$"

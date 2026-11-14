@@ -32,6 +32,7 @@ EXPECTED_TABLES = {
     "role",
     "role_permission",
     "totp_recovery_code",
+    "ssh_host_key",
     "user_session",
     "credential",
     "node",
@@ -54,6 +55,7 @@ EXPECTED_TABLES = {
     "notification_delivery",
     "audit_event",
     "terminal_session",
+    "snippet",
 }
 
 
@@ -124,6 +126,8 @@ def test_builtin_roles_seeded(migrated: None) -> None:
         ("auditor", "users.read"),
         ("operator", "inventory.manage"),
         ("operator", "inventory.read"),
+        ("operator", "sftp.transfer"),
+        ("operator", "ssh.connect"),
     ]
 
 

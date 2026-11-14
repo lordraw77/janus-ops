@@ -1,6 +1,7 @@
 "use client";
 
-import { Pencil, Plus, Server, Trash2 } from "lucide-react";
+import { FolderOpen, Pencil, Plus, Server, SquareTerminal, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
@@ -316,6 +317,8 @@ function NodeDialog({
 function NodesTab({ groups }: { groups: Group[] }) {
   const { can } = useAuth();
   const manage = can("inventory.manage");
+  const canSsh = can("ssh.connect");
+  const canFiles = can("sftp.transfer");
   const [q, setQ] = useState("");
   const [env, setEnv] = useState("");
   const [cap, setCap] = useState("");
@@ -425,16 +428,36 @@ function NodesTab({ groups }: { groups: Group[] }) {
                   </td>
                   <td className="py-2 pr-3 text-fg-secondary">{n.parent?.name ?? ""}</td>
                   <td className="py-2 text-right">
-                    {manage && (
-                      <div className="flex justify-end gap-1">
+                    <div className="flex justify-end gap-1">
+                      {canSsh && n.capabilities.some((c) => c.kind === "ssh" && c.enabled) && (
+                        <Link
+                          href={`/terminal/?node=${n.id}`}
+                          className="inline-flex items-center gap-1 rounded border border-line bg-elevated px-2 py-1.5 text-xs font-semibold text-telemetry hover:border-line-strong"
+                          aria-label={`SSH to ${n.name}`}
+                        >
+                          <SquareTerminal className="h-3 w-3" aria-hidden /> SSH
+                        </Link>
+                      )}
+                      {canFiles && n.capabilities.some((c) => c.kind === "ssh" && c.enabled) && (
+                        <Link
+                          href={`/terminal/?view=files&node=${n.id}`}
+                          className="inline-flex items-center gap-1 rounded border border-line bg-elevated px-2 py-1.5 text-xs font-semibold text-telemetry hover:border-line-strong"
+                          aria-label={`Files on ${n.name}`}
+                        >
+                          <FolderOpen className="h-3 w-3" aria-hidden /> Files
+                        </Link>
+                      )}
+                      {manage && (
+                        <>
                         <Button onClick={() => setEditing(n)} aria-label={`Edit ${n.name}`}>
                           <Pencil className="h-3 w-3" aria-hidden />
                         </Button>
                         <Button variant="danger" onClick={() => void remove(n)} aria-label={`Delete ${n.name}`}>
                           <Trash2 className="h-3 w-3" aria-hidden />
                         </Button>
-                      </div>
-                    )}
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

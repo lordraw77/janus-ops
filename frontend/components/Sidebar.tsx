@@ -27,7 +27,8 @@ type NavItem = {
   label: string;
   icon: LucideIcon;
   /** Route of an implemented page, or the roadmap phase that delivers it */
-  target: { href: string; permission?: Permission } | { phase: string };
+  /** permission: any of these grants the entry */
+  target: { href: string; permission?: Permission | Permission[] } | { phase: string };
   ai?: boolean;
 };
 
@@ -40,7 +41,11 @@ const NAV: NavItem[] = [
   { label: "Containers", icon: Container, target: { phase: "F4" } },
   { label: "Proxmox VE", icon: Boxes, target: { phase: "F5" } },
   { label: "Ansible & Workflows", icon: Workflow, target: { phase: "F6" } },
-  { label: "SSH Bastion", icon: SquareTerminal, target: { phase: "F1" } },
+  {
+    label: "SSH Bastion",
+    icon: SquareTerminal,
+    target: { href: "/terminal/", permission: ["ssh.connect", "sftp.transfer", "audit.read"] },
+  },
   { label: "Janus AI Copilot", icon: Sparkles, target: { phase: "F7" }, ai: true },
   { label: "Users & roles", icon: Users, target: { href: "/admin/users/", permission: "users.read" } },
   { label: "Audit log", icon: ScrollText, target: { href: "/audit/", permission: "audit.read" } },
@@ -73,7 +78,8 @@ export function Sidebar() {
         <nav aria-label="Main" className="space-y-1 text-xs">
           {NAV.map(({ label, icon: Icon, target, ai }) => {
             if ("href" in target) {
-              if (target.permission && !can(target.permission)) return null;
+              const needed = target.permission === undefined ? [] : [target.permission].flat();
+              if (needed.length && !needed.some((p) => can(p))) return null;
               const active = isActive(pathname, target.href);
               return (
                 <Link

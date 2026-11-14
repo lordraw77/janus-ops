@@ -85,7 +85,7 @@ get the union. The built-in roles:
 | Role | LDAP group | Default permissions |
 |---|---|---|
 | admin | `janus-admins` | all (fixed) |
-| operator | `janus-operators` | `inventory.read`, `inventory.manage` |
+| operator | `janus-operators` | `inventory.read`, `inventory.manage`, `ssh.connect`, `sftp.transfer` |
 | auditor | `janus-auditors` | `audit.read`, `users.read`, `inventory.read` |
 
 | Permission | Allows |
@@ -97,6 +97,9 @@ get the union. The built-in roles:
 | `inventory.read` | view nodes, tags, groups and credential names (never secrets) |
 | `inventory.manage` | create, edit and delete nodes, tags, groups and capabilities |
 | `credentials.manage` | create, replace and delete vault credentials |
+| `ssh.connect` | open web SSH terminals on nodes with the SSH capability |
+| `sftp.transfer` | browse, download, upload, rename and delete files on nodes over SFTP |
+| `snippets.manage` | create, edit and delete shared command snippets |
 
 Who can read the audit log is therefore a checkbox in the roles table. Admins can create custom
 roles (the LDAP group is created for them). Permission changes apply immediately, also to
@@ -121,11 +124,39 @@ host (via agent or SSH), SNMP device. A capability that needs to log in points t
 the right type.
 
 **Credentials** are stored in the vault: SSH keys (OpenSSH or PEM, with passphrase), passwords,
-Proxmox API tokens, registry and SNMP secrets. Each secret is encrypted with its own key, which is
+Proxmox API tokens or user + password (`root@pam`, `admin@pve`), registry and SNMP secrets. Each secret is encrypted with its own key, which is
 itself encrypted with `JANUS_SECRET_KEY` (envelope encryption, AES-256-GCM). Secrets are
 **write-only**: no page or API returns them, and they never reach the browser or the audit log.
 SSH keys show their type and SHA-256 fingerprint (same as `ssh-keygen -l`). A credential used by
 a node cannot be deleted.
+Planned: keep the master key, or the secrets themselves, in an external secret manager such as
+OpenBao or HashiCorp Vault (see ADR-011 in [docs/PLAN.md](docs/PLAN.md)).
+
+### SSH bastion
+
+Open a terminal on any node with the SSH capability from **SSH Bastion** or the **SSH** button in
+the inventory. The browser runs xterm.js over a WebSocket; Janus-Ops opens the SSH connection with
+the credential from the vault, so **keys and passwords never reach the browser**. Several
+terminals can be open in tabs; a jump host configured on the node is used automatically.
+
+- **Host keys are pinned on first use**: the server key is fetched *before* authenticating and
+  stored (ED25519 preferred, same fingerprint as `ssh-keygen -l`). If it changes, the connection is
+  refused and no credential is sent, until an operator resets the pin in the *Host keys* tab.
+- **Sessions are recorded** (output only, asciicast v2, on the `recordings` volume) and can be
+  replayed from *Recorded sessions*. Everyone sees their own sessions; users with `audit.read`
+  see and replay all of them. Set `JANUS_RECORDINGS_DIR=` (empty) to disable recording.
+- Start, end (duration, reason) and failures of each session are in the audit log. Terminals
+  close after 30 minutes without input (`JANUS_TERMINAL_IDLE_S`) and as soon as the user's
+  Janus-Ops session ends (sign-out, disabled account, permission removed).
+- **Files** (`sftp.transfer`): browse a node over SFTP, download, upload (drag and drop),
+  rename, create folders, delete files and empty folders. Uploads go to a temporary name and are
+  renamed when complete, and never overwrite unless asked. Every transfer and change is in the
+  audit log with its path. Limit: `JANUS_SFTP_MAX_UPLOAD_MB` (1024).
+- **Broadcast**: type into several terminals at once; the terminals that receive keystrokes are
+  checked and highlighted.
+- **Snippets**: personal command snippets, plus shared ones managed with `snippets.manage`.
+  The server types them (one line, one Enter), so the audit log records exactly what was sent to
+  which node.
 
 ### Two-factor authentication (optional)
 
@@ -260,8 +291,9 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 
 > 🚧 **Pre-alpha (0.1.0).** Available today: the single `lordraw77/janus-ops` image, LDAP
 > sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
-> audit log, **inventory and credential vault** (phase F0 complete), the F0–F3 database schema,
-> the Compose stack and CI. Next: F1, the SSH bastion.
+> audit log, inventory and credential vault (phase F0), **web SSH bastion** with host key
+> pinning, session recording, SFTP browser, command broadcast and snippets (phase F1 complete),
+> the F0–F3 database schema, the Compose stack and CI. Next: F2, agent and telemetry.
 
 | Phase | Scope |
 |---|---|
@@ -273,7 +305,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 | **F5** Proxmox | Cluster overview, VM/LXC lifecycle, backup audit |
 | **F6** Ansible | Dynamic inventory, playbook catalog, live runs |
 | **F7** AI Copilot | RCA on alerts, action plans with human approval |
-| **F8+** | Visual workflows, GitOps, SNMP, agent PTY & auto-update, Windows agent |
+| **F8+** | Visual workflows, GitOps, SNMP, agent PTY & auto-update, Windows agent, external secret manager (OpenBao / HashiCorp Vault) |
 
 Details, acceptance criteria and open decisions: [docs/PLAN.md](docs/PLAN.md).
 

@@ -10,7 +10,10 @@ export type Permission =
   | "roles.manage"
   | "inventory.read"
   | "inventory.manage"
-  | "credentials.manage";
+  | "credentials.manage"
+  | "ssh.connect"
+  | "sftp.transfer"
+  | "snippets.manage";
 
 export type SessionUser = {
   username: string;

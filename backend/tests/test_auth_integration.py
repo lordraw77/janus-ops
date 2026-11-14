@@ -136,7 +136,11 @@ def me(c: TestClient) -> dict[str, Any]:
     ("user", "roles", "permissions"),
     [
         ("alice", ["admin"], sorted(PERMISSIONS)),
-        ("bob", ["operator"], ["inventory.manage", "inventory.read"]),
+        (
+            "bob",
+            ["operator"],
+            ["inventory.manage", "inventory.read", "sftp.transfer", "ssh.connect"],
+        ),
         ("carol", ["auditor"], ["audit.read", "inventory.read", "users.read"]),
     ],
 )
@@ -356,6 +360,8 @@ def test_union_of_permissions_for_several_roles() -> None:
                 "audit.read",
                 "inventory.manage",
                 "inventory.read",
+                "sftp.transfer",
+                "ssh.connect",
                 "users.read",
             ]
         admin.delete("/api/v1/users/olga")

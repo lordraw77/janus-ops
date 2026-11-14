@@ -44,6 +44,13 @@ services:
       JANUS_SESSION_TTL_S: ${JANUS_SESSION_TTL_S:-28800}
       JANUS_SESSION_IDLE_S: ${JANUS_SESSION_IDLE_S:-3600}
       JANUS_BREAKGLASS_USERNAME: ${JANUS_BREAKGLASS_USERNAME:-breakglass}
+      # SSH bastion: terminal recordings (asciicast) on the "recordings" volume
+      JANUS_RECORDINGS_DIR: ${JANUS_RECORDINGS_DIR-/var/lib/janus-ops/recordings}
+      JANUS_TERMINAL_IDLE_S: ${JANUS_TERMINAL_IDLE_S:-1800}
+      JANUS_TERMINAL_MAX_PER_USER: ${JANUS_TERMINAL_MAX_PER_USER:-10}
+      JANUS_SFTP_MAX_UPLOAD_MB: ${JANUS_SFTP_MAX_UPLOAD_MB:-1024}
+    volumes:
+      - recordings:/var/lib/janus-ops/recordings
     depends_on:
       setup:
         condition: service_completed_successfully
@@ -159,6 +166,7 @@ networks:
   ldap_ui:
 
 volumes:
+  recordings:
   caddy_data:
   caddy_config:
   pg_data:

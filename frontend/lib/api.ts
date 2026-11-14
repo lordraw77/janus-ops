@@ -74,6 +74,21 @@ const MESSAGES: Record<string, string> = {
   jump_host_without_ssh: "The jump host must have the SSH capability enabled.",
   credential_in_use: "This credential is used by some nodes: detach it first.",
   vault_unavailable: "The vault is not configured on this server (JANUS_SECRET_KEY).",
+  name_and_body_required: "A name and a command are required.",
+  invalid_path: "The path is not valid (it must be absolute).",
+  no_such_path: "No such file or directory on the server.",
+  remote_permission_denied: "The remote account is not allowed to do this.",
+  exists: "A file or directory with this name already exists.",
+  directory_not_empty: "The directory is not empty.",
+  not_a_file: "Only regular files can be downloaded.",
+  too_large: "The file is larger than the upload limit of this server.",
+  sftp_error: "The SFTP server refused the operation.",
+  sftp_unavailable: "The server does not offer SFTP.",
+  connection_lost: "The SSH connection was lost. Try again.",
+  auth_failed: "The server refused the credential.",
+  unreachable: "The server is not reachable.",
+  host_key_mismatch: "The server's host key changed: reset the pin in Host keys if expected.",
+  no_ssh_capability: "This node has no SSH capability.",
 };
 
 export function message(code: string, retryAfter?: number): string {
@@ -87,6 +102,7 @@ export function message(code: string, retryAfter?: number): string {
   const rest = colon > 0 ? code.slice(colon + 1) : undefined;
   const DETAILED: Record<string, string> = {
     invalid_secret: "Invalid secret",
+    invalid_username: "User name format",
     unknown_group: "Unknown group",
     credential_required: "A credential is required for capability",
     credential_kind_mismatch: "The credential type does not fit capability",

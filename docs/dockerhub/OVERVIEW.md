@@ -28,7 +28,8 @@ self-hosted TLS, and a planned Go agent that only opens outbound connections.
 | Control plane, web UI shell, database schema | ✅ available |
 | LDAP sign-in, user / role / permission management, optional TOTP, break-glass, audit log | ✅ available |
 | Inventory (nodes, tags, groups, capabilities) and encrypted credential vault | ✅ available |
-| SSH bastion (web terminal, SFTP) | phase F1 |
+| SSH bastion: web terminal, jump host, host key pinning, session recording and replay | ✅ available |
+| SFTP browser, command broadcast, snippets | ✅ available |
 | `janus-agent`, telemetry, NOC dashboard | phase F2 |
 | Alerting: thresholds, ack, downtimes, dependencies, notifications | phase F3 |
 | Docker containers & Compose stacks | phase F4 |
@@ -40,7 +41,8 @@ self-hosted TLS, and a planned Go agent that only opens outbound connections.
 
 - **FastAPI** control plane (Python 3.12) and the **Next.js** web UI exported as static files,
   served by the same process.
-- Runs as **non-root** (uid/gid `10001`), stateless (no volumes), ready for `read_only: true`.
+- Runs as **non-root** (uid/gid `10001`), ready for `read_only: true`. The only state on disk is
+  the optional terminal recordings directory (`/var/lib/janus-ops/recordings`, mount a volume).
 - Listens on **port 8000** (plain HTTP): put it behind a TLS reverse proxy. The reference
   stack below uses Caddy.
 - Built-in `HEALTHCHECK` on `/api/v1/health`.
@@ -117,6 +119,9 @@ inventory). Permissions:
 | `roles.manage` | create and delete roles; change permissions and LDAP groups |
 | `inventory.read` / `inventory.manage` | view / change nodes, tags, groups, capabilities |
 | `credentials.manage` | create, replace and delete vault credentials (secrets are write-only) |
+| `ssh.connect` | open web SSH terminals (operator and admin by default) |
+| `sftp.transfer` | browse and transfer files over SFTP (operator and admin by default) |
+| `snippets.manage` | manage shared command snippets (admin by default) |
 
 Who can read the audit log is a checkbox in the roles table. Only admins can grant the admin role.
 Sessions last 8 hours with a 1-hour inactivity timeout; 5 failed attempts lock a username for
@@ -133,8 +138,17 @@ by the server and codes depend only on the clock (keep NTP in sync). Seeds are e
 
 Add nodes (IP or FQDN, environment, tags, groups, parent dependency) and enable their
 capabilities: SSH target, Janus agent, Proxmox node, Docker host, SNMP device. Credentials (SSH
-keys, passwords, Proxmox tokens, SNMP secrets) live in the vault with envelope encryption under
+keys, passwords, Proxmox tokens or user + password, SNMP secrets) live in the vault with envelope encryption under
 `JANUS_SECRET_KEY`; they are write-only and never sent to the browser.
+
+### SSH bastion
+
+Open terminals from the browser on nodes with the SSH capability (xterm.js over WebSocket; the
+SSH connection and its credentials stay on the server). Host keys are pinned on first use and a
+changed key blocks the connection. Sessions are recorded (asciicast, on the `recordings` volume)
+and can be replayed; start, end and failures are audited. An SFTP file browser, command
+broadcast across terminals and a snippet library complete the bastion; transfers and snippet runs
+are audited.
 
 ### Break-glass account
 
@@ -181,7 +195,11 @@ Variables read by the `janus-ops` process:
 | `JANUS_LLDAP_HTTP_URL` | — | lldap GraphQL endpoint; unset = users are read-only (external directory) |
 | `JANUS_LDAP_MANAGER_USER` / `JANUS_LDAP_MANAGER_PASSWORD` | `janus-manager` / — | lldap account in `lldap_admin`, used for user administration |
 | `JANUS_ADMIN_USERNAME` / `JANUS_ADMIN_PASSWORD` / `JANUS_ADMIN_EMAIL` | `janus-admin` / — / `<user>@janus-ops.invalid` | Initial administrator created by `setup` if missing |
-| `JANUS_SECRET_KEY` | — | 64 hex chars, encrypts TOTP seeds; unset = TOTP unavailable |
+| `JANUS_SECRET_KEY` | — | 64 hex chars, encrypts TOTP seeds and the vault; unset = both unavailable |
+| `JANUS_RECORDINGS_DIR` | — | Terminal recordings directory; unset or empty = no recording |
+| `JANUS_TERMINAL_IDLE_S` / `JANUS_TERMINAL_MAX_PER_USER` | `1800` / `10` | Terminal inactivity timeout; open terminals per user |
+| `JANUS_SSH_CONNECT_TIMEOUT_S` | `10` | SSH connect timeout |
+| `JANUS_SFTP_MAX_UPLOAD_MB` / `JANUS_SFTP_IDLE_S` | `1024` / `300` | SFTP upload limit; idle SFTP connections are closed after this many seconds |
 | `JANUS_LDAP_TIMEOUT_S` | `5` | LDAP timeout, whole seconds |
 | `JANUS_LDAP_CA_FILE` | system CAs | CA bundle to verify `ldaps://` servers |
 | `JANUS_SESSION_TTL_S` / `JANUS_SESSION_IDLE_S` | `28800` / `3600` | Session lifetime / inactivity timeout, seconds |
@@ -219,6 +237,10 @@ Variables used by the Compose stack (`.env`):
 | `/api/v1/audit` · `/audit/verify` | Audit log (paged, filterable) and hash-chain verification |
 | `/api/v1/nodes` · `/groups` · `/tags` | Inventory |
 | `/api/v1/credentials` | Vault (metadata only; secrets are never returned) |
+| `/api/v1/terminal/ws` | Web SSH terminal (WebSocket, session cookie + same-origin check) |
+| `/api/v1/terminal/sessions` · `/host-keys` | Recorded sessions and replay; pinned SSH host keys |
+| `/api/v1/sftp/{node}/…` | SFTP browser: `home`, `list`, `download`, `upload` (raw body), `mkdir`, `rename`, `entry` |
+| `/api/v1/snippets` | Command snippets (personal and shared) |
 | `/api/v1/health` | Liveness: the process is up |
 | `/api/v1/ready` | Readiness: database reachable, TimescaleDB loaded, schema up to date (`503` otherwise) |
 | `/api/docs` | OpenAPI documentation |

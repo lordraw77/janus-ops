@@ -68,4 +68,9 @@ def test_cli_rejects_unknown_command() -> None:
 
 
 def test_schema_head_is_latest_migration() -> None:
-    assert schema_head() == "0003"
+    assert schema_head() == "0006"
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_empty_recordings_dir_disables_recording(value: str) -> None:
+    assert make_settings(recordings_dir=value).recordings_dir is None

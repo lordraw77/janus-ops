@@ -1,5 +1,7 @@
 """FastAPI application factory."""
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,6 +20,8 @@ from janus_ops.config import Settings, get_settings
 from janus_ops.db import create_engine, schema_head
 from janus_ops.directory import LldapAdmin
 from janus_ops.inventory import credentials, groups, nodes
+from janus_ops.terminal import router as terminal
+from janus_ops.terminal import sftp, snippets
 from janus_ops.vault import Vault
 
 API_PREFIX = "/api/v1"
@@ -69,9 +73,18 @@ def create_app(
         app.state.auth = AuthService(engine, settings, directory)
         app.state.directory_admin = LldapAdmin(settings) if settings.directory_managed else None
         app.state.vault = Vault(app.state.auth.box)
+        app.state.terminals = terminal.TerminalCounter()
+        app.state.sftp = sftp.SftpPool(engine, app.state.vault, settings)
+        reaper = asyncio.create_task(sftp.reaper(app.state.sftp, engine))
+        if settings.recordings_dir is not None:
+            settings.recordings_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
             yield
         finally:
+            reaper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reaper
+            app.state.sftp.close_all()
             await engine.dispose()
 
     app = FastAPI(
@@ -108,6 +121,9 @@ def create_app(
         nodes.router,
         groups.router,
         credentials.router,
+        terminal.router,
+        sftp.router,
+        snippets.router,
     ):
         app.include_router(module_router, prefix=API_PREFIX)
     for router in extra_routers:

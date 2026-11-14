@@ -52,6 +52,7 @@ def creds(admin: TestClient) -> dict[str, str]:
         "ssh-key": {"kind": "ssh_key", "username": "root", "secret": openssh_key()},
         "ssh-pass": {"kind": "ssh_password", "username": "ops", "secret": SSH_PASSWORD},
         "pve-token": {"kind": "proxmox_token", "username": "root@pam!janus", "secret": "uuid-x"},
+        "pve-pass": {"kind": "proxmox_password", "username": "admin@pve", "secret": "pve-pw"},
         "snmp": {"kind": "generic", "secret": "public-community"},
     }.items():
         r = admin.post("/api/v1/credentials", json={"name": name, **body})
@@ -393,3 +394,44 @@ def test_inventory_changes_are_audited(operator: TestClient) -> None:
         r[0] for r in run_sql("SELECT action FROM audit_event WHERE actor_name = 'alice'")
     }
     assert {"credentials.created", "credentials.rotated", "credentials.deleted"} <= admin_actions
+
+
+# ---------------------------------------------------------------- Proxmox user + password
+@pytest.mark.parametrize(
+    ("kind", "username"),
+    [
+        ("proxmox_password", None),
+        ("proxmox_password", "root"),  # realm missing
+        ("proxmox_password", "root@pam!janus"),  # that is a token id
+        ("proxmox_token", "root@pam"),  # token name missing
+    ],
+)
+def test_proxmox_username_format(admin: TestClient, kind: str, username: str | None) -> None:
+    r = admin.post(
+        "/api/v1/credentials",
+        json={"name": f"bad-{kind}-{username}", "kind": kind, "username": username, "secret": "s"},
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"].startswith("invalid_username:")
+
+
+def test_proxmox_capability_accepts_password(
+    admin: TestClient, operator: TestClient, creds: dict[str, str]
+) -> None:
+    r = operator.post(
+        "/api/v1/nodes",
+        json={
+            "name": "pve-pw-node",
+            "address": "10.20.0.5",
+            "capabilities": [
+                {"kind": "proxmox", "credential_id": creds["pve-pass"], "config": {"port": 8006}}
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    listed = {c["name"]: c for c in admin.get("/api/v1/credentials").json()}
+    assert listed["pve-pass"]["kind"] == "proxmox_password"
+    assert listed["pve-pass"]["username"] == "admin@pve"
+    assert "secret" not in listed["pve-pass"]
+    bad = admin.patch(f"/api/v1/credentials/{creds['pve-pass']}", json={"username": "admin"})
+    assert bad.status_code == 422
