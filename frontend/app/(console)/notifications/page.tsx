@@ -6,7 +6,7 @@ import { type FormEvent, useState } from "react";
 import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { RequirePermission } from "@/lib/auth";
-import { ENVIRONMENTS } from "@/lib/inventory";
+import { useEnvironments } from "@/lib/environments";
 import {
   CHANNEL_LABEL,
   type Channel,
@@ -156,6 +156,7 @@ function ChannelDialog({ channel, onClose, onSaved }: { channel: Channel | null;
 }
 
 function RuleDialog({ rule, channels, onClose, onSaved }: { rule: Rule | null; channels: Channel[]; onClose: () => void; onSaved: () => void }) {
+  const { names: environmentNames } = useEnvironments();
   const [error, setError] = useState<string | null>(null);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -203,7 +204,7 @@ function RuleDialog({ rule, channels, onClose, onSaved }: { rule: Rule | null; c
         </div>
         <Field label="Environments" hint="None selected = all">
           <div className="flex flex-wrap gap-3 text-xs">
-            {ENVIRONMENTS.map((env) => (
+            {environmentNames.map((env) => (
               <label key={env} className="flex items-center gap-1">
                 <input type="checkbox" name="env" value={env} defaultChecked={rule?.filter.environments?.includes(env)} /> {env}
               </label>

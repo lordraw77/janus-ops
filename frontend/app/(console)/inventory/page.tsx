@@ -4,15 +4,15 @@ import { FolderOpen, Pencil, Plus, Server, SquareTerminal, Trash2 } from "lucide
 import Link from "next/link";
 import { type FormEvent, useMemo, useState } from "react";
 
+import { EnvBadge } from "@/components/EnvBadge";
 import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { RequirePermission, useAuth } from "@/lib/auth";
+import { ENV_COLORS, type EnvColor, type Environment, useEnvironments } from "@/lib/environments";
 import {
   CAPABILITIES,
   type CapabilityKind,
   type Credential,
-  ENV_STYLE,
-  ENVIRONMENTS,
   type Group,
   type InventoryNode,
   KIND_LABELS,
@@ -21,14 +21,6 @@ import {
 
 const SELECT =
   "w-full rounded border border-line bg-canvas px-3 py-1.5 text-sm outline-none focus:border-primary";
-
-function EnvBadge({ env }: { env: string }) {
-  return (
-    <span className={`inline-block rounded border px-1.5 font-mono text-[10px] uppercase ${ENV_STYLE[env] ?? ""}`}>
-      {env}
-    </span>
-  );
-}
 
 function Chip({ children, muted = false }: { children: string; muted?: boolean }) {
   return (
@@ -100,7 +92,8 @@ function NodeDialog({
 }) {
   const [name, setName] = useState(node?.name ?? "");
   const [address, setAddress] = useState(node?.address ?? "");
-  const [environment, setEnvironment] = useState<string>(node?.environment ?? "prod");
+  const { names: environmentNames } = useEnvironments();
+  const [environment, setEnvironment] = useState<string>(node?.environment ?? "");
   const [parent, setParent] = useState(node?.parent?.id ?? "");
   const [description, setDescription] = useState(node?.description ?? "");
   const [tags, setTags] = useState((node?.tags ?? []).join(", "));
@@ -125,7 +118,7 @@ function NodeDialog({
     const body = {
       name: name.trim(),
       address: address.trim(),
-      environment,
+      environment: environment || environmentNames[0],
       parent_id: parent || null,
       description: description.trim() || null,
       tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
@@ -151,8 +144,8 @@ function NodeDialog({
             <TextInput required value={address} onChange={(e) => setAddress(e.target.value)} className="font-mono" />
           </Field>
           <Field label="Environment">
-            <select value={environment} onChange={(e) => setEnvironment(e.target.value)} className={SELECT}>
-              {ENVIRONMENTS.map((env) => (
+            <select value={environment || environmentNames[0] || ""} onChange={(e) => setEnvironment(e.target.value)} className={SELECT}>
+              {environmentNames.map((env) => (
                 <option key={env}>{env}</option>
               ))}
             </select>
@@ -320,6 +313,7 @@ function NodesTab({ groups }: { groups: Group[] }) {
   const canSsh = can("ssh.connect");
   const canFiles = can("sftp.transfer");
   const [q, setQ] = useState("");
+  const { names: environmentNames } = useEnvironments();
   const [env, setEnv] = useState("");
   const [cap, setCap] = useState("");
   const { data: nodes, error, reload } = useResource<InventoryNode[]>("/nodes");
@@ -362,7 +356,7 @@ function NodesTab({ groups }: { groups: Group[] }) {
         <TextInput placeholder="Search name, address, tag" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
         <select value={env} onChange={(e) => setEnv(e.target.value)} className={`${SELECT} max-w-[9rem]`} aria-label="Environment">
           <option value="">All environments</option>
-          {ENVIRONMENTS.map((e) => (
+          {environmentNames.map((e) => (
             <option key={e}>{e}</option>
           ))}
         </select>
@@ -659,14 +653,154 @@ function TagsTab() {
   );
 }
 
+const COLOR_LABEL: Record<EnvColor, string> = { crit: "Red", warn: "Amber", ok: "Green", primary: "Blue", muted: "Grey" };
+
+function EnvironmentDialog({ env, onClose, onSaved }: { env: Environment | null; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(env?.name ?? "");
+  const [label, setLabel] = useState(env?.label ?? "");
+  const [color, setColor] = useState<EnvColor | "">(env?.color ?? "");
+  const [position, setPosition] = useState(String(env?.position ?? 100));
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const body = { label: label.trim(), color: color || null, position: Number(position) };
+    const r = env
+      ? await api(`/environments/${env.name}`, { method: "PATCH", body })
+      : await api("/environments", { method: "POST", body: { name: name.trim(), ...body } });
+    if (!r.ok) return setError(message(r.code));
+    onSaved();
+  }
+
+  return (
+    <Modal title={env ? `Edit environment ${env.name}` : "New environment"} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        {!env && (
+          <Field label="Name" hint="Lower-case letters, digits and - ; it cannot be changed later">
+            <TextInput autoFocus required value={name} onChange={(e) => setName(e.target.value.toLowerCase())} className="font-mono" />
+          </Field>
+        )}
+        <Field label="Label">
+          <TextInput required value={label} onChange={(e) => setLabel(e.target.value)} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Badge colour">
+            <select value={color} onChange={(e) => setColor(e.target.value as EnvColor | "")} className={SELECT}>
+              <option value="">Neutral</option>
+              {ENV_COLORS.map((c) => (
+                <option key={c} value={c}>
+                  {COLOR_LABEL[c]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Order" hint="Lower comes first">
+            <TextInput type="number" min={0} max={10000} value={position} onChange={(e) => setPosition(e.target.value)} />
+          </Field>
+        </div>
+        {error && <Alert>{error}</Alert>}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary">
+            Save
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function EnvironmentsTab() {
+  const { can } = useAuth();
+  const manage = can("environments.manage");
+  const { list, reload } = useEnvironments();
+  const [editing, setEditing] = useState<Environment | "new" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function remove(e: Environment) {
+    if (!window.confirm(`Delete the environment "${e.name}"?`)) return;
+    const r = await api(`/environments/${e.name}`, { method: "DELETE" });
+    setError(r.ok ? null : message(r.code));
+    reload();
+  }
+
+  return (
+    <Card
+      title="Environments"
+      actions={
+        manage ? (
+          <Button variant="primary" onClick={() => setEditing("new")}>
+            <Plus className="h-3.5 w-3.5" aria-hidden /> New environment
+          </Button>
+        ) : null
+      }
+    >
+      <p className="mb-3 text-xs text-fg-secondary">
+        Every node belongs to one environment. Roles can be limited to some of them (Users &amp; roles), and notification
+        rules filter by them. An environment in use cannot be deleted.
+      </p>
+      {error && <Alert>{error}</Alert>}
+      <table className="w-full text-left text-xs">
+        <thead className="border-b border-line text-fg-muted">
+          <tr>
+            <th className="py-2 pr-3 font-medium">Name</th>
+            <th className="py-2 pr-3 font-medium">Label</th>
+            <th className="py-2 pr-3 font-medium">Order</th>
+            <th className="py-2 pr-3 text-right font-medium">Nodes</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {list.map((e) => (
+            <tr key={e.name}>
+              <td className="py-2 pr-3">
+                <EnvBadge env={e.name} />
+              </td>
+              <td className="py-2 pr-3">{e.label}</td>
+              <td className="py-2 pr-3 font-mono text-fg-muted">{e.position}</td>
+              <td className="py-2 pr-3 text-right font-mono">{e.nodes}</td>
+              <td className="py-2 text-right">
+                {manage && (
+                  <div className="flex justify-end gap-1">
+                    <Button onClick={() => setEditing(e)} aria-label={`Edit ${e.name}`}>
+                      <Pencil className="h-3 w-3" aria-hidden />
+                    </Button>
+                    <Button variant="danger" disabled={e.nodes > 0} title={e.nodes > 0 ? "In use by nodes" : undefined} onClick={() => void remove(e)} aria-label={`Delete ${e.name}`}>
+                      <Trash2 className="h-3 w-3" aria-hidden />
+                    </Button>
+                  </div>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {editing && (
+        <EnvironmentDialog
+          env={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            reload();
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
 function Inventory() {
-  const [tab, setTab] = useState<"nodes" | "groups" | "tags">("nodes");
+  const { can } = useAuth();
+  const [tab, setTab] = useState<"nodes" | "groups" | "tags" | "environments">("nodes");
   const groups = useResource<Group[]>("/groups");
   return (
     <div className="max-w-7xl space-y-4">
       <h1 className="text-lg font-semibold">Inventory</h1>
       <div role="tablist" className="flex gap-1 border-b border-line text-xs">
-        {(["nodes", "groups", "tags"] as const).map((t) => (
+        {(["nodes", "groups", "tags", "environments"] as const)
+          .filter((t) => t !== "environments" || can("environments.manage"))
+          .map((t) => (
           <button
             key={t}
             role="tab"
@@ -682,6 +816,7 @@ function Inventory() {
       {tab === "nodes" && <NodesTab groups={groups.data ?? []} />}
       {tab === "groups" && <GroupsTab groups={groups.data ?? []} reload={groups.reload} />}
       {tab === "tags" && <TagsTab />}
+      {tab === "environments" && <EnvironmentsTab />}
     </div>
   );
 }

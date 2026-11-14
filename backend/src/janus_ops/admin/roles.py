@@ -1,6 +1,7 @@
 """/api/v1/roles: roles, their LDAP group and their permissions."""
 
-from typing import Annotated, Any
+import uuid
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -21,12 +22,28 @@ Reader = Annotated[Session, Depends(require_permission("users.read"))]
 Manager = Annotated[Session, Depends(require_permission("roles.manage"))]
 
 
+class ScopeRule(BaseModel):
+    """Nodes matching ALL non-empty fields; an empty rule matches every node."""
+
+    environments: list[Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")]] = Field(
+        default_factory=list, max_length=50
+    )
+    tags: list[uuid.UUID] = Field(default_factory=list, max_length=200)
+    groups: list[uuid.UUID] = Field(default_factory=list, max_length=200)
+    capabilities: list[Literal["ssh", "agent", "proxmox", "docker", "snmp"]] = Field(
+        default_factory=list, max_length=5
+    )
+    nodes: list[uuid.UUID] = Field(default_factory=list, max_length=500)
+
+
 class RoleOut(BaseModel):
     name: str
     description: str
     ldap_group: str
     builtin: bool
     permissions: list[str]
+    node_scope: Literal["all", "restricted"]
+    scope_rules: list[ScopeRule]
 
 
 class RoleList(BaseModel):
@@ -40,12 +57,53 @@ class RoleCreate(BaseModel):
     description: str = Field(default="", max_length=256)
     ldap_group: str | None = Field(default=None, pattern=GROUP_PATTERN)
     permissions: list[str] = Field(default_factory=list)
+    node_scope: Literal["all", "restricted"] = "all"
+    scope_rules: list[ScopeRule] = Field(default_factory=list, max_length=20)
 
 
 class RoleUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=256)
     ldap_group: str | None = Field(default=None, pattern=GROUP_PATTERN)
     permissions: list[str] | None = None
+    node_scope: Literal["all", "restricted"] | None = None
+    scope_rules: list[ScopeRule] | None = Field(default=None, max_length=20)
+
+
+async def _write_scope(
+    conn: Any, role: str, node_scope: str | None, rules: list[ScopeRule] | None
+) -> dict[str, Any]:
+    """Replace a role's node scope; returns what changed for the audit log."""
+    changes: dict[str, Any] = {}
+    if node_scope is not None:
+        await conn.execute(
+            text("UPDATE role SET node_scope = :s WHERE name = :n"), {"s": node_scope, "n": role}
+        )
+        changes["node_scope"] = node_scope
+    if rules is not None:
+        known = {r.name for r in await conn.execute(text("SELECT name FROM environment"))}
+        for rule in rules:
+            if missing := set(rule.environments) - known:
+                raise HTTPException(422, f"unknown_environment:{sorted(missing)[0]}")
+        await conn.execute(text("DELETE FROM role_scope_rule WHERE role = :n"), {"n": role})
+        for position, rule in enumerate(rules):
+            await conn.execute(
+                text(
+                    "INSERT INTO role_scope_rule (role, position, environments, tag_ids,"
+                    " group_ids, capabilities, node_ids) VALUES (:r, :p, :e,"
+                    " CAST(:t AS uuid[]), CAST(:g AS uuid[]), :c, CAST(:n AS uuid[]))"
+                ),
+                {
+                    "r": role,
+                    "p": position,
+                    "e": rule.environments,
+                    "t": rule.tags,
+                    "g": rule.groups,
+                    "c": rule.capabilities,
+                    "n": rule.nodes,
+                },
+            )
+        changes["scope_rules"] = [r.model_dump(mode="json") for r in rules]
+    return changes
 
 
 def _check_permissions(perms: list[str]) -> None:
@@ -58,6 +116,26 @@ def _check_permissions(perms: list[str]) -> None:
 async def get_roles(request: Request, _: Reader) -> RoleList:
     async with request.app.state.engine.connect() as conn:
         roles = await list_roles(conn)
+        scopes = {
+            r.name: r.node_scope
+            for r in await conn.execute(text("SELECT name, node_scope FROM role"))
+        }
+        rules: dict[str, list[ScopeRule]] = {}
+        for r in await conn.execute(
+            text(
+                "SELECT role, environments, tag_ids, group_ids, capabilities, node_ids"
+                " FROM role_scope_rule ORDER BY role, position, id"
+            )
+        ):
+            rules.setdefault(r.role, []).append(
+                ScopeRule(
+                    environments=r.environments,
+                    tags=r.tag_ids,
+                    groups=r.group_ids,
+                    capabilities=r.capabilities,
+                    nodes=r.node_ids,
+                )
+            )
     return RoleList(
         roles=[
             RoleOut(
@@ -66,6 +144,8 @@ async def get_roles(request: Request, _: Reader) -> RoleList:
                 ldap_group=r.ldap_group,
                 builtin=r.builtin,
                 permissions=sorted(r.permissions),
+                node_scope=scopes.get(r.name, "all"),
+                scope_rules=rules.get(r.name, []),
             )
             for r in roles
         ],
@@ -99,6 +179,7 @@ async def create_role(body: RoleCreate, request: Request, session: Manager) -> R
                     text("INSERT INTO role_permission (role, permission) VALUES (:r, :p)"),
                     {"r": body.name, "p": perm},
                 )
+            await _write_scope(conn, body.name, body.node_scope, body.scope_rules)
     except IntegrityError:
         raise HTTPException(409, "role_or_group_exists") from None
     await record(
@@ -107,7 +188,12 @@ async def create_role(body: RoleCreate, request: Request, session: Manager) -> R
         "roles.created",
         "role",
         body.name,
-        {"ldap_group": group, "permissions": sorted(set(body.permissions))},
+        {
+            "ldap_group": group,
+            "permissions": sorted(set(body.permissions)),
+            "node_scope": body.node_scope,
+            "scope_rules": [r.model_dump(mode="json") for r in body.scope_rules],
+        },
     )
     return Response(status_code=201)
 
@@ -115,7 +201,7 @@ async def create_role(body: RoleCreate, request: Request, session: Manager) -> R
 @router.patch("/{name}", status_code=204, responses={400: {}, 403: {}, 404: {}, 409: {}})
 async def update_role(name: str, body: RoleUpdate, request: Request, session: Manager) -> Response:
     if name == ADMIN_ROLE:
-        if body.permissions is not None:
+        if body.permissions is not None or body.node_scope is not None or body.scope_rules:
             raise HTTPException(400, "admin_role_fixed")
         if ADMIN_ROLE not in session.roles:
             raise HTTPException(403, "admin_only")
@@ -153,6 +239,7 @@ async def update_role(name: str, body: RoleUpdate, request: Request, session: Ma
                         {"r": name, "p": perm},
                     )
                 changes["permissions"] = sorted(set(body.permissions))
+            changes.update(await _write_scope(conn, name, body.node_scope, body.scope_rules))
     except IntegrityError:
         raise HTTPException(409, "group_in_use") from None
     if changes:

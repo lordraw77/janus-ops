@@ -37,7 +37,7 @@ export type InventoryNode = {
   id: string;
   name: string;
   address: string;
-  environment: "prod" | "staging" | "lab" | "dmz";
+  environment: string;
   parent: { id: string; name: string } | null;
   description: string | null;
   tags: string[];
@@ -57,8 +57,6 @@ export type Group = {
 
 export type Tag = { id: string; name: string; node_count: number };
 
-export const ENVIRONMENTS = ["prod", "staging", "lab", "dmz"] as const;
-
 /** Capability -> label, accepted credential kinds (empty = none), credential required. */
 export const CAPABILITIES: Record<CapabilityKind, { label: string; credentials: string[]; required: boolean }> = {
   ssh: { label: "SSH target", credentials: ["ssh_key", "ssh_password"], required: true },
@@ -68,9 +66,3 @@ export const CAPABILITIES: Record<CapabilityKind, { label: string; credentials: 
   snmp: { label: "SNMP device", credentials: ["snmp_v3", "generic"], required: true },
 };
 
-export const ENV_STYLE: Record<string, string> = {
-  prod: "border-crit/40 text-crit",
-  staging: "border-warn/40 text-warn",
-  lab: "border-telemetry/40 text-telemetry",
-  dmz: "border-ai/40 text-ai",
-};

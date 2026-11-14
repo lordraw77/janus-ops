@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 from janus_ops import __version__
+from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
 from janus_ops.agents import bootstrap
 from janus_ops.agents.hub import AgentHub
@@ -113,17 +114,23 @@ def _out(row: Any, hub: AgentHub, model: type[AgentOut] = AgentOut, **extra: Any
 
 
 @router.get("", response_model=list[AgentOut])
-async def list_agents(request: Request, _: Reader) -> list[AgentOut]:
+async def list_agents(request: Request, session: Reader) -> list[AgentOut]:
     """Nodes with the agent capability or an installed agent."""
     hub: AgentHub = request.app.state.agents
+    scope_sql, params = session.scope.sql("n")
     async with request.app.state.engine.connect() as conn:
         rows = await conn.execute(
-            text(SELECT + " WHERE c.node_id IS NOT NULL OR a.node_id IS NOT NULL ORDER BY n.name")
+            text(
+                SELECT + " WHERE (c.node_id IS NOT NULL OR a.node_id IS NOT NULL)"
+                f" AND {scope_sql} ORDER BY n.name"
+            ),
+            params,
         )
         return [_out(r, hub) for r in rows]
 
 
-async def _row(request: Request, node_id: uuid.UUID) -> Any:
+async def _row(request: Request, session: Session, node_id: uuid.UUID) -> Any:
+    await node_scope.require_node(request, session, node_id)
     async with request.app.state.engine.connect() as conn:
         row = (await conn.execute(text(SELECT + " WHERE n.id = :id"), {"id": node_id})).first()
     if row is None:
@@ -132,8 +139,8 @@ async def _row(request: Request, node_id: uuid.UUID) -> Any:
 
 
 @router.get("/{node_id}", response_model=AgentDetail)
-async def get_agent(request: Request, node_id: uuid.UUID, _: Reader) -> AgentOut:
-    row = await _row(request, node_id)
+async def get_agent(request: Request, node_id: uuid.UUID, session: Reader) -> AgentOut:
+    row = await _row(request, session, node_id)
     async with request.app.state.engine.connect() as conn:
         facts = (
             await conn.execute(
@@ -204,7 +211,7 @@ async def bootstrap_agent(
     """Install (or upgrade) the agent over SSH and wait for it to connect."""
     app = request.app
     settings = app.state.settings
-    row = await _row(request, node_id)
+    row = await _row(request, session, node_id)
     if row.capability_enabled is not True:
         raise HTTPException(409, "no_agent_capability")
     if settings.agent_dir is None:
@@ -278,7 +285,7 @@ async def _failed(request: Request, session: Session, node: str, code: str, deta
 @router.post("/{node_id}/revoke", status_code=204)
 async def revoke_agent(request: Request, node_id: uuid.UUID, session: Manager) -> None:
     """Refuse the agent's key from now on and drop its connection. Bootstrap again to undo."""
-    row = await _row(request, node_id)
+    row = await _row(request, session, node_id)
     async with request.app.state.engine.begin() as conn:
         updated = await conn.scalar(
             text(
@@ -301,7 +308,7 @@ async def revoke_agent(request: Request, node_id: uuid.UUID, session: Manager) -
 async def uninstall_agent(request: Request, node_id: uuid.UUID, session: Manager) -> None:
     """Stop and remove the agent from the node over SSH, then forget its key."""
     app = request.app
-    row = await _row(request, node_id)
+    row = await _row(request, session, node_id)
     key = str(node_id)
     if key in _busy(request):
         raise HTTPException(409, "bootstrap_running")

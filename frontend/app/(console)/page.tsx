@@ -9,7 +9,7 @@ import { Alert } from "@/components/ui";
 import type { Dashboard } from "@/lib/agents";
 import { api, message } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { ENVIRONMENTS } from "@/lib/inventory";
+import { useEnvironments } from "@/lib/environments";
 
 const POLL_MS = 10_000;
 
@@ -83,10 +83,11 @@ function ControlPlane() {
 
 function Noc() {
   const result = usePoll(loadDashboard);
+  const { names } = useEnvironments();
   if (result === null) return <p className="text-sm text-fg-muted">Loading…</p>;
   if (result.error || !result.data) return <Alert>{result.error}</Alert>;
   const dash = result.data;
-  const order = (env: string) => ENVIRONMENTS.indexOf(env as (typeof ENVIRONMENTS)[number]);
+  const order = (env: string) => names.indexOf(env);
   const nodes = [...dash.nodes].sort(
     (a, b) =>
       Number(a.state === "unmonitored") - Number(b.state === "unmonitored") ||

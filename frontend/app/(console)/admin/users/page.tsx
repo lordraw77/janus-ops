@@ -6,6 +6,7 @@ import { type FormEvent, type ReactNode, useState } from "react";
 import { Alert, Button, Card, Field, Modal, RoleBadge, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { RequirePermission, useAuth } from "@/lib/auth";
+import { type NodeScope, type ScopeRule, ScopeEditor } from "@/components/ScopeEditor";
 
 type User = {
   id: string;
@@ -24,6 +25,8 @@ type Role = {
   ldap_group: string;
   builtin: boolean;
   permissions: string[];
+  node_scope: NodeScope;
+  scope_rules: ScopeRule[];
 };
 type RoleList = { roles: Role[]; permissions: Record<string, string>; managed: boolean };
 
@@ -449,6 +452,7 @@ function RolesTab({ roleList, reload }: { roleList: RoleList; reload: () => void
             <tr>
               <th className="py-2 pr-3 font-medium">Role</th>
               <th className="py-2 pr-3 font-medium">LDAP group</th>
+              <th className="py-2 pr-3 font-medium">Nodes</th>
               {perms.map(([key, description]) => (
                 <th key={key} className="py-2 pr-3 text-center font-mono font-medium" title={description}>
                   {key}
@@ -467,6 +471,9 @@ function RolesTab({ roleList, reload }: { roleList: RoleList; reload: () => void
                     <div className="mt-0.5 text-[11px] text-fg-muted">{r.description}</div>
                   </td>
                   <td className="py-2 pr-3 font-mono">{r.ldap_group}</td>
+                  <td className="py-2 pr-3 text-fg-secondary" title={r.node_scope === "restricted" ? "Limited by rules: edit the role to see them" : undefined}>
+                    {r.node_scope === "all" ? "all" : r.scope_rules.length === 0 ? "none" : `${r.scope_rules.length} rule${r.scope_rules.length === 1 ? "" : "s"}`}
+                  </td>
                   {perms.map(([key]) => (
                     <td key={key} className="py-2 pr-3 text-center">
                       <input
@@ -544,6 +551,8 @@ function RoleDialog({
   const [description, setDescription] = useState(role?.description ?? "");
   const [group, setGroup] = useState(role?.ldap_group ?? "");
   const [picked, setPicked] = useState<string[]>(role?.permissions ?? []);
+  const [scope, setScope] = useState<NodeScope>(role?.node_scope ?? "all");
+  const [rules, setRules] = useState<ScopeRule[]>(role?.scope_rules ?? []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -557,7 +566,7 @@ function RoleDialog({
           body: {
             description,
             ...(group !== role.ldap_group ? { ldap_group: group.trim() } : {}),
-            ...(role.name !== "admin" ? { permissions: picked } : {}),
+            ...(role.name !== "admin" ? { permissions: picked, node_scope: scope, scope_rules: scope === "restricted" ? rules : [] } : {}),
           },
         })
       : await api("/roles", {
@@ -567,6 +576,8 @@ function RoleDialog({
             description,
             ...(group.trim() ? { ldap_group: group.trim() } : {}),
             permissions: picked,
+            node_scope: scope,
+            scope_rules: scope === "restricted" ? rules : [],
           },
         });
     setBusy(false);
@@ -575,7 +586,7 @@ function RoleDialog({
   }
 
   return (
-    <Modal title={role ? `Edit role ${role.name}` : "New role"} onClose={onClose}>
+    <Modal title={role ? `Edit role ${role.name}` : "New role"} onClose={onClose} wide>
       <form onSubmit={submit} className="space-y-3">
         {!role && (
           <Field label="Name" hint="Lower-case letters, digits and - (2–32 characters)">
@@ -610,6 +621,7 @@ function RoleDialog({
             </div>
           </Field>
         )}
+        {role?.name !== "admin" && <ScopeEditor scope={scope} rules={rules} onScope={setScope} onRules={setRules} />}
         {error && <Alert>{error}</Alert>}
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>

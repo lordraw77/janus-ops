@@ -26,6 +26,7 @@ from sqlalchemy import text
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from janus_ops import audit
+from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
 from janus_ops.auth import sessions
 from janus_ops.auth.deps import current_session, require_permission
@@ -92,6 +93,9 @@ async def terminal_ws(
         return await _fail(ws, "not_authenticated", 4401)
     if "ssh.connect" not in session.permissions:
         return await _fail(ws, "forbidden", 4403)
+    async with app.state.engine.connect() as conn:
+        if not await node_scope.allows(conn, session, node_id):
+            return await _fail(ws, "not_found", 4404)
     counter: TerminalCounter = app.state.terminals
     if not counter.acquire(session.user_id, settings.terminal_max_per_user):
         return await _fail(ws, "too_many_terminals", 4429)
@@ -353,16 +357,28 @@ async def list_sessions(
     if not (_can_see_all(session) or "ssh.connect" in session.permissions):
         raise HTTPException(403, "forbidden")
     directory = request.app.state.settings.recordings_dir
+    scope_sql, scope_params = session.scope.sql("n")
     async with request.app.state.engine.connect() as conn:
         rows = await conn.execute(
             text(
-                "SELECT t.id, u.username, t.node_id, t.node_name, t.target, t.remote_user,"
-                " t.started_at, t.ended_at, t.end_reason, t.bytes_out FROM terminal_session t"
-                " LEFT JOIN app_user u ON u.id = t.user_id"
-                " WHERE CAST(:all AS boolean) OR t.user_id = CAST(:me AS uuid)"
-                " ORDER BY t.started_at DESC LIMIT :limit"
+                node_scope.fill(
+                    "SELECT t.id, u.username, t.node_id, t.node_name, t.target, t.remote_user,"
+                    " t.started_at, t.ended_at, t.end_reason, t.bytes_out FROM terminal_session t"
+                    " LEFT JOIN app_user u ON u.id = t.user_id"
+                    " WHERE t.user_id = CAST(:me AS uuid) OR (CAST(:all AS boolean) AND"
+                    " (t.node_id IS NULL AND CAST(:free AS boolean) OR EXISTS"
+                    " (SELECT 1 FROM node n WHERE n.id = t.node_id AND <SCOPE>)))"
+                    " ORDER BY t.started_at DESC LIMIT :limit",
+                    scope_sql,
+                )
             ),
-            {"all": _can_see_all(session), "me": session.user_id, "limit": limit},
+            {
+                "all": _can_see_all(session),
+                "free": session.scope.unrestricted,
+                "me": session.user_id,
+                "limit": limit,
+                **scope_params,
+            },
         )
         return [
             SessionOut(
@@ -389,13 +405,25 @@ async def get_recording(
     session: Annotated[Session, Depends(current_session)],
 ) -> FileResponse:
     async with request.app.state.engine.connect() as conn:
-        owner = await conn.scalar(
-            text("SELECT user_id FROM terminal_session WHERE id = :id"), {"id": session_id}
-        )
-    if owner is None:
-        raise HTTPException(404, "not_found")
-    if not (_can_see_all(session) or str(owner) == session.user_id):
-        raise HTTPException(403, "forbidden")
+        found = (
+            await conn.execute(
+                text("SELECT user_id, node_id FROM terminal_session WHERE id = :id"),
+                {"id": session_id},
+            )
+        ).first()
+        if found is None:
+            raise HTTPException(404, "not_found")
+        owner = found.user_id
+        if str(owner) != session.user_id:
+            if not _can_see_all(session):
+                raise HTTPException(403, "forbidden")
+            visible = (
+                session.scope.unrestricted
+                if found.node_id is None
+                else await node_scope.allows(conn, session, found.node_id)
+            )
+            if not visible:
+                raise HTTPException(404, "not_found")
     directory = request.app.state.settings.recordings_dir
     path = recording_path(directory, str(session_id)) if directory else None
     if path is None:
@@ -415,14 +443,20 @@ class HostKeyOut(BaseModel):
 
 @router.get("/host-keys", response_model=list[HostKeyOut])
 async def list_host_keys(
-    request: Request, _: Annotated[Session, Depends(require_permission("inventory.read"))]
+    request: Request, session: Annotated[Session, Depends(require_permission("inventory.read"))]
 ) -> list[HostKeyOut]:
+    scope_sql, scope_params = session.scope.sql("n")
     async with request.app.state.engine.connect() as conn:
         rows = await conn.execute(
             text(
-                "SELECT k.node_id, n.name, k.key_type, k.fingerprint, k.first_seen"
-                " FROM ssh_host_key k JOIN node n ON n.id = k.node_id ORDER BY lower(n.name)"
-            )
+                node_scope.fill(
+                    "SELECT k.node_id, n.name, k.key_type, k.fingerprint, k.first_seen"
+                    " FROM ssh_host_key k JOIN node n ON n.id = k.node_id"
+                    " WHERE <SCOPE> ORDER BY lower(n.name)",
+                    scope_sql,
+                )
+            ),
+            scope_params,
         )
         return [
             HostKeyOut(
@@ -443,6 +477,7 @@ async def reset_host_key(
     session: Annotated[Session, Depends(require_permission("inventory.manage"))],
 ) -> Response:
     """After a legitimate key change (reinstall): the next connection pins the new key."""
+    await node_scope.require_node(request, session, node_id)
     async with request.app.state.engine.begin() as conn:
         row = (
             await conn.execute(

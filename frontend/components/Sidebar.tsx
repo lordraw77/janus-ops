@@ -40,7 +40,7 @@ const NAV: NavItem[] = [
   { label: "Credentials", icon: KeyRound, target: { href: "/credentials/", permission: "inventory.read" } },
   { label: "Problems", icon: TriangleAlert, target: { href: "/problems/", permission: "inventory.read" } },
   { label: "Containers", icon: Container, target: { href: "/containers/", permission: "inventory.read" } },
-  { label: "Proxmox VE", icon: Boxes, target: { phase: "F5" } },
+  { label: "Proxmox VE", icon: Boxes, target: { href: "/proxmox/", permission: "inventory.read" } },
   { label: "Ansible & Workflows", icon: Workflow, target: { phase: "F6" } },
   {
     label: "SSH Bastion",

@@ -53,7 +53,22 @@
 > **v0.13** — **fase F4**: container Docker via tunnel dell'agent (stream multiplexati, policy
 > locale `allow_docker`) o via SSH (inoltro del socket Unix); elenco, stack Compose, inspect,
 > log in diretta, statistiche, azioni, exec nel browser. Migrazione `0009`, permessi
-> `containers.manage` e `containers.exec` (operator). Avanzamento in §5.5.
+> `containers.manage` e `containers.exec` (operator). Avanzamento in §5.5. La vista Containers è
+> una tabella (stato, salute, uptime, riavvii, CPU, memoria, rete, disco, IP, porte
+> pubblicate, stack) con ricerca, filtri e ordinamento.
+>
+> **v0.14** — **fase F5**: Proxmox VE. Client async httpx (ADR C4: Proxmoxer non serve), ticket o
+> token API dal vault, cluster raggruppati con failover tra i membri, panoramica nodi/storage/VM/LXC,
+> ciclo di vita, snapshot, clone, migrazione, task con log, audit dei backup vzdump/PBS e console
+> xterm.js via termproxy. Migrazione `0010`, permessi `proxmox.manage` e `proxmox.console`
+> (operator). Avanzamento in §5.6.
+>
+> **v0.15** — **ambienti configurabili e ambito dei nodi per ruolo**. Gli ambienti sono una
+> tabella (non più un vincolo fisso): CRUD per gli admin (`environments.manage`). Ogni ruolo vede
+> tutti i nodi oppure solo quelli che soddisfano almeno una regola; una regola combina in AND
+> ambiente, tag, gruppo, capability e nodi specifici; più ruoli si sommano. Applicato a inventory,
+> check, problemi, downtime, dashboard, agent, terminale, SFTP, container, Proxmox e storico delle
+> sessioni; i nodi fuori ambito rispondono 404. Migrazione `0011`. Dettagli in §5.7.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -491,6 +506,42 @@ Decisioni (Security):
 - **Permessi separati**: `containers.manage` (azioni) e `containers.exec` (shell, come `ssh.connect`); la lettura usa `inventory.read`. Ogni azione ed exec nell'audit.
 - **Flusso**: al massimo 64 stream per agent; uno stream con troppi dati in coda viene chiuso per non bloccare il tunnel (manca un controllo di flusso per stream `OPEN`).
 
+### 5.6 Avanzamento F5
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Client PVE async (httpx2): ticket con rinnovo e CSRF, o token API; errori tipizzati | ✅ | Test unitari con trasporto simulato (login, CSRF, ticket scaduto, token, 401/403/5xx, host irraggiungibile) |
+| Cluster dai nodi con capability `proxmox` (stesso cluster = stessa vista), failover tra i membri | ✅ | Test con server PVE finto in HTTPS: un membro giù non nasconde il cluster; E2E su cluster reale a 2 nodi (PVE 9.2.25) |
+| Panoramica: quorum, nodi, storage (condivisi una volta sola), VM/LXC (FR-50) | ✅ | Test; E2E sul cluster reale (12 guest) |
+| Ciclo di vita: start/shutdown/reboot/stop/suspend/resume, snapshot (crea/elimina/rollback), clone, migrazione, task con log (FR-51) | ✅ parziale | Test con PVE finto (reboot) e unitari; sul cluster reale **non** sono state eseguite azioni che modificano le VM |
+| Console LXC e shell nodo via termproxy (xterm.js); VM tramite porta seriale (FR-52) | ✅ parziale | E2E: console LXC reale con prompt di login; noVNC (grafica) non incluso |
+| Audit backup: mancanti, falliti, troppo vecchi, senza job; soglia dedotta dalla schedule di ogni job (FR-53) | ✅ | Test unitari sulle regole; E2E: 2 guest senza backup rilevati su 12 |
+| Backup in PBS e replica | ⏳ | I contenuti PBS sono letti come qualunque storage `backup`; non provato con un PBS reale |
+| Alert dai backup (check verso il motore F3) | ⏳ | L'audit è consultabile ma non genera ancora problemi |
+
+Decisioni (Security):
+- **Credenziali nel vault**, mai nel browser; utente con 2FA non supportato con password: usare un token API.
+- **Il browser non chiama PVE**: endpoint Janus-Ops con nomi di nodo, snapshot e UPID validati; la password di cloud-init non è mai restituita.
+- **Permessi**: lettura con `inventory.read`; azioni con `proxmox.manage`; console con `proxmox.console`, e la shell del nodo richiede anche `ssh.connect`. Ogni azione e ogni console (inizio/fine, durata) nell'audit.
+
+### 5.7 Ambienti e ambito dei nodi
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Ambienti configurabili (nome fisso, etichetta, colore, ordine); non eliminabili se in uso | ✅ | Test di integrazione; usati da nodi, filtri delle regole di notifica e UI |
+| Ambito per ruolo: `tutti` oppure regole (ambiente, tag, gruppo, capability, nodi) in AND dentro la regola e OR tra regole; unione tra ruoli, un ruolo senza limiti prevale | ✅ | Test con tre ruoli ristretti e uno senza limiti: elenchi, 404 sui singoli nodi, dashboard, check, downtime, container |
+| Chi può gestire i nodi non può crearne o spostarne fuori dal proprio ambito (403, annullato) | ✅ | Test |
+| Editor dell'ambito nella pagina ruoli (regole a pulsanti con riepilogo in parole) | ✅ | Build e prova manuale |
+| Audit log, notifiche e canali | ⚠️ | Restano globali (servono permessi amministrativi): l'audit non è filtrato per nodo |
+| Downtime di gruppo | ⚠️ | Solo per ruoli senza limiti, perché toccano nodi fuori ambito |
+| Proxmox | ⚠️ | L'ambito si applica agli host PVE dell'inventario: un cluster è visibile se uno dei suoi host lo è, e mostra tutti i suoi guest |
+
+Decisioni (Security):
+- **404 e non 403** per i nodi fuori ambito: non si rivela che esistono.
+- **Filtro nel server**, non nella UI: ogni query sui nodi riceve la condizione dell'ambito; le azioni su un nodo lo verificano prima (anche WebSocket e SFTP).
+- **Riferimenti per id** (tag, gruppi, nodi): se un tag viene eliminato la regola resta restrittiva, non si allarga.
+- Un ruolo cambiato vale al login successivo (i ruoli sono fissati nella sessione).
+
 ### 5.4 Avanzamento F3
 
 | Elemento | Stato | Verifica |
@@ -653,8 +704,8 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F4 completata; F2 con AC-04 verificato solo su Debian amd64
-  Delivered:   piano v0.11, migrazioni 0001–0007, F0–F2: bastion SSH web, SFTP, snippet;
+  Phase:       Engineer — F5 completata; F2 con AC-04 verificato solo su Debian amd64
+  Delivered:   piano v0.15, migrazioni 0001–0011, F0–F5 (F3 allarmi, F4 container, F5 Proxmox); F0–F2: bastion SSH web, SFTP, snippet;
                agent Go (tunnel WSS, telemetria, buffer), enrollment con chiave ed25519,
                bootstrap SSH, ingest Timescale idempotente, dashboard NOC e pagina nodo
   Open:        CSP per l'UI esportata; rotazione KEK; retention delle registrazioni;
@@ -662,5 +713,5 @@ STATE
                AC-04 su Rocky e arm64; E2E dietro squid (NFR-02); test di carico (NFR-05);
                continuous aggregates; installazione manuale dell'agent senza SSH;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        F5 — Proxmox VE: cluster, VM/LXC, backup
+  Next:        F6 — Ansible: inventario dinamico, catalogo da Git, run live
 ```

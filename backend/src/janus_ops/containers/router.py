@@ -13,9 +13,10 @@ from fastapi.responses import PlainTextResponse
 from starlette.websockets import WebSocketDisconnect
 
 from janus_ops import audit
+from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
 from janus_ops.auth import sessions
-from janus_ops.auth.deps import require_permission
+from janus_ops.auth.deps import require_node_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.containers import docker
 from janus_ops.containers.access import DockerAccess, DockerHost
@@ -24,8 +25,8 @@ from janus_ops.terminal.router import _same_origin
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/containers", tags=["containers"])
-Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
-Manager = Annotated[Session, Depends(require_permission("containers.manage"))]
+Reader = Annotated[Session, Depends(require_node_permission("inventory.read", "node_id"))]
+Manager = Annotated[Session, Depends(require_node_permission("containers.manage", "node_id"))]
 
 PROJECT = "com.docker.compose.project"
 SERVICE = "com.docker.compose.service"
@@ -96,11 +97,15 @@ def _summary(c: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/hosts")
-async def hosts(request: Request, _: Reader) -> list[dict[str, Any]]:
+async def hosts(request: Request, session: Reader) -> list[dict[str, Any]]:
     """Nodes with the Docker capability and how they are reached."""
     hub = request.app.state.agents
     out = []
+    async with request.app.state.engine.connect() as conn:
+        visible = await node_scope.visible_ids(conn, session)
     for h in await _access(request).hosts():
+        if visible is not None and h.node_id not in visible:
+            continue
         link = hub.get(h.node_id)
         out.append(
             {
@@ -445,6 +450,10 @@ async def _ws_opener(
     ws: WebSocket, node_id: uuid.UUID, session: Session
 ) -> tuple[DockerHost, Any] | None:
     access = _access(ws)
+    async with ws.app.state.engine.connect() as conn:
+        if not await node_scope.allows(conn, session, node_id):
+            await _close(ws, "not_found", 4404)
+            return None
     try:
         host = await access.host(str(node_id))
         return host, await access.opener(host, (session.user_id, session.username))

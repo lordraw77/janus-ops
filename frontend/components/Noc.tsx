@@ -6,7 +6,7 @@ import Link from "next/link";
 import { StateBadge } from "@/components/ui";
 import { type Attention, type Dashboard, type NodeCardData, ago, formatDuration } from "@/lib/agents";
 import { useAuth } from "@/lib/auth";
-import { ENV_STYLE } from "@/lib/inventory";
+import { EnvBadge } from "@/components/EnvBadge";
 
 const STATE_COLOR = {
   up: "var(--color-ok)",
@@ -118,9 +118,7 @@ export function NodeCard({ node }: { node: NodeCardData }) {
             <span className="block truncate font-mono text-[11px] text-fg-muted">{node.address}</span>
           </span>
         </Link>
-        <span className={`shrink-0 rounded border px-1.5 text-[10px] uppercase ${ENV_STYLE[node.environment] ?? ""}`}>
-          {node.environment}
-        </span>
+        <EnvBadge env={node.environment} />
       </header>
       <div className="flex items-center gap-2 text-xs">
         <span className="inline-block h-2 w-2 rounded-full" style={{ background: STATE_COLOR[node.state] }} aria-hidden />

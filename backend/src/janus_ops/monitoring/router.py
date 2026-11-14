@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
@@ -116,10 +117,14 @@ def _check_out(r: Any) -> CheckOut:
 
 
 @router.get("/checks", response_model=list[CheckOut])
-async def list_checks(request: Request, _: Reader, node_id: uuid.UUID | None = None) -> list[Any]:
-    where, params = "", {}
+async def list_checks(
+    request: Request, session: Reader, node_id: uuid.UUID | None = None
+) -> list[Any]:
+    scope_sql, params = session.scope.sql("n")
+    where = f" WHERE {scope_sql}"
     if node_id:
-        where, params = " WHERE c.node_id = :node", {"node": node_id}
+        where += " AND c.node_id = :node"
+        params["node"] = node_id
     async with request.app.state.engine.connect() as conn:
         rows = await conn.execute(text(CHECKS + where + " ORDER BY n.name, c.name"), params)
         return [_check_out(r) for r in rows]
@@ -137,6 +142,7 @@ async def create_check(request: Request, body: CheckIn, session: Manager) -> Che
     if body.node_id is None:
         raise HTTPException(422, "node_required")
     check_id = uuid.uuid4()
+    await node_scope.require_node(request, session, body.node_id)
     try:
         async with request.app.state.engine.begin() as conn:
             node = await _node_name(conn, body.node_id)
@@ -173,27 +179,28 @@ async def create_check(request: Request, body: CheckIn, session: Manager) -> Che
         {"kind": body.kind, "params": body.params, "source": body.source},
     )
     _wake(request)
-    return await _get_check(request, check_id)
+    return await _get_check(request, session, check_id)
 
 
-async def _get_check(request: Request, check_id: uuid.UUID) -> CheckOut:
+async def _get_check(request: Request, session: Session, check_id: uuid.UUID) -> CheckOut:
     async with request.app.state.engine.connect() as conn:
         row = (await conn.execute(text(CHECKS + " WHERE c.id = :id"), {"id": check_id})).first()
     if row is None:
         raise HTTPException(404, "not_found")
+    await node_scope.require_node(request, session, row.node_id)
     return _check_out(row)
 
 
 @router.get("/checks/{check_id}", response_model=CheckOut)
-async def get_check(request: Request, check_id: uuid.UUID, _: Reader) -> CheckOut:
-    return await _get_check(request, check_id)
+async def get_check(request: Request, check_id: uuid.UUID, session: Reader) -> CheckOut:
+    return await _get_check(request, session, check_id)
 
 
 @router.put("/checks/{check_id}", response_model=CheckOut)
 async def update_check(
     request: Request, check_id: uuid.UUID, body: CheckIn, session: Manager
 ) -> CheckOut:
-    current = await _get_check(request, check_id)
+    current = await _get_check(request, session, check_id)
     try:
         async with request.app.state.engine.begin() as conn:
             await conn.execute(
@@ -240,12 +247,12 @@ async def update_check(
         {"kind": body.kind, "params": body.params, "enabled": body.enabled},
     )
     _wake(request)
-    return await _get_check(request, check_id)
+    return await _get_check(request, session, check_id)
 
 
 @router.delete("/checks/{check_id}", status_code=204)
 async def delete_check(request: Request, check_id: uuid.UUID, session: Manager) -> Response:
-    current = await _get_check(request, check_id)
+    current = await _get_check(request, session, check_id)
     async with request.app.state.engine.begin() as conn:
         await conn.execute(text("DELETE FROM service_check WHERE id = :id"), {"id": check_id})
     await record(
@@ -255,8 +262,8 @@ async def delete_check(request: Request, check_id: uuid.UUID, session: Manager) 
 
 
 @router.post("/checks/{check_id}/run", status_code=202)
-async def run_check_now(request: Request, check_id: uuid.UUID, _: Manager) -> dict[str, str]:
-    await _get_check(request, check_id)
+async def run_check_now(request: Request, check_id: uuid.UUID, session: Manager) -> dict[str, str]:
+    await _get_check(request, session, check_id)
     async with request.app.state.engine.begin() as conn:
         await conn.execute(
             text("UPDATE check_state SET last_checked_at = NULL WHERE check_id = :id"),
@@ -274,8 +281,9 @@ class ResultOut(BaseModel):
 
 @router.get("/checks/{check_id}/results", response_model=list[ResultOut])
 async def check_results(
-    request: Request, check_id: uuid.UUID, _: Reader, limit: int = Query(50, ge=1, le=500)
+    request: Request, check_id: uuid.UUID, session: Reader, limit: int = Query(50, ge=1, le=500)
 ) -> list[Any]:
+    await _get_check(request, session, check_id)
     async with request.app.state.engine.connect() as conn:
         rows = await conn.execute(
             text(
@@ -381,8 +389,9 @@ def _suggest(
 
 
 @router.get("/nodes/{node_id}/discovery", response_model=list[Suggestion])
-async def discover(request: Request, node_id: uuid.UUID, _: Reader) -> list[Suggestion]:
+async def discover(request: Request, node_id: uuid.UUID, session: Reader) -> list[Suggestion]:
     """Checks this node could have, from its capabilities and what the agent reports."""
+    await node_scope.require_node(request, session, node_id)
     async with request.app.state.engine.connect() as conn:
         await _node_name(conn, node_id)
         agent = (
@@ -466,7 +475,7 @@ LEFT JOIN check_state s ON s.check_id = c.id LEFT JOIN app_user u ON u.id = p.ac
 @router.get("/problems", response_model=list[ProblemOut])
 async def list_problems(
     request: Request,
-    _: Reader,
+    session: Reader,
     status: Literal["open", "closed", "all"] = "open",
     node_id: uuid.UUID | None = None,
     limit: int = Query(200, ge=1, le=1000),
@@ -476,7 +485,9 @@ async def list_problems(
         "closed": "p.closed_at IS NOT NULL",
         "all": "true",
     }[status]
-    params: dict[str, Any] = {"n": limit}
+    scope_sql, params = session.scope.sql("n")
+    where += f" AND {scope_sql}"
+    params["n"] = limit
     if node_id:
         where += " AND n.id = :node"
         params["node"] = node_id
@@ -495,11 +506,12 @@ class AckIn(BaseModel):
     comment: str = Field(min_length=1, max_length=1000)
 
 
-async def _problem(request: Request, problem_id: uuid.UUID) -> Any:
+async def _problem(request: Request, session: Session, problem_id: uuid.UUID) -> Any:
     async with request.app.state.engine.connect() as conn:
         row = (await conn.execute(text(PROBLEMS + " WHERE p.id = :id"), {"id": problem_id})).first()
     if row is None:
         raise HTTPException(404, "not_found")
+    await node_scope.require_node(request, session, row.node_id)
     return row
 
 
@@ -507,7 +519,7 @@ async def _problem(request: Request, problem_id: uuid.UUID) -> Any:
 async def acknowledge(
     request: Request, problem_id: uuid.UUID, body: AckIn, session: Manager
 ) -> Response:
-    p = await _problem(request, problem_id)
+    p = await _problem(request, session, problem_id)
     if p.closed_at is not None:
         raise HTTPException(409, "problem_closed")
     async with request.app.state.engine.begin() as conn:
@@ -531,7 +543,7 @@ async def acknowledge(
 
 @router.delete("/problems/{problem_id}/ack", status_code=204)
 async def unacknowledge(request: Request, problem_id: uuid.UUID, session: Manager) -> Response:
-    p = await _problem(request, problem_id)
+    p = await _problem(request, session, problem_id)
     async with request.app.state.engine.begin() as conn:
         await conn.execute(
             text(
@@ -593,6 +605,7 @@ SELECT d.id, d.starts_at, d.ends_at, d.reason, u.username AS created_by,
        CASE WHEN d.node_id IS NOT NULL THEN 'node' WHEN d.check_id IS NOT NULL THEN 'check'
             ELSE 'group' END AS scope,
        coalesce(d.node_id, d.check_id, d.group_id) AS target_id,
+       coalesce(d.node_id, c.node_id) AS node_ref,
        coalesce(n.name, cn.name || '/' || c.name, g.name) AS target_name,
        (d.starts_at <= now() AND d.ends_at > now()) AS active
 FROM downtime d
@@ -604,16 +617,34 @@ LEFT JOIN app_user u ON u.id = d.created_by
 
 
 @router.get("/downtimes", response_model=list[DowntimeOut])
-async def list_downtimes(request: Request, _: Reader, include_past: bool = False) -> list[Any]:
-    where = "" if include_past else " WHERE d.ends_at > now()"
+async def list_downtimes(
+    request: Request, session: Reader, include_past: bool = False
+) -> list[Any]:
+    where = " WHERE true" if include_past else " WHERE d.ends_at > now()"
+    params: dict[str, Any] = {}
+    if not session.scope.unrestricted:  # group downtimes reach nodes outside the scope
+        scope_sql, params = session.scope.sql("sn", "dt")
+        where += node_scope.fill(
+            " AND d.group_id IS NULL AND EXISTS (SELECT 1 FROM node sn"
+            " WHERE sn.id = coalesce(d.node_id, c.node_id) AND <SCOPE>)",
+            scope_sql,
+        )
     async with request.app.state.engine.connect() as conn:
-        rows = await conn.execute(text(DOWNTIMES + where + " ORDER BY d.starts_at DESC LIMIT 500"))
+        rows = await conn.execute(
+            text(DOWNTIMES + where + " ORDER BY d.starts_at DESC LIMIT 500"), params
+        )
         return [DowntimeOut.model_validate(r._mapping) for r in rows]
 
 
 @router.post("/downtimes", status_code=201, response_model=DowntimeOut)
 async def create_downtime(request: Request, body: DowntimeIn, session: Manager) -> Any:
     downtime_id = uuid.uuid4()
+    if body.group_id is not None and not session.scope.unrestricted:
+        raise HTTPException(403, "out_of_scope")  # a group reaches nodes outside the scope
+    if body.node_id is not None:
+        await node_scope.require_node(request, session, body.node_id)
+    if body.check_id is not None:
+        await _get_check(request, session, body.check_id)
     try:
         async with request.app.state.engine.begin() as conn:
             await conn.execute(
@@ -661,6 +692,11 @@ async def end_downtime(request: Request, downtime_id: uuid.UUID, session: Manage
         ).first()
         if row is None:
             raise HTTPException(404, "not_found")
+        if not session.scope.unrestricted:
+            if row.node_ref is None:
+                raise HTTPException(404, "not_found")
+            if not await node_scope.allows(conn, session, row.node_ref):
+                raise HTTPException(404, "not_found")
         # not started yet (or started this very instant): drop it; active: it ends now
         await conn.execute(
             text("DELETE FROM downtime WHERE id = :id AND starts_at >= now()"), {"id": downtime_id}
@@ -964,7 +1000,9 @@ async def test_channel(request: Request, channel_id: uuid.UUID, session: Notifie
 
 class RuleFilter(BaseModel):
     model_config = {"extra": "forbid"}
-    environments: list[Literal["prod", "staging", "lab", "dmz"]] = Field(default_factory=list)
+    environments: list[Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")]] = Field(
+        default_factory=list, max_length=50
+    )
     node_ids: list[uuid.UUID] = Field(default_factory=list, max_length=500)
     check_kinds: list[Kind] = Field(default_factory=list)
 

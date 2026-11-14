@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from janus_ops import audit
+from janus_ops import scope as node_scope
 from janus_ops.admin.common import client_ip, record
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
@@ -92,6 +93,9 @@ class SftpPool:
 
     async def _open(self, session: Session, node_id: str, ip: str | None) -> _Entry:
         actor = (session.user_id, session.username)
+        async with self._engine.connect() as conn:
+            if not await node_scope.allows(conn, session, node_id):
+                raise HTTPException(404, "not_found")
         try:
             opened = await open_connection(
                 self._engine, self._vault, self._settings, node_id, actor

@@ -56,6 +56,8 @@ EXPECTED_TABLES = {
     "audit_event",
     "terminal_session",
     "snippet",
+    "environment",
+    "role_scope_rule",
 }
 
 
@@ -130,6 +132,8 @@ def test_builtin_roles_seeded(migrated: None) -> None:
         ("operator", "inventory.manage"),
         ("operator", "inventory.read"),
         ("operator", "monitoring.manage"),
+        ("operator", "proxmox.console"),
+        ("operator", "proxmox.manage"),
         ("operator", "sftp.transfer"),
         ("operator", "ssh.connect"),
     ]
@@ -187,7 +191,7 @@ def test_one_open_problem_per_check(migrated: None) -> None:
         ),
         (
             "INSERT INTO node (name, address, environment) VALUES ('n-env', 'h', 'moon')",
-            "node_environment_check",
+            "node_environment_fk",
         ),
         (
             "INSERT INTO app_user (username, ldap_dn, password_hash)"

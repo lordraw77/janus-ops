@@ -124,6 +124,25 @@ const MESSAGES: Record<string, string> = {
   secret_required: "This channel needs its secret (token or URL).",
   kind_fixed: "The kind of a channel cannot change: create a new one.",
   channel_not_found: "The channel no longer exists.",
+  // environments and scope
+  environment_exists: "An environment with this name already exists.",
+  environment_in_use: "Nodes still use this environment: move them first.",
+  out_of_scope: "That would put the node outside your own scope.",
+  label_required: "The label cannot be empty.",
+  // proxmox
+  no_proxmox_capability: "This node has no Proxmox capability.",
+  no_credential: "The Proxmox capability has no credential.",
+  pve_unreachable: "The Proxmox API is not reachable (port 8006).",
+  pve_timeout: "The Proxmox API did not answer in time.",
+  pve_auth_failed: "Proxmox refused the credential: check user, realm and password or token.",
+  pve_tfa_required: "This Proxmox user has two-factor authentication: use an API token instead.",
+  pve_forbidden: "The Proxmox user lacks the privilege for this.",
+  pve_console_failed: "Opening the Proxmox console failed.",
+  invalid_node: "Invalid Proxmox node name.",
+  invalid_snapshot: "Snapshot names start with a letter: letters, digits, - and _ (2-40).",
+  invalid_target: "Invalid console target.",
+  same_node: "The guest is already on that node.",
+  credential_unreadable: "The credential cannot be decrypted.",
 };
 
 export function message(code: string, retryAfter?: number): string {
@@ -143,6 +162,10 @@ export function message(code: string, retryAfter?: number): string {
     credential_kind_mismatch: "The credential type does not fit capability",
     credential_not_used: "No credential is used by capability",
     invalid_config: "Invalid setting",
+    unknown_environment: "Unknown environment",
+    pve_error: "Proxmox",
+    pve_forbidden: "Proxmox permission",
+    pve_console_failed: "Proxmox console",
   };
   if (rest !== undefined && DETAILED[prefix]) return `${DETAILED[prefix]}: ${rest}.`;
   if (code.startsWith("unknown_permission:")) return `Unknown permission: ${code.slice(19)}.`;

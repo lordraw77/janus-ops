@@ -24,10 +24,12 @@ from janus_ops.containers import router as containers
 from janus_ops.containers.access import DockerAccess
 from janus_ops.db import create_engine, schema_head
 from janus_ops.directory import LldapAdmin
-from janus_ops.inventory import credentials, groups, nodes
+from janus_ops.inventory import credentials, environments, groups, nodes
 from janus_ops.monitoring import engine as check_engine
 from janus_ops.monitoring import notify
 from janus_ops.monitoring import router as monitoring
+from janus_ops.proxmox import router as proxmox
+from janus_ops.proxmox.access import ProxmoxAccess
 from janus_ops.terminal import router as terminal
 from janus_ops.terminal import sftp, snippets
 from janus_ops.vault import Vault
@@ -86,6 +88,7 @@ def create_app(
         app.state.agents = AgentHub()
         app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
         app.state.docker = DockerAccess(engine, app.state.vault, settings, app.state.agents)
+        app.state.proxmox = ProxmoxAccess(engine, app.state.vault)
         app.state.check_engine = check_engine.Engine(engine, app.state.agents)
         app.state.dispatcher = notify.Dispatcher(engine, app.state.vault)
         tasks = [asyncio.create_task(sftp.reaper(app.state.sftp, engine))]
@@ -104,6 +107,7 @@ def create_app(
                     await task
             app.state.sftp.close_all()
             app.state.docker.close_all()
+            await app.state.proxmox.close_all()
             await app.state.agents.close_all()
             await engine.dispose()
 
@@ -138,6 +142,7 @@ def create_app(
         users.router,
         roles.router,
         audit_log.router,
+        environments.router,
         nodes.router,
         groups.router,
         credentials.router,
@@ -149,6 +154,7 @@ def create_app(
         telemetry.router,
         monitoring.router,
         containers.router,
+        proxmox.router,
     ):
         app.include_router(module_router, prefix=API_PREFIX)
     for router in extra_routers:

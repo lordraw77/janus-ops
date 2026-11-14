@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops.rbac import permissions_for
+from janus_ops.scope import UNRESTRICTED, Scope, scope_for
 
 COOKIE_NAME = "janus_session"
 MFA_PENDING_TTL_S = 300
@@ -36,6 +37,7 @@ class Session:
     totp_enabled: bool
     mfa_failures: int
     expires_at: datetime
+    scope: Scope = UNRESTRICTED  # nodes this user may see (per-role)
 
 
 def _hash(token: str) -> bytes:
@@ -108,6 +110,7 @@ async def lookup(
         display_name=row.display_name,
         roles=roles,
         permissions=await permissions_for(conn, roles),
+        scope=await scope_for(conn, roles),
         method="breakglass" if row.is_breakglass else "ldap",
         stage=row.stage,
         totp_enabled=row.totp_enabled,

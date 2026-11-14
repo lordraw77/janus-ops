@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, Request, status
 
+from janus_ops import scope
 from janus_ops.auth import sessions
 from janus_ops.auth.sessions import Session, Stage
 from janus_ops.rbac import PERMISSIONS
@@ -39,6 +40,19 @@ def require_permission(permission: str) -> Callable[..., Awaitable[Session]]:
     async def _check(session: Session = Depends(current_session)) -> Session:  # noqa: B008
         if permission not in session.permissions:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+        return session
+
+    return _check
+
+
+def require_node_permission(permission: str, param: str) -> Callable[..., Awaitable[Session]]:
+    """require_permission, and the path parameter `param` must be a node the user may see."""
+    check = require_permission(permission)
+
+    async def _check(request: Request, session: Session = Depends(check)) -> Session:  # noqa: B008
+        node_id = request.path_params.get(param)
+        if node_id:
+            await scope.require_node(request, session, node_id)
         return session
 
     return _check

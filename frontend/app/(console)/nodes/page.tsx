@@ -19,7 +19,7 @@ import {
 } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { ENV_STYLE } from "@/lib/inventory";
+import { EnvBadge } from "@/components/EnvBadge";
 
 const RANGES = ["1h", "6h", "24h", "7d"] as const;
 type Range = (typeof RANGES)[number];
@@ -379,7 +379,7 @@ function NodeView({ id }: { id: string }) {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-lg font-semibold">{a.node_name}</h1>
         <span className="font-mono text-xs text-fg-muted">{a.address}</span>
-        <span className={`rounded border px-1.5 text-[10px] uppercase ${ENV_STYLE[a.environment] ?? ""}`}>{a.environment}</span>
+        <EnvBadge env={a.environment} />
         <div className="ml-auto flex gap-2">
           {a.has_ssh && can("ssh.connect") && (
             <Link href={`/terminal/?node=${a.node_id}`} className="flex items-center gap-1 rounded border border-line bg-elevated px-2 py-1 text-xs text-telemetry hover:border-line-strong">

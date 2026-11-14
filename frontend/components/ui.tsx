@@ -117,7 +117,7 @@ export function Modal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-canvas/80 p-4"
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
-      <div className={`w-full ${wide ? "max-w-5xl" : "max-w-md"} rounded-lg border border-line bg-surface p-5 shadow-2xl`}>
+      <div className={`max-h-[94vh] w-full overflow-y-auto ${wide ? "max-w-5xl" : "max-w-md"} rounded-lg border border-line bg-surface p-5 shadow-2xl`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-fg-muted hover:text-fg">

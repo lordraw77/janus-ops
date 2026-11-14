@@ -18,6 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/nodes", tags=["inventory"])
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 Manager = Annotated[Session, Depends(require_permission("inventory.manage"))]
 
-Environment = Literal["prod", "staging", "lab", "dmz"]
+Environment = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")]  # a row of `environment`
 CapabilityKind = Literal["ssh", "agent", "proxmox", "docker", "snmp"]
 
 NODE_NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$"
@@ -232,14 +233,15 @@ async def _load(
 @router.get("", response_model=list[NodeOut])
 async def list_nodes(
     request: Request,
-    _: Reader,
+    session: Reader,
     q: Annotated[str | None, Query(max_length=100)] = None,
     environment: Environment | None = None,
     tag: Annotated[str | None, Query(max_length=64)] = None,
     group: Annotated[str | None, Query(max_length=128)] = None,
     capability: CapabilityKind | None = None,
 ) -> list[NodeOut]:
-    clauses, params = [], {}
+    scope_sql, params = session.scope.sql("n")
+    clauses = [scope_sql]
     if q:
         clauses.append("(n.name ILIKE :q OR n.address ILIKE :q)")
         params["q"] = "%" + q.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_") + "%"
@@ -264,13 +266,14 @@ async def list_nodes(
             " AND c.kind = :cap AND c.enabled)"
         )
         params["cap"] = capability
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    where = "WHERE " + " AND ".join(clauses)
     async with request.app.state.engine.connect() as conn:
         return await _load(conn, where, params)
 
 
 @router.get("/{node_id}", response_model=NodeOut, responses={404: {}})
-async def get_node(node_id: uuid.UUID, request: Request, _: Reader) -> NodeOut:
+async def get_node(node_id: uuid.UUID, request: Request, session: Reader) -> NodeOut:
+    await node_scope.require_node(request, session, node_id)
     async with request.app.state.engine.connect() as conn:
         found = await _load(conn, "WHERE n.id = :id", {"id": node_id})
     if not found:
@@ -279,6 +282,11 @@ async def get_node(node_id: uuid.UUID, request: Request, _: Reader) -> NodeOut:
 
 
 # ---------------------------------------------------------------- writing
+async def _check_environment(conn: AsyncConnection, name: str) -> None:
+    if not await conn.scalar(text("SELECT 1 FROM environment WHERE name = :n"), {"n": name}):
+        raise HTTPException(422, f"unknown_environment:{name}")
+
+
 async def _check_parent(conn: AsyncConnection, node_id: uuid.UUID, parent_id: uuid.UUID) -> None:
     if parent_id == node_id:
         raise HTTPException(422, "parent_cycle")
@@ -401,6 +409,7 @@ async def create_node(body: NodeIn, request: Request, session: Manager) -> dict[
     node_id = uuid.uuid4()
     try:
         async with request.app.state.engine.begin() as conn:
+            await _check_environment(conn, body.environment or "prod")
             if body.parent_id:
                 await _check_parent(conn, node_id, body.parent_id)
             await conn.execute(
@@ -419,6 +428,8 @@ async def create_node(body: NodeIn, request: Request, session: Manager) -> dict[
                 },
             )
             await _write_relations(conn, node_id, body)
+            if not await node_scope.allows(conn, session, node_id):
+                raise HTTPException(403, "out_of_scope")  # rolled back: not a node of theirs
     except IntegrityError:
         raise HTTPException(409, "name_exists") from None
     await record(request, session, "inventory.node_created", "node", body.name, _summary(body))
@@ -430,11 +441,14 @@ async def update_node(
     node_id: uuid.UUID, body: NodeIn, request: Request, session: Manager
 ) -> Response:
     fields = body.model_dump(exclude_unset=True)
+    await node_scope.require_node(request, session, node_id)
     try:
         async with request.app.state.engine.begin() as conn:
             name = await conn.scalar(text("SELECT name FROM node WHERE id = :id"), {"id": node_id})
             if name is None:
                 raise HTTPException(404, "not_found")
+            if fields.get("environment"):
+                await _check_environment(conn, fields["environment"])
             if fields.get("parent_id"):
                 await _check_parent(conn, node_id, body.parent_id)  # type: ignore[arg-type]
             for column in ("name", "address", "environment", "parent_id", "description"):
@@ -449,6 +463,8 @@ async def update_node(
                 text("UPDATE node SET updated_at = now() WHERE id = :id"), {"id": node_id}
             )
             await _write_relations(conn, node_id, body)
+            if not await node_scope.allows(conn, session, node_id):
+                raise HTTPException(403, "out_of_scope")  # it would leave their scope
     except IntegrityError:
         raise HTTPException(409, "name_exists") from None
     if body.capabilities is not None and not any(
@@ -464,6 +480,7 @@ async def update_node(
 
 @router.delete("/{node_id}", status_code=204, responses={404: {}})
 async def delete_node(node_id: uuid.UUID, request: Request, session: Manager) -> Response:
+    await node_scope.require_node(request, session, node_id)
     async with request.app.state.engine.begin() as conn:
         name = await conn.scalar(
             text("DELETE FROM node WHERE id = :id RETURNING name"), {"id": node_id}

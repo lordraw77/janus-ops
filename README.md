@@ -217,6 +217,25 @@ allowed to use Docker; Janus-Ops forwards `/var/run/docker.sock` over SSH.
 stats, start/stop/restart/pause/remove, start/stop/restart of a whole stack, and a shell in the
 browser. Environment variables are listed by name only. Every action and shell is audited.
 
+### Environments and who sees which nodes
+
+**Inventory → Environments** (admins) is the list of environments (prod, staging, …): add your own,
+change label, colour and order. In **Users & roles**, a role can see **all nodes** or only the nodes
+matching one of its rules; a rule combines environment, tag, group, capability and specific nodes
+(all filled-in lines must match, rules add up, and several roles add up too). So one team can have
+everything, another only the Docker hosts, another only `lab`. The filter applies to the inventory,
+checks and problems, terminals and files, containers and Proxmox hosts; nodes outside it answer
+*not found*. The audit log and notification settings stay global.
+
+### Proxmox VE
+
+Give each PVE host the **Proxmox** capability (port 8006, TLS check) with a Proxmox credential: user
+and password (`root@pam`, no two-factor) or an API token. Hosts of the same cluster appear as one
+cluster, and a host that is down does not hide it. **Proxmox VE** shows quorum, nodes, storage and
+every VM and container, with start/shutdown/reboot/stop, snapshots, clone, migration, task logs and
+a console in the browser (LXC, VM serial port, node shell). **Backups** audits vzdump archives: no
+backup, a failed one, too old for the job's schedule, or not covered by any job.
+
 ### Two-factor authentication (optional)
 
 Each user can turn on TOTP from **My account** (click your name in the sidebar): scan the QR code
@@ -363,7 +382,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 | **F2** Agent & Telemetry | `janus-agent` enrollment, WSS tunnel, metrics ingest, NOC dashboard |
 | **F3** Alerting | Check states, hysteresis, ack/downtime, dependencies, notifications |
 | **F4** Containers | Docker via agent, logs/stats/exec, Compose stacks |
-| **F5** Proxmox | Cluster overview, VM/LXC lifecycle, backup audit |
+| **F5** Proxmox | Cluster overview, VM/LXC lifecycle, snapshots, backup audit, console |
 | **F6** Ansible | Dynamic inventory, playbook catalog, live runs |
 | **F7** AI Copilot | RCA on alerts, action plans with human approval |
 | **F8+** | Visual workflows, GitOps, SNMP, agent PTY & auto-update, Windows agent, external secret manager (OpenBao / HashiCorp Vault) |

@@ -19,6 +19,7 @@ PERMISSIONS: dict[str, str] = {
     "roles.manage": "Create and delete roles; change their permissions and LDAP group",
     "inventory.read": "View nodes, tags, groups and credential names (never secrets)",
     "inventory.manage": "Create, edit and delete nodes, tags, groups and capabilities",
+    "environments.manage": "Create, rename and delete environments (prod, staging, ...)",
     "credentials.manage": "Create, replace and delete vault credentials",
     "ssh.connect": "Open web SSH terminals on nodes with the SSH capability",
     "sftp.transfer": "Browse, download, upload, rename and delete files on nodes over SFTP",
@@ -28,6 +29,8 @@ PERMISSIONS: dict[str, str] = {
     "notifications.manage": "Configure notification channels (with their secrets) and rules",
     "containers.manage": "Start, stop, restart and remove containers and Compose stacks",
     "containers.exec": "Open interactive shells inside containers",
+    "proxmox.manage": "Power, snapshot, clone and migrate Proxmox VMs and containers",
+    "proxmox.console": "Open Proxmox consoles (VM serial, LXC; node shell also needs ssh.connect)",
 }
 
 ROLE_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,31}$"

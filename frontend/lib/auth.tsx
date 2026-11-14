@@ -18,7 +18,10 @@ export type Permission =
   | "monitoring.manage"
   | "notifications.manage"
   | "containers.manage"
-  | "containers.exec";
+  | "containers.exec"
+  | "environments.manage"
+  | "proxmox.manage"
+  | "proxmox.console";
 
 export type SessionUser = {
   username: string;

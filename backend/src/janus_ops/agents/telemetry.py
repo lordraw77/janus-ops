@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from janus_ops import scope as node_scope
 from janus_ops.agents.hub import AgentHub
 from janus_ops.agents.ingest import NAME
 from janus_ops.agents.router import SELECT, status_of
@@ -67,10 +68,11 @@ class Chart(BaseModel):
 async def node_chart(
     request: Request,
     node_id: uuid.UUID,
-    _: Reader,
+    session: Reader,
     name: Annotated[list[str], Query(max_length=20)],
     range: Literal["1h", "6h", "24h", "7d"] = "1h",
 ) -> Chart:
+    await node_scope.require_node(request, session, node_id)
     if not name or any(not NAME.match(n) for n in name):
         raise HTTPException(422, "invalid_metric")
     span, bucket = RANGES[range]
@@ -176,11 +178,18 @@ def _latest(values: dict[str, list[tuple[dict[str, str], float]]]) -> Latest:
 
 
 @router.get("/dashboard", response_model=Dashboard)
-async def dashboard(request: Request, _: Reader) -> Dashboard:
+async def dashboard(request: Request, session: Reader) -> Dashboard:
     hub: AgentHub = request.app.state.agents
     now = datetime.now(UTC)
+    scope_sql, scope_params = session.scope.sql("n")
     async with request.app.state.engine.connect() as conn:
-        nodes = list(await conn.execute(text(SELECT + " ORDER BY n.environment, n.name")))
+        nodes = list(
+            await conn.execute(
+                text(SELECT + f" WHERE {scope_sql} ORDER BY n.environment, n.name"),
+                scope_params,
+            )
+        )
+        visible = [r.id for r in nodes]
         latest_rows = await conn.execute(
             text(
                 "SELECT DISTINCT ON (p.series_id) s.node_id, s.name, s.labels, p.value"
@@ -238,8 +247,10 @@ async def dashboard(request: Request, _: Reader) -> Dashboard:
             text(
                 "SELECT coalesce(s.hard_state, 'pending') AS state, count(*) AS n"
                 " FROM service_check c LEFT JOIN check_state s ON s.check_id = c.id"
-                " WHERE c.enabled AND c.kind <> 'host' GROUP BY 1"
-            )
+                " WHERE c.enabled AND c.kind <> 'host'"
+                " AND c.node_id = ANY(CAST(:visible AS uuid[])) GROUP BY 1"
+            ),
+            {"visible": visible},
         ):
             services[r.state] = r.n
         problems = list(
@@ -255,10 +266,11 @@ async def dashboard(request: Request, _: Reader) -> Dashboard:
                     "  WHERE m.node_id = c.node_id))) AS in_downtime"
                     " FROM problem p JOIN service_check c ON c.id = p.check_id"
                     " JOIN node n ON n.id = c.node_id LEFT JOIN check_state s ON s.check_id = c.id"
-                    " WHERE p.closed_at IS NULL"
+                    " WHERE p.closed_at IS NULL AND c.node_id = ANY(CAST(:visible AS uuid[]))"
                     " ORDER BY CASE p.state WHEN 'crit' THEN 0 WHEN 'unknown' THEN 1 ELSE 2 END,"
                     " p.opened_at DESC"
-                )
+                ),
+                {"visible": visible},
             )
         )
 
@@ -322,7 +334,13 @@ async def dashboard(request: Request, _: Reader) -> Dashboard:
                 flapping=p.flapping,
             )
         )
-    hosts = {"up": 0, "down": 0, "unreachable": 0, "unmonitored": 0, "downtime": len(in_downtime)}
+    hosts = {
+        "up": 0,
+        "down": 0,
+        "unreachable": 0,
+        "unmonitored": 0,
+        "downtime": len(in_downtime & {str(v) for v in visible}),
+    }
     for card in cards:
         hosts[card.state] += 1
     return Dashboard(
