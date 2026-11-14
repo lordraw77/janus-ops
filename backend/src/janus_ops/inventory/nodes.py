@@ -451,6 +451,11 @@ async def update_node(
             await _write_relations(conn, node_id, body)
     except IntegrityError:
         raise HTTPException(409, "name_exists") from None
+    if body.capabilities is not None and not any(
+        c.kind == "agent" and c.enabled for c in body.capabilities
+    ):
+        # agent capability removed or disabled: its connection goes too
+        await request.app.state.agents.disconnect(str(node_id), 4403, "disabled")
     await record(
         request, session, "inventory.node_updated", "node", body.name or name, _summary(body)
     )
@@ -466,5 +471,6 @@ async def delete_node(node_id: uuid.UUID, request: Request, session: Manager) ->
     if name is None:
         raise HTTPException(404, "not_found")
     # Children keep existing: their parent_id becomes NULL (ON DELETE SET NULL)
+    await request.app.state.agents.disconnect(str(node_id), 4403, "disabled")
     await record(request, session, "inventory.node_deleted", "node", name)
     return Response(status_code=204)

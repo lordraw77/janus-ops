@@ -37,6 +37,12 @@
 > e libreria di snippet (FR-12). Migrazione `0005` (tabella `snippet`), permessi `sftp.transfer`
 > (operator) e `snippets.manage` (solo admin di default). Migrazione `0006`: credenziale
 > Proxmox con utente e password (`proxmox_password`, utente con realm `root@pam`), oltre al token API.
+>
+> **v0.11** — **fase F2**: agent Go (`agent/`, binario statico amd64/arm64), gateway WebSocket,
+> enrollment con token monouso e chiave ed25519 generata sul nodo (AMEND ADR-002), bootstrap via
+> SSH, telemetria con buffer su disco e ingest idempotente in TimescaleDB, dashboard NOC (esagono,
+> node card, "needs attention") e pagina nodo con grafici. Migrazione `0007`, permesso
+> `agents.manage` (operator). Avanzamento in §5.3.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -265,6 +271,10 @@ janus-ops/
 - *Opzioni*: (a) gRPC bidi su HTTP/2 — tipizzato, ma fragile con proxy TLS-inspecting e alcuni L7 LB; (b) WebSocket su HTTP/1.1 Upgrade + multiplexer di stream (es. yamux `[VERIFY: libreria]`) + messaggi protobuf — massima compatibilità con proxy; (c) SSH reverse tunnel — maturo ma porta 22 spesso bloccata e gestione chiavi più complessa.
 - *Decisione*: **(b)**. Un canale di controllo + stream dedicati per metriche, docker, exec, PTY.
 - *Conseguenze*: si implementano a mano heartbeat, backpressure e reconnect (backoff esponenziale con jitter). Autenticazione mTLS (cert per-agent da enrollment, vedi C7). Se un proxy TLS-inspecting rompe l'mTLS: fallback a token firmato a breve scadenza dentro il tunnel `OPEN`.
+- **AMEND Architect (v0.11)**: implementato in F2 con tre scostamenti, contratto in [`proto/agent-protocol.md`](../proto/agent-protocol.md).
+  1. *Autenticazione*: il fallback diventa la soluzione principale. L'agent genera sul nodo una chiave ed25519 (non lascia mai il nodo); a ogni connessione firma un nonce casuale del server legato a node id e host del server. Il token monouso del bootstrap registra la chiave (solo hash SHA-256 in DB, TTL 15 min, invalidato da un nuovo bootstrap). Motivi: il TLS è terminato da Caddy (ADR-009), quindi un certificato client non arriverebbe all'app senza una seconda porta e header fidati; funziona sulla 443 dietro proxy che ispezionano il TLS; nessuna CA da gestire o ruotare. Rischio residuo: chi intercetta il TLS (CA fidata dall'agent) e inoltra il challenge in tempo reale può impersonare l'agent per quella connessione, come con qualunque bearer; non può riusare la firma altrove né più tardi. Revoca = rifiuto della chiave (`revoked_at`).
+  2. *Codifica*: messaggi JSON (campo `t`) invece di protobuf: volumi bassi (≤ 500 nodi ogni 10 s), leggibili nei log, nessun codegen in due linguaggi; il campo `v` permette di cambiare codifica.
+  3. *Multiplexing*: rimandato a F4, quando serviranno gli stream Docker; in F2 c'è un solo canale. Sarà fatto con frame binari con id di stream sopra lo stesso WebSocket (yamux `[VERIFY]` non serve).
 
 **ADR-003 — Task queue e workflow**
 - *Opzioni*: (a) Celery + Canvas — maturo, ma sync-first e Canvas poco adatto a workflow con attese umane; (b) Taskiq (async) + workflow engine interno (DAG persistito in PG, step idempotenti) — coerente con FastAPI async, stato ispezionabile in SQL; (c) Temporal — durabilità eccellente, ma un servizio pesante in più da operare.
@@ -428,6 +438,30 @@ Razionale dell'ordine: F1 dà valore immediato senza agent e costruisce i matton
 | Vault credenziali (envelope encryption, segreti in sola scrittura) | ✅ | Test: cifratura legata alla riga, rotazione, nessun segreto in API/DB/audit; fingerprint uguale a `ssh-keygen` |
 | Command palette `Ctrl+K` | ⏳ | FR-05 |
 
+### 5.3 Avanzamento F2
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Agent Go statico (CGO off), nessuna porta in ascolto (NFR-01) | ✅ | CI: `file` → statically linked; E2E: `ldd` → not a dynamic executable, nessun socket in LISTEN dell'agent |
+| Bootstrap via SSH (FR-20): root o `sudo -n`, `uname -m`, systemd, copia binario, config 0600, unit con hardening | ✅ | 8 test con SSH in-process (token mai su riga di comando, errori `needs_root`, `unsupported_arch`, `systemd_required`, re-bootstrap); E2E su Debian 13 amd64 con systemd: online in 0,9 s |
+| Tunnel WSS in uscita, proxy HTTP(S) con CONNECT, CA custom (FR-21) | ✅ | Test Go con server TLS e proxy CONNECT; certificato non fidato → nessun dato inviato. E2E dietro squid non fatto (NFR-02 `OPEN`) |
+| Enrollment con token monouso, chiave ed25519, revoca, disinstallazione | ✅ | Test: firma sbagliata, nonce/host diversi, token scaduto o riusato, chiave clonata su altro nodo, capability disattivata (connessione chiusa subito), revoca e reintegro |
+| Telemetria ogni 5–15 s (FR-22): CPU, load, RAM/swap, disk I/O, file system, rete, uptime, processi, unit systemd fallite, porte in ascolto, top processi | ✅ | Test Go su procfs finto (rate, reset dei contatori, nomi di processo con parentesi, socket IPv4/IPv6); valori uguali a `df` sull'host |
+| Buffer su disco (bbolt, 24 h) e invio differito (FR-23, AC-05) | ✅ | Test Go: campioni non confermati reinviati dopo la riconnessione; ingest idempotente (indice unico `series_id, time`). E2E: server fermo 3 min → 27 punti, gap massimo 10,04 s |
+| Dashboard NOC (FR-24): esagono host, node card con CPU/RAM/disco e sparkline, "needs attention" | ✅ | Test API; screenshot. "Needs attention" usa soglie fisse finché F3 non porta check, problemi e notifiche |
+| Pagina nodo: agent, azioni, grafici 1h/6h/24h/7d, porte, processi, systemd | ✅ | Test API dei grafici; screenshot |
+| AC-04 su Debian **e Rocky**, amd64 **e arm64** | ⚠️ | Verificato su Debian 13 amd64; Rocky e arm64 non ancora provati |
+| Continuous aggregates 1m/1h, test di carico 500 nodi (NFR-05) | ⏳ | Rimandati: i grafici fino a 7 giorni leggono i dati grezzi con `time_bucket` |
+
+Decisioni (Security):
+- **Agent come root con hardening systemd**: serve root per leggere i socket di tutti i processi (porte in ascolto) e interrogare systemd; `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, `RestrictAddressFamilies` e scrittura solo in `/etc/janus-agent` (rimozione del token) e `/var/lib/janus-agent`.
+- **Il token non compare mai su una riga di comando**: viaggia solo nel file di configurazione (0600) caricato via SFTP; l'agent lo cancella dal file dopo l'enrollment.
+- **Policy locale** (`allow_exec`, `allow_pty`, `allow_docker`, tutte `false`): scritta nella config dal bootstrap, riportata al server e mostrata, mai modificabile dal server (C9). In F2 l'agent non esegue nulla per conto del server.
+- **CA dell'agent**: il proxy pubblica solo il certificato *pubblico* della CA interna di Caddy in un volume condiviso (`pki_public`); la chiave della CA resta nel volume di Caddy, non montato nell'app. Con certificati ACME pubblici gli agent usano le CA di sistema.
+- **Ingest robusto**: un punto non valido viene scartato, mai l'intero batch (bloccherebbe il buffer dell'agent); limite di 2000 serie per nodo contro label esplosive; timestamp accettati tra −48 h e +5 min.
+- **Una connessione per nodo**: una nuova connessione con la stessa chiave chiude la precedente (`replaced`); una chiave già registrata su un altro nodo (VM clonata) è rifiutata.
+- **Redis non introdotto**: la dashboard interroga l'API ogni 10 s (NFR-04 ≤ 30 s rispettato); Redis arriverà se servirà con il worker di F3.
+
 ### 5.2 Avanzamento F1
 
 | Elemento | Stato | Verifica |
@@ -464,7 +498,7 @@ Trust boundary: Browser ⇄ Server · Agent ⇄ Server · Server ⇄ target (SSH
 
 | Minaccia | Vettore | Mitigazione | Rischio residuo |
 |---|---|---|---|
-| S — Agent impersonato | Furto token di enrollment | Token monouso a TTL breve, solo hash in DB, mTLS dopo enrollment, revoca cert | Basso |
+| S — Agent impersonato | Furto token di enrollment o della chiave | Token monouso a TTL breve (15 min) solo come hash, mai su riga di comando; dopo l'enrollment chiave ed25519 sul nodo (0600) e firma di un nonce per connessione; revoca della chiave; chiave duplicata su altro nodo rifiutata | Basso |
 | S — Sessione utente rubata | XSS, furto cookie | Cookie httpOnly/Secure/SameSite, CSP rigorosa, TOTP | Basso |
 | T — Binario agent alterato | Server o canale compromesso durante update | Firma ed25519 con chiave offline, verifica sull'agent | Medio (se chiave di release compromessa) |
 | T — Manomissione audit | Admin DB | Append-only via grant, hash chain, export esterno | Medio |
@@ -571,12 +605,14 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F1 completata
-  Delivered:   piano v0.10, migrazioni 0001–0005, F0 e F1 complete: bastion SSH web con jump
-               host, pinning host key, registrazione/replay, browser SFTP, broadcast, snippet
+  Phase:       Engineer — F2 completata (AC-04 verificato solo su Debian amd64)
+  Delivered:   piano v0.11, migrazioni 0001–0007, F0–F2: bastion SSH web, SFTP, snippet;
+               agent Go (tunnel WSS, telemetria, buffer), enrollment con chiave ed25519,
+               bootstrap SSH, ingest Timescale idempotente, dashboard NOC e pagina nodo
   Open:        CSP per l'UI esportata; rotazione KEK; retention delle registrazioni;
                secret manager esterno (ADR-011, in roadmap F8+);
-               [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, yamux, Taskiq
-  Next:        F2 — agent Go (tunnel WSS, telemetria, buffer), enrollment mTLS, bootstrap SSH,
-               ingest Timescale, NOC dashboard
+               AC-04 su Rocky e arm64; E2E dietro squid (NFR-02); test di carico (NFR-05);
+               continuous aggregates; installazione manuale dell'agent senza SSH;
+               [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
+  Next:        F3 — check engine, isteresi, problemi, ack, downtime, dipendenze, notifiche
 ```

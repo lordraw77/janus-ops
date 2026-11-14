@@ -124,6 +124,7 @@ def test_builtin_roles_seeded(migrated: None) -> None:
         ("auditor", "audit.read"),
         ("auditor", "inventory.read"),
         ("auditor", "users.read"),
+        ("operator", "agents.manage"),
         ("operator", "inventory.manage"),
         ("operator", "inventory.read"),
         ("operator", "sftp.transfer"),

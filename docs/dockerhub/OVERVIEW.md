@@ -21,7 +21,7 @@
 Janus-Ops replaces the daily jump between Checkmk, Portainer/Dockhand, the Proxmox VE UI,
 MobaXterm and Ansible terminals with **one central inventory** and decoupled modules around it.
 It is built for **segmented, air-gapped and proxy-restricted networks**: no runtime downloads,
-self-hosted TLS, and a planned Go agent that only opens outbound connections.
+self-hosted TLS, and a Go agent that only opens outbound connections.
 
 | Module | Status |
 |---|---|
@@ -30,7 +30,7 @@ self-hosted TLS, and a planned Go agent that only opens outbound connections.
 | Inventory (nodes, tags, groups, capabilities) and encrypted credential vault | ✅ available |
 | SSH bastion: web terminal, jump host, host key pinning, session recording and replay | ✅ available |
 | SFTP browser, command broadcast, snippets | ✅ available |
-| `janus-agent`, telemetry, NOC dashboard | phase F2 |
+| `janus-agent` (SSH bootstrap, outbound-only), telemetry, NOC dashboard | ✅ available |
 | Alerting: thresholds, ack, downtimes, dependencies, notifications | phase F3 |
 | Docker containers & Compose stacks | phase F4 |
 | Proxmox VE clusters, VM/LXC, backup audit | phase F5 |
@@ -122,6 +122,7 @@ inventory). Permissions:
 | `ssh.connect` | open web SSH terminals (operator and admin by default) |
 | `sftp.transfer` | browse and transfer files over SFTP (operator and admin by default) |
 | `snippets.manage` | manage shared command snippets (admin by default) |
+| `agents.manage` | install, revoke, uninstall the agent on nodes (operator and admin by default) |
 
 Who can read the audit log is a checkbox in the roles table. Only admins can grant the admin role.
 Sessions last 8 hours with a 1-hour inactivity timeout; 5 failed attempts lock a username for
@@ -200,6 +201,10 @@ Variables read by the `janus-ops` process:
 | `JANUS_TERMINAL_IDLE_S` / `JANUS_TERMINAL_MAX_PER_USER` | `1800` / `10` | Terminal inactivity timeout; open terminals per user |
 | `JANUS_SSH_CONNECT_TIMEOUT_S` | `10` | SSH connect timeout |
 | `JANUS_SFTP_MAX_UPLOAD_MB` / `JANUS_SFTP_IDLE_S` | `1024` / `300` | SFTP upload limit; idle SFTP connections are closed after this many seconds |
+| `JANUS_AGENT_SERVER_URL` | URL used in the browser | `https://` URL agents connect to; must match the TLS certificate |
+| `JANUS_AGENT_CA_FILE` | `/var/lib/janus-ops/pki/root.crt` (Compose) | CA certificate (PEM) written to nodes for the agent; the Compose proxy publishes Caddy's internal root there |
+| `JANUS_AGENT_INTERVAL_S` | `10` | Telemetry interval, 5–15 seconds |
+| `JANUS_AGENT_DIR` | `/app/agent` | Agent binaries copied to nodes (built into the image) |
 | `JANUS_LDAP_TIMEOUT_S` | `5` | LDAP timeout, whole seconds |
 | `JANUS_LDAP_CA_FILE` | system CAs | CA bundle to verify `ldaps://` servers |
 | `JANUS_SESSION_TTL_S` / `JANUS_SESSION_IDLE_S` | `28800` / `3600` | Session lifetime / inactivity timeout, seconds |
@@ -241,6 +246,9 @@ Variables used by the Compose stack (`.env`):
 | `/api/v1/terminal/sessions` · `/host-keys` | Recorded sessions and replay; pinned SSH host keys |
 | `/api/v1/sftp/{node}/…` | SFTP browser: `home`, `list`, `download`, `upload` (raw body), `mkdir`, `rename`, `entry` |
 | `/api/v1/snippets` | Command snippets (personal and shared) |
+| `/api/v1/agent/ws` | Agent gateway (WebSocket; ed25519 challenge, one-time enrollment token) |
+| `/api/v1/agents` · `/{node}/bootstrap` · `/revoke` · `/uninstall` | Agent status and lifecycle over SSH |
+| `/api/v1/telemetry/dashboard` · `/telemetry/nodes/{node}` | NOC summary; per-node charts |
 | `/api/v1/health` | Liveness: the process is up |
 | `/api/v1/ready` | Readiness: database reachable, TimescaleDB loaded, schema up to date (`503` otherwise) |
 | `/api/docs` | OpenAPI documentation |

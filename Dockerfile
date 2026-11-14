@@ -4,6 +4,7 @@
 ARG NODE_IMAGE=node:24.22.3-alpine3.24
 ARG PYTHON_IMAGE=python:3.12.16-slim-trixie
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.31
+ARG GO_IMAGE=golang:1.27.4-bookworm
 
 # ---------------------------------------------------------------- web UI (static export)
 FROM ${NODE_IMAGE} AS ui
@@ -14,6 +15,21 @@ COPY res/ /src/res/
 COPY frontend/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
+
+# ---------------------------------------------------------------- janus-agent (Go)
+# Static binaries for every supported node architecture, cross-compiled on the build host;
+# the server copies the right one to a node during the SSH bootstrap.
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS agent
+WORKDIR /src/agent
+COPY agent/go.mod agent/go.sum ./
+RUN go mod download
+COPY agent/ ./
+ARG VERSION=dev
+RUN for arch in amd64 arm64; do \
+      CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+        -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/janus-agent-linux-$arch ./cmd/janus-agent; \
+    done
 
 # ---------------------------------------------------------------- Python virtualenv
 FROM ${UV_IMAGE} AS uv
@@ -45,11 +61,13 @@ RUN groupadd --system --gid 10001 janus \
 
 COPY --from=backend --chown=root:root /app/.venv /app/.venv
 COPY --from=ui --chown=root:root /src/frontend/out /app/static
+COPY --from=agent --chown=root:root /out /app/agent
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     JANUS_STATIC_DIR=/app/static \
+    JANUS_AGENT_DIR=/app/agent \
     JANUS_PORT=8000
 
 WORKDIR /app

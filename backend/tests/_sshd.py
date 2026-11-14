@@ -3,11 +3,13 @@
 The shell greets with user, terminal type and size, echoes input as `echo:<data>`, prints the
 current size on `size`, and exits on `exit`. TCP forwarding is allowed (jump host tests).
 SFTP serves `root` (a temporary directory) as `/`, with `/home/ops` as starting directory.
+Exec requests (`ssh host command`) go to `exec_handler(command) -> (stdout, exit status)`.
 """
 
 import asyncio
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +79,7 @@ class TestSSHD:
         self.host_key = asyncssh.generate_private_key("ssh-ed25519")
         self.client_key = asyncssh.generate_private_key("ssh-ed25519")
         self.port = 0
+        self.exec_handler: Callable[[str], tuple[str, int]] | None = None
         self._loop = asyncio.new_event_loop()
         self._server: Any = None
         self._ready = threading.Event()
@@ -95,7 +98,7 @@ class TestSSHD:
                 0,
                 server_host_keys=[self.host_key],
                 authorized_client_keys=authorized,
-                process_factory=_shell,
+                process_factory=self._process,
                 allow_pty=True,
                 sftp_factory=lambda chan: _ChrootSFTP(chan, str(self.root)),
             )
@@ -104,6 +107,16 @@ class TestSSHD:
 
         self._loop.run_until_complete(_start())
         self._loop.run_forever()
+
+    async def _process(self, process: asyncssh.SSHServerProcess[str]) -> None:
+        if process.command is None:
+            return await _shell(process)
+        if self.exec_handler is None:
+            process.stderr.write("exec not supported\n")
+            return process.exit(127)
+        out, status = self.exec_handler(process.command)
+        process.stdout.write(out)
+        process.exit(status)
 
     def start(self) -> "TestSSHD":
         self._thread.start()

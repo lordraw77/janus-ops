@@ -30,6 +30,21 @@ lint: ## Lint and type-check backend and frontend
 test: ## Unit tests (no external services)
 	cd backend && uv run pytest -m "not integration"
 
+# Go runs in a container when it is not installed locally
+GO := $(if $(shell command -v go 2>/dev/null),go,docker run --rm -v $(CURDIR)/agent:/src -w /src -e CGO_ENABLED=0 -e GOOS -e GOARCH golang:1.27.4-bookworm go)
+
+.PHONY: agent/test
+agent/test: ## Agent: gofmt check, vet and tests
+	cd agent && test -z "$$($(GO)fmt -l . 2>/dev/null || true)"
+	cd agent && $(GO) vet ./... && $(GO) test ./...
+
+.PHONY: agent/build
+agent/build: ## Agent: static binaries for amd64 and arm64 in agent/dist
+	for arch in amd64 arm64; do \
+	  cd $(CURDIR)/agent && GOOS=linux GOARCH=$$arch $(GO) build -trimpath \
+	    -ldflags "-s -w -X main.version=$(VERSION)" -o dist/janus-agent-linux-$$arch ./cmd/janus-agent; \
+	done
+
 .PHONY: test/integration
 test/integration: ## Integration tests against a throwaway TimescaleDB container
 	scripts/integration-test.sh

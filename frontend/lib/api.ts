@@ -89,6 +89,24 @@ const MESSAGES: Record<string, string> = {
   unreachable: "The server is not reachable.",
   host_key_mismatch: "The server's host key changed: reset the pin in Host keys if expected.",
   no_ssh_capability: "This node has no SSH capability.",
+  // agents
+  no_agent_capability: "Enable the Janus agent capability on this node first.",
+  agent_binary_missing: "The agent binary for this architecture is not available on the server.",
+  agent_server_url_not_https: "Agents need an https:// server URL (JANUS_AGENT_SERVER_URL).",
+  bootstrap_running: "An installation is already running on this node.",
+  needs_root: "The SSH account must be root or have passwordless sudo.",
+  unsupported_arch: "Unsupported CPU architecture: the agent runs on amd64 and arm64.",
+  systemd_required: "The agent needs a systemd host.",
+  upload_failed: "Copying the agent to the node failed.",
+  install_failed: "Installing the agent service failed: see the audit log.",
+  uninstall_failed: "Removing the agent failed.",
+  remote_command_failed: "A command on the node failed.",
+  not_enrolled: "This agent is not enrolled.",
+  ssh_no_ssh_capability: "This node has no SSH capability: it is needed to install the agent.",
+  ssh_unreachable: "The node is not reachable over SSH.",
+  ssh_auth_failed: "SSH authentication failed: check the node's credential.",
+  ssh_host_key_mismatch: "The node's SSH host key changed: reset the pin in Host keys if expected.",
+  ssh_no_credential: "The SSH capability has no credential.",
 };
 
 export function message(code: string, retryAfter?: number): string {

@@ -34,6 +34,25 @@ jobs:
         working-directory: .
         run: scripts/integration-test.sh
 
+  agent:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: Static binary, no runtime dependencies (NFR-01)
+        run: |
+          CGO_ENABLED=0 go build -o janus-agent ./cmd/janus-agent
+          file janus-agent | grep -q "statically linked"
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -52,7 +71,7 @@ jobs:
       - run: npm run build
 
   image:
-    needs: [backend, frontend]
+    needs: [backend, agent, frontend]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

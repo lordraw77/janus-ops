@@ -24,10 +24,14 @@ services:
     environment:
       JANUS_DOMAIN: ${JANUS_DOMAIN:-localhost}
       JANUS_TLS: ${JANUS_TLS:-internal}
+    # Publishes the internal CA's root certificate for agents (see the script)
+    entrypoint: ["/bin/sh", "/usr/local/bin/caddy-entrypoint.sh"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-entrypoint.sh:/usr/local/bin/caddy-entrypoint.sh:ro
       - caddy_data:/data
       - caddy_config:/config
+      - pki_public:/pki-public
     depends_on:
       janus-ops:
         condition: service_healthy
@@ -49,8 +53,14 @@ services:
       JANUS_TERMINAL_IDLE_S: ${JANUS_TERMINAL_IDLE_S:-1800}
       JANUS_TERMINAL_MAX_PER_USER: ${JANUS_TERMINAL_MAX_PER_USER:-10}
       JANUS_SFTP_MAX_UPLOAD_MB: ${JANUS_SFTP_MAX_UPLOAD_MB:-1024}
+      # Agents (F2): URL they connect to (default: the URL used in the browser) and the CA
+      # they trust for it (Caddy's internal root, published by the proxy)
+      JANUS_AGENT_SERVER_URL: ${JANUS_AGENT_SERVER_URL:-}
+      JANUS_AGENT_CA_FILE: ${JANUS_AGENT_CA_FILE-/var/lib/janus-ops/pki/root.crt}
+      JANUS_AGENT_INTERVAL_S: ${JANUS_AGENT_INTERVAL_S:-10}
     volumes:
       - recordings:/var/lib/janus-ops/recordings
+      - pki_public:/var/lib/janus-ops/pki:ro
     depends_on:
       setup:
         condition: service_completed_successfully
@@ -167,6 +177,7 @@ networks:
 
 volumes:
   recordings:
+  pki_public:
   caddy_data:
   caddy_config:
   pg_data:

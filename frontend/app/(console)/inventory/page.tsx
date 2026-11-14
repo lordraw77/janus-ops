@@ -397,10 +397,10 @@ function NodesTab({ groups }: { groups: Group[] }) {
               {shown.map((n) => (
                 <tr key={n.id}>
                   <td className="py-2 pr-3">
-                    <div className="flex items-center gap-1.5 font-semibold">
+                    <Link href={`/nodes/?id=${n.id}`} className="flex items-center gap-1.5 font-semibold hover:text-primary">
                       <Server className="h-3.5 w-3.5 text-telemetry" aria-hidden />
                       {n.name}
-                    </div>
+                    </Link>
                     {n.description && <div className="text-[11px] text-fg-muted">{n.description}</div>}
                   </td>
                   <td className="py-2 pr-3 font-mono text-fg-secondary">{n.address}</td>

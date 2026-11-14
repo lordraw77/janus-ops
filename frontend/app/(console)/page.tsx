@@ -1,155 +1,134 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import Link from "next/link";
-
-import { type Status, StatusBadge } from "@/components/StatusBadge";
-import { useResource } from "@/lib/api";
+import { AttentionTable, HexagonHealth, NodeCard } from "@/components/Noc";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Alert } from "@/components/ui";
+import type { Dashboard } from "@/lib/agents";
+import { api, message } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { CAPABILITIES, type CapabilityKind, ENVIRONMENTS, type InventoryNode } from "@/lib/inventory";
+import { ENVIRONMENTS } from "@/lib/inventory";
 
-const POLL_MS = 15_000;
+const POLL_MS = 10_000;
 
-type ReadyResponse = {
-  status: "ok" | "unavailable";
-  version: string;
-  checks: Record<string, string>;
-};
-
-type Probe =
-  | { kind: "loading" }
-  | { kind: "error" }
-  | { kind: "loaded"; data: ReadyResponse; at: Date };
+type ReadyResponse = { status: "ok" | "unavailable"; version: string; checks: Record<string, string> };
 
 const CHECK_LABELS: Record<string, string> = {
   database: "PostgreSQL",
-  timescaledb: "TimescaleDB extension",
-  schema: "Database schema",
+  timescaledb: "TimescaleDB",
+  schema: "Schema",
 };
 
-function checkStatus(value: string): Status {
-  return value === "ok" ? "ok" : "crit";
+/** Poll `load` every POLL_MS; state only changes in the async callbacks. */
+function usePoll<T>(load: () => Promise<T>): T | null {
+  const [value, setValue] = useState<T | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () =>
+      void load().then((v) => {
+        if (!cancelled) setValue(v);
+      });
+    tick();
+    const timer = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [load]);
+  return value;
 }
 
-function InventorySummary() {
-  const { data: nodes, error } = useResource<InventoryNode[]>("/nodes");
-  if (error) return null;
-  const count = (pred: (n: InventoryNode) => boolean) => (nodes ?? []).filter(pred).length;
+async function loadReady(): Promise<ReadyResponse | "error"> {
+  try {
+    // /ready answers 503 with a JSON body when a dependency is down: both are valid here
+    const res = await fetch("/api/v1/ready", { cache: "no-store" });
+    return (await res.json()) as ReadyResponse;
+  } catch {
+    return "error";
+  }
+}
+
+async function loadDashboard(): Promise<{ data: Dashboard | null; error: string | null }> {
+  const r = await api<Dashboard>("/telemetry/dashboard");
+  return r.ok ? { data: r.data, error: null } : { data: null, error: message(r.code) };
+}
+
+function ControlPlane() {
+  const ready = usePoll(loadReady);
   return (
-    <section className="rounded-lg border border-line bg-surface p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">Inventory</h2>
-        <Link href="/inventory/" className="text-[11px] text-primary hover:text-primary-hover">
-          Open →
-        </Link>
-      </div>
-      {!nodes ? (
-        <p className="text-sm text-fg-muted">Loading…</p>
-      ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-[auto_1fr_1fr]">
-          <div>
-            <div className="font-mono text-3xl font-bold tabular-nums">{nodes.length}</div>
-            <div className="text-[11px] text-fg-muted">nodes</div>
-          </div>
-          <dl className="space-y-1 font-mono text-xs">
-            {ENVIRONMENTS.map((env) => (
-              <div key={env} className="flex justify-between gap-3">
-                <dt className="text-fg-muted">{env}</dt>
-                <dd className="tabular-nums">{count((n) => n.environment === env)}</dd>
-              </div>
-            ))}
-          </dl>
-          <dl className="space-y-1 font-mono text-xs">
-            {(Object.keys(CAPABILITIES) as CapabilityKind[]).map((k) => (
-              <div key={k} className="flex justify-between gap-3">
-                <dt className="text-fg-muted">{CAPABILITIES[k].label}</dt>
-                <dd className="tabular-nums">
-                  {count((n) => n.capabilities.some((c) => c.kind === k && c.enabled))}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </div>
+    <section className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-line bg-surface px-4 py-2.5 text-xs">
+      <span className="font-semibold uppercase tracking-wider text-fg-muted">Control plane</span>
+      {ready === null && <span className="text-fg-muted">Checking…</span>}
+      {ready === "error" && (
+        <span className="flex items-center gap-2">
+          API not reachable <StatusBadge status="offline" />
+        </span>
+      )}
+      {ready !== null && ready !== "error" && (
+        <>
+          {Object.entries(ready.checks).map(([name, value]) => (
+            <span key={name} className="flex items-center gap-2">
+              {CHECK_LABELS[name] ?? name}
+              <StatusBadge status={value === "ok" ? "ok" : "crit"} />
+            </span>
+          ))}
+          <span className="ml-auto font-mono text-[11px] text-fg-muted">v{ready.version}</span>
+        </>
       )}
     </section>
   );
 }
 
+function Noc() {
+  const result = usePoll(loadDashboard);
+  if (result === null) return <p className="text-sm text-fg-muted">Loading…</p>;
+  if (result.error || !result.data) return <Alert>{result.error}</Alert>;
+  const dash = result.data;
+  const order = (env: string) => ENVIRONMENTS.indexOf(env as (typeof ENVIRONMENTS)[number]);
+  const nodes = [...dash.nodes].sort(
+    (a, b) =>
+      Number(a.state === "unmonitored") - Number(b.state === "unmonitored") ||
+      order(a.environment) - order(b.environment) ||
+      a.name.localeCompare(b.name),
+  );
+  return (
+    <>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_1fr]">
+        <HexagonHealth hosts={dash.hosts} />
+        <AttentionTable items={dash.attention} />
+      </div>
+      {nodes.length === 0 ? (
+        <p className="text-sm text-fg-muted">
+          No nodes yet. Add them in the <Link href="/inventory/" className="text-primary">inventory</Link>,
+          enable the Janus agent capability and install it from the node page.
+        </p>
+      ) : (
+        <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
+          {nodes.map((n) => (
+            <NodeCard key={n.node_id} node={n} />
+          ))}
+        </div>
+      )}
+      <p className="font-mono text-[10px] text-fg-muted">
+        updated {new Date(dash.generated_at).toLocaleTimeString()} · refresh every {POLL_MS / 1000}s
+      </p>
+    </>
+  );
+}
+
 export default function DashboardPage() {
   const { can } = useAuth();
-  const [probe, setProbe] = useState<Probe>({ kind: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        // /ready answers 503 with a JSON body when a dependency is down: both are valid here
-        const res = await fetch("/api/v1/ready", { cache: "no-store" });
-        const data = (await res.json()) as ReadyResponse;
-        if (!cancelled) setProbe({ kind: "loaded", data, at: new Date() });
-      } catch {
-        if (!cancelled) setProbe({ kind: "error" });
-      }
-    }
-
-    load();
-    const timer = setInterval(load, POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, []);
-
   return (
-    <div className="max-w-3xl space-y-4">
+    <div className="space-y-4">
       <h1 className="text-lg font-semibold">Dashboard</h1>
-
-      <section className="rounded-lg border border-line bg-surface p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
-            Control plane
-          </h2>
-          {probe.kind === "loaded" && (
-            <span className="font-mono text-[11px] text-fg-muted">
-              v{probe.data.version} · checked {probe.at.toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-
-        {probe.kind === "loading" && <p className="text-sm text-fg-muted">Checking…</p>}
-
-        {probe.kind === "error" && (
-          <div className="flex items-center justify-between text-sm">
-            <span>API not reachable</span>
-            <StatusBadge status="offline" />
-          </div>
-        )}
-
-        {probe.kind === "loaded" && (
-          <ul className="divide-y divide-line text-sm">
-            {Object.entries(probe.data.checks).map(([name, value]) => (
-              <li key={name} className="flex items-center justify-between py-2">
-                <span>
-                  {CHECK_LABELS[name] ?? name}
-                  {value !== "ok" && (
-                    <span className="ml-2 font-mono text-xs text-fg-muted">{value}</span>
-                  )}
-                </span>
-                <StatusBadge status={checkStatus(value)} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {can("inventory.read") && <InventorySummary />}
-
-      <p className="text-xs text-fg-muted">
-        NOC widgets (host and service hexagons, node cards, unhandled problems) arrive with
-        phases F2–F3.
-      </p>
+      <ControlPlane />
+      {can("inventory.read") ? (
+        <Noc />
+      ) : (
+        <p className="text-sm text-fg-muted">The NOC view needs the inventory.read permission.</p>
+      )}
     </div>
   );
 }

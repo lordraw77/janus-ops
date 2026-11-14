@@ -85,7 +85,7 @@ get the union. The built-in roles:
 | Role | LDAP group | Default permissions |
 |---|---|---|
 | admin | `janus-admins` | all (fixed) |
-| operator | `janus-operators` | `inventory.read`, `inventory.manage`, `ssh.connect`, `sftp.transfer` |
+| operator | `janus-operators` | `inventory.read`, `inventory.manage`, `ssh.connect`, `sftp.transfer`, `agents.manage` |
 | auditor | `janus-auditors` | `audit.read`, `users.read`, `inventory.read` |
 
 | Permission | Allows |
@@ -100,6 +100,7 @@ get the union. The built-in roles:
 | `ssh.connect` | open web SSH terminals on nodes with the SSH capability |
 | `sftp.transfer` | browse, download, upload, rename and delete files on nodes over SFTP |
 | `snippets.manage` | create, edit and delete shared command snippets |
+| `agents.manage` | install, revoke and uninstall the Janus agent on nodes (it runs as root) |
 
 Who can read the audit log is therefore a checkbox in the roles table. Admins can create custom
 roles (the LDAP group is created for them). Permission changes apply immediately, also to
@@ -157,6 +158,32 @@ terminals can be open in tabs; a jump host configured on the node is used automa
 - **Snippets**: personal command snippets, plus shared ones managed with `snippets.manage`.
   The server types them (one line, one Enter), so the audit log records exactly what was sent to
   which node.
+
+### Agent and NOC dashboard
+
+`janus-agent` is a static Go binary (Linux amd64/arm64, systemd) that sends telemetry every
+10 seconds: CPU, load, memory and swap, disk I/O, file systems, network, uptime, failed systemd
+units, listening ports and top processes. It only connects **out** to the server over HTTPS
+(port 443, through an HTTP(S) proxy if configured) and opens no port.
+
+1. In **Inventory**, give the node an *SSH* capability (root, or a user with passwordless `sudo`)
+   and the *Janus agent* capability.
+2. Open the node (click its name) and press **Install via SSH**. Janus-Ops copies the agent, writes
+   `/etc/janus-agent/config.yaml` (0600) with a one-time enrollment token and starts the
+   `janus-agent` service; the node is online within seconds.
+3. On first connection the agent registers an ed25519 key generated on the node; the token is
+   then deleted. **Revoke** refuses the key, **Uninstall** removes everything over SSH,
+   **Reinstall** upgrades the binary to the server's version.
+
+While the server is unreachable the agent keeps up to 24 hours of samples on disk and sends them
+when it reconnects. Agents connect to the URL used in the browser (or `JANUS_AGENT_SERVER_URL`)
+and trust Caddy's internal CA, which the proxy container publishes: with `JANUS_TLS=internal`,
+**`JANUS_DOMAIN` must be the host name or IP the agents use**, so that the certificate matches.
+
+The **Dashboard** shows a host-health hexagon, a card per node (CPU, RAM, disk, CPU sparkline)
+and the items needing attention (agent offline, file system ≥ 85 %, memory ≥ 90 %, failed units).
+Thresholds are fixed until the alerting engine (F3). Each node page has charts over 1 h – 7 days.
+Protocol: [proto/agent-protocol.md](proto/agent-protocol.md).
 
 ### Two-factor authentication (optional)
 
@@ -292,8 +319,9 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 > 🚧 **Pre-alpha (0.1.0).** Available today: the single `lordraw77/janus-ops` image, LDAP
 > sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
 > audit log, inventory and credential vault (phase F0), **web SSH bastion** with host key
-> pinning, session recording, SFTP browser, command broadcast and snippets (phase F1 complete),
-> the F0–F3 database schema, the Compose stack and CI. Next: F2, agent and telemetry.
+> pinning, session recording, SFTP browser, command broadcast and snippets (phase F1),
+> **Go agent with SSH bootstrap, telemetry and NOC dashboard** (phase F2), the Compose stack and
+> CI. Next: F3, alerting.
 
 | Phase | Scope |
 |---|---|
@@ -313,17 +341,17 @@ Details, acceptance criteria and open decisions: [docs/PLAN.md](docs/PLAN.md).
 
 ```
 janus-ops/
+├── agent/           janus-agent (Go): telemetry, disk buffer, outbound WebSocket
+├── proto/           agent ⇄ server protocol
 ├── backend/         FastAPI control plane (package janus_ops, Alembic migrations, tests)
 ├── frontend/        Next.js web UI, exported as static files into the image
 ├── deploy/          compose.yaml, compose.build.yaml, Caddyfile, .env.example
 ├── scripts/         gen-env, integration tests, release
 ├── docs/            specs, PLAN (ADRs, roadmap), Docker Hub overview
 ├── res/             Brand & design resources (logo, favicons, tokens, mockups)
-├── Dockerfile       Single image: UI build → Python venv → non-root runtime
+├── Dockerfile       Single image: UI build, agent binaries, Python venv → non-root runtime
 └── Makefile         Entry points (`make help`)
 ```
-
-Planned with later phases: `agent/` (Go, F2) and `proto/` (agent ⇄ server contracts).
 
 ## Security principles
 

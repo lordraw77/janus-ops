@@ -139,7 +139,7 @@ def me(c: TestClient) -> dict[str, Any]:
         (
             "bob",
             ["operator"],
-            ["inventory.manage", "inventory.read", "sftp.transfer", "ssh.connect"],
+            ["agents.manage", "inventory.manage", "inventory.read", "sftp.transfer", "ssh.connect"],
         ),
         ("carol", ["auditor"], ["audit.read", "inventory.read", "users.read"]),
     ],
@@ -357,6 +357,7 @@ def test_union_of_permissions_for_several_roles() -> None:
             info = me(olga)
             assert info["roles"] == ["auditor", "operator"]
             assert info["permissions"] == [
+                "agents.manage",
                 "audit.read",
                 "inventory.manage",
                 "inventory.read",

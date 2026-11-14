@@ -78,6 +78,22 @@ class Settings(BaseSettings):
     sftp_max_upload_mb: int = Field(default=1024, ge=1, le=102400)
     sftp_idle_s: int = Field(default=300, ge=30, le=3600)
 
+    # --- Agent and telemetry (F2)
+    agent_dir: Path | None = Field(
+        default=None, description="Directory with janus-agent-linux-<arch> binaries for bootstrap"
+    )
+    agent_server_url: str | None = Field(
+        default=None,
+        description="https:// URL agents connect to; unset = the URL the operator is using",
+    )
+    agent_ca_file: Path | None = Field(
+        default=None,
+        description="CA certificate (PEM) agents trust for agent_server_url, besides system CAs",
+    )
+    agent_interval_s: int = Field(default=10, ge=5, le=15)
+    agent_enroll_ttl_s: int = Field(default=900, ge=60, le=86400)
+    agent_bootstrap_wait_s: int = Field(default=45, ge=0, le=300)
+
     # --- Sessions
     session_ttl_s: int = Field(default=8 * 3600, ge=300, le=7 * 86400)
     session_idle_s: int = Field(default=3600, ge=60, le=86400)
@@ -150,7 +166,18 @@ class Settings(BaseSettings):
             raise ValueError("must start with postgresql+asyncpg://")
         return value
 
-    @field_validator("static_dir", "recordings_dir", "ldap_ca_file", mode="before")
+    @field_validator("agent_server_url")
+    @classmethod
+    def _agent_url_https(cls, value: str | None) -> str | None:
+        if not value or not value.strip():
+            return None  # empty = derive from the request
+        if not value.startswith("https://"):
+            raise ValueError("must start with https://")
+        return value.rstrip("/")
+
+    @field_validator(
+        "static_dir", "recordings_dir", "ldap_ca_file", "agent_dir", "agent_ca_file", mode="before"
+    )
     @classmethod
     def _empty_path_is_unset(cls, value: object) -> object:
         # JANUS_RECORDINGS_DIR= (empty) must mean "off", not Path("") == current directory

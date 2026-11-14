@@ -13,6 +13,9 @@ from fastapi.staticfiles import StaticFiles
 
 from janus_ops import __version__, health
 from janus_ops.admin import audit_log, roles, users
+from janus_ops.agents import gateway, telemetry
+from janus_ops.agents import router as agents
+from janus_ops.agents.hub import AgentHub
 from janus_ops.auth.ldap import DirectoryBackend, LdapDirectory
 from janus_ops.auth.router import router as auth_router
 from janus_ops.auth.service import AuthService
@@ -75,6 +78,8 @@ def create_app(
         app.state.vault = Vault(app.state.auth.box)
         app.state.terminals = terminal.TerminalCounter()
         app.state.sftp = sftp.SftpPool(engine, app.state.vault, settings)
+        app.state.agents = AgentHub()
+        app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
         reaper = asyncio.create_task(sftp.reaper(app.state.sftp, engine))
         if settings.recordings_dir is not None:
             settings.recordings_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -85,6 +90,7 @@ def create_app(
             with contextlib.suppress(asyncio.CancelledError):
                 await reaper
             app.state.sftp.close_all()
+            await app.state.agents.close_all()
             await engine.dispose()
 
     app = FastAPI(
@@ -124,6 +130,9 @@ def create_app(
         terminal.router,
         sftp.router,
         snippets.router,
+        gateway.router,
+        agents.router,
+        telemetry.router,
     ):
         app.include_router(module_router, prefix=API_PREFIX)
     for router in extra_routers:

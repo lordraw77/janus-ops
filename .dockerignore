@@ -1,5 +1,6 @@
-# Only what the Dockerfile copies: backend/, frontend/, res/
+# Only what the Dockerfile copies: agent/, backend/, frontend/, res/
 *
+!agent/
 !backend/
 !frontend/
 !res/
@@ -14,6 +15,8 @@
 **/node_modules
 **/.next
 **/out
+agent/dist
+agent/janus-agent
 frontend/public
 **/.env
 **/.env.*
