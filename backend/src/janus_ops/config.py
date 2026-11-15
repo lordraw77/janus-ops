@@ -187,6 +187,12 @@ class Settings(BaseSettings):
             raise ValueError("must start with postgresql+asyncpg://")
         return value
 
+    @field_validator("ai_api_key", mode="before")
+    @classmethod
+    def _empty_key_is_unset(cls, value: object) -> object:
+        # JANUS_AI_API_KEY= (empty in the env file) means "no key", not an empty bearer token
+        return None if value is None or (isinstance(value, str) and not value.strip()) else value
+
     @field_validator("ai_base_url")
     @classmethod
     def _ai_url_https(cls, value: str | None) -> str | None:

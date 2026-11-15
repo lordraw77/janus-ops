@@ -147,6 +147,10 @@ def test_chat_returns_the_first_answer_and_sends_the_key() -> None:
             httpx2.MockTransport(lambda r: (_ for _ in ()).throw(httpx2.ConnectError("down"))),
             "ai_unreachable",
         ),
+        (
+            httpx2.MockTransport(lambda r: (_ for _ in ()).throw(httpx2.ReadTimeout("slow"))),
+            "ai_timeout",
+        ),
     ],
 )
 def test_chat_errors_carry_stable_codes_only(transport: httpx2.MockTransport, code: str) -> None:
@@ -154,3 +158,9 @@ def test_chat_errors_carry_stable_codes_only(transport: httpx2.MockTransport, co
         asyncio.run(llm.chat(_settings(), [], transport))
     assert exc.value.code == code
     assert "secret" not in exc.value.code
+
+
+def test_an_empty_api_key_means_no_key() -> None:
+    assert make_settings(ai_api_key="").ai_api_key is None
+    assert make_settings(ai_api_key="   ").ai_api_key is None
+    assert make_settings(ai_api_key="sk-x").ai_api_key is not None

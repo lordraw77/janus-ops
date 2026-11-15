@@ -34,6 +34,9 @@ async def chat(settings: Settings, messages: list[dict[str, str]], transport: An
             response = await http.post(
                 f"{settings.ai_base_url}/chat/completions", json=body, headers=headers
             )
+    except httpx2.TimeoutException:
+        # a reasoning model can take minutes: a slow answer is not an unreachable endpoint
+        raise AIError("ai_timeout") from None
     except httpx2.HTTPError:
         raise AIError("ai_unreachable") from None
     if response.status_code != 200:

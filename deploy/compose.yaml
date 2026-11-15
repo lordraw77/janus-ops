@@ -58,6 +58,11 @@ services:
       JANUS_AGENT_SERVER_URL: ${JANUS_AGENT_SERVER_URL:-}
       JANUS_AGENT_CA_FILE: ${JANUS_AGENT_CA_FILE-/var/lib/janus-ops/pki/root.crt}
       JANUS_AGENT_INTERVAL_S: ${JANUS_AGENT_INTERVAL_S:-10}
+      # AI Copilot (F7): off unless the endpoint and the model are set
+      JANUS_AI_BASE_URL: ${JANUS_AI_BASE_URL:-}
+      JANUS_AI_MODEL: ${JANUS_AI_MODEL:-}
+      JANUS_AI_API_KEY: ${JANUS_AI_API_KEY:-}
+      JANUS_AI_TIMEOUT_S: ${JANUS_AI_TIMEOUT_S:-120}
     volumes:
       - recordings:/var/lib/janus-ops/recordings
       - pki_public:/var/lib/janus-ops/pki:ro
