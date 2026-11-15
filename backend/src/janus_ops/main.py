@@ -89,7 +89,7 @@ def create_app(
         app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
         app.state.docker = DockerAccess(engine, app.state.vault, settings, app.state.agents)
         app.state.proxmox = ProxmoxAccess(engine, app.state.vault)
-        app.state.check_engine = check_engine.Engine(engine, app.state.agents)
+        app.state.check_engine = check_engine.Engine(engine, app.state.agents, app.state.proxmox)
         app.state.dispatcher = notify.Dispatcher(engine, app.state.vault)
         tasks = [asyncio.create_task(sftp.reaper(app.state.sftp, engine))]
         if settings.monitoring_enabled:

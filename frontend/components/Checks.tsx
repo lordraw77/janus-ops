@@ -57,6 +57,7 @@ export function CheckEditor({
     } else if (kind === "systemd") params = { unit: str(f.get("unit")) };
     else if (kind === "port") params = { port: num(f.get("port")), proto: f.get("proto") };
     else if (kind === "tcp") params = { port: num(f.get("port")), host: str(f.get("host")) };
+    else if (kind === "backup") params = { max_age_h: num(f.get("max_age_h")) ?? undefined };
     else if (kind === "http")
       params = {
         url: str(f.get("url")),
@@ -141,6 +142,11 @@ export function CheckEditor({
               </Field>
             )}
           </div>
+        )}
+        {kind === "backup" && (
+          <Field label="Max backup age (hours, empty = per job schedule)">
+            <TextInput name="max_age_h" type="number" min={1} max={2160} defaultValue={String(p.max_age_h ?? "")} />
+          </Field>
         )}
         {kind === "http" && (
           <>

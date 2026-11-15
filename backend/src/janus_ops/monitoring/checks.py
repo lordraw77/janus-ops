@@ -7,6 +7,8 @@ Kinds:
 - port:    something listens on a port, from the agent's facts
 - tcp:     the server can open a TCP connection to the node (no agent needed); latency thresholds
 - http:    the server gets an expected HTTP status (no agent needed); latency thresholds
+- backup:  the Proxmox cluster behind the node has no guest without a recent backup (FR-53):
+           failed or missing = CRIT, stale or not in any job = WARN. Needs the PVE access.
 """
 
 import asyncio
@@ -26,9 +28,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops.agents.ingest import LABEL_KEY, NAME
+from janus_ops.proxmox.access import ProxmoxAccess
+from janus_ops.proxmox.backup_audit import collect as collect_backups
+from janus_ops.proxmox.client import PveError
 
 State = Literal["ok", "warn", "crit", "unknown"]
-Kind = Literal["host", "metric", "systemd", "port", "tcp", "http"]
+Kind = Literal["host", "metric", "systemd", "port", "tcp", "http", "backup"]
 FACTS_STALE = timedelta(minutes=3)
 METRIC_STALE = timedelta(minutes=5)
 MAX_OUTPUT = 1000
@@ -80,6 +85,11 @@ class HttpParams(_Params):
     timeout_s: float = Field(default=10, gt=0, le=60)
 
 
+class BackupParams(_Params):
+    # longer than the schedule of the jobs when set; default: each guest's own job period
+    max_age_h: int | None = Field(default=None, ge=1, le=24 * 90)
+
+
 PARAMS: dict[str, type[_Params]] = {
     "host": HostParams,
     "metric": MetricParams,
@@ -87,6 +97,7 @@ PARAMS: dict[str, type[_Params]] = {
     "port": PortParams,
     "tcp": TcpParams,
     "http": HttpParams,
+    "backup": BackupParams,
 }
 # kinds whose value can be compared with thresholds
 THRESHOLDS = {"metric", "tcp", "http"}
@@ -277,11 +288,40 @@ async def _http(c: Check) -> Result:
     return Result(state, f"HTTP {status} in {ms:.0f} ms", {"latency_ms": ms})
 
 
+async def _backup(c: Check, proxmox: ProxmoxAccess | None) -> Result:
+    p = BackupParams.model_validate(c.params)
+    if proxmox is None:
+        return Result("unknown", "Proxmox access not available")
+    try:
+        audit = await collect_backups(
+            proxmox, c.node_id, p.max_age_h * 3600 if p.max_age_h else None
+        )
+    except PveError as exc:
+        return Result("unknown", f"Proxmox: {exc.code}")
+    s = audit["summary"]
+    bad = s.get("failed", 0) + s.get("missing", 0)
+    attention = s.get("stale", 0) + s.get("unscheduled", 0)
+    if not bad and not attention:
+        return Result("ok", f"{s.get('ok', 0)} guests with a recent backup", {"attention": 0})
+    rows = [g for g in audit["guests"] if g["status"] != "ok"]
+    shown = ", ".join(f"{g['vmid']} {g['status']}" for g in rows[:8])
+    if len(rows) > 8:
+        shown += f" (+{len(rows) - 8})"
+    head = f"{bad} failed or missing, {attention} stale or unscheduled"
+    return Result("crit" if bad else "warn", f"{head}: {shown}", {"attention": bad + attention})
+
+
 async def evaluate(
-    conn: AsyncConnection, c: Check, agent_online: bool, last_seen: datetime | None
+    conn: AsyncConnection,
+    c: Check,
+    agent_online: bool,
+    last_seen: datetime | None,
+    proxmox: ProxmoxAccess | None = None,
 ) -> Result:
     """One evaluation; never raises (an error is an UNKNOWN result)."""
     try:
+        if c.kind == "backup":
+            return await _backup(c, proxmox)
         if c.kind == "host":
             if agent_online:
                 return Result("ok", "Agent connected")

@@ -28,8 +28,8 @@ from janus_ops.admin.common import record
 from janus_ops.auth.deps import require_node_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.containers.router import _close, _ws_session
-from janus_ops.proxmox import backups
 from janus_ops.proxmox.access import Cluster, ProxmoxAccess
+from janus_ops.proxmox.backup_audit import collect as backup_collect
 from janus_ops.proxmox.client import PveError, ssl_context
 
 log = logging.getLogger(__name__)
@@ -43,7 +43,6 @@ PVE_NODE = r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$"
 SNAPSHOT = r"^[A-Za-z][A-Za-z0-9_-]{1,39}$"
 UPID = re.compile(r"^UPID:[A-Za-z0-9-]{1,63}:[0-9A-Fa-f:]+:[A-Za-z0-9_-]+:[^/\s]*:[^/\s]+:$")
 HIDDEN_CONFIG = {"cipassword"}  # PVE masks it already; never pass it on
-FAILED_TASKS = 10
 CONSOLE_IDLE_S = 1800
 STATUS = {
     "no_proxmox_capability": 404,
@@ -463,111 +462,12 @@ async def backup_audit(
     _: Reader,
     max_age_h: Annotated[int | None, Query(ge=1, le=24 * 90)] = None,
 ) -> dict[str, Any]:
-    resources, jobs = await asyncio.gather(
-        _call(request, key, "GET", "/cluster/resources"),
-        _call(request, key, "GET", "/cluster/backup"),
-    )
-    guests = [r for r in resources if r.get("type") in ("qemu", "lxc")]
-    online = {
-        r["node"] for r in resources if r.get("type") == "node" and r.get("status") == "online"
-    }
-    stores: dict[str, tuple[str, str]] = {}  # shared storages are read once
-    for r in resources:
-        if r.get("type") != "storage" or r.get("status") != "available":
-            continue
-        if "backup" not in (r.get("content") or "").split(",") or r["node"] not in online:
-            continue
-        name = r["storage"] if r.get("shared") else f"{r['node']}/{r['storage']}"
-        stores.setdefault(name, (r["node"], r["storage"]))
-
-    errors: list[str] = []
-
-    async def content(node: str, storage: str) -> list[dict[str, Any]]:
-        try:
-            rows: list[dict[str, Any]] = await _access(request).call(
-                str(key),
-                "GET",
-                f"/nodes/{node}/storage/{quote(storage, safe='')}/content",
-                params={"content": "backup"},
-            )
-            return rows
-        except PveError as exc:
-            errors.append(f"{storage}@{node}: {exc.code}")
-            return []
-
-    async def failed(node: str) -> list[dict[str, Any]]:
-        try:
-            rows: list[dict[str, Any]] = await _access(request).call(
-                str(key),
-                "GET",
-                f"/nodes/{node}/tasks",
-                params={"typefilter": "vzdump", "errors": 1, "limit": FAILED_TASKS},
-            )
-            return rows
-        except PveError as exc:
-            errors.append(f"tasks@{node}: {exc.code}")
-            return []
-
-    archives_lists, failed_lists = await asyncio.gather(
-        asyncio.gather(*(content(n, s) for n, s in stores.values())),
-        asyncio.gather(*(failed(n) for n in sorted(online))),
-    )
-    archives = [a for rows in archives_lists for a in rows]
-    failed_tasks = [t for rows in failed_lists for t in rows if t.get("status") != "OK"]
-    failures: list[tuple[int, int]] = []
-
-    async def parse(t: dict[str, Any]) -> None:
-        at = int(t.get("endtime") or t.get("starttime") or 0)
-        if str(t.get("id") or "").isdigit():
-            failures.append((int(t["id"]), at))
-        try:
-            lines = await _access(request).call(
-                str(key),
-                "GET",
-                f"/nodes/{t['node']}/tasks/{quote(t['upid'], safe='')}/log",
-                params={"limit": 2000},
-            )
-        except PveError:
-            return
-        for vmid in backups.failures_from_log([line.get("t", "") for line in lines]):
-            failures.append((vmid, at))
-
-    await asyncio.gather(*(parse(t) for t in failed_tasks))
-    rows = backups.audit(
-        guests, jobs, archives, failures, int(time.time()), max_age_h * 3600 if max_age_h else None
-    )
-    summary: dict[str, int] = {}
-    for r in rows:
-        summary[r["status"]] = summary.get(r["status"], 0) + 1
-    return {
-        "max_age_h": max_age_h,
-        "summary": summary,
-        "guests": rows,
-        "jobs": [
-            {
-                "id": j.get("id"),
-                "enabled": str(j.get("enabled", 1)) != "0",
-                "schedule": j.get("schedule") or j.get("starttime"),
-                "storage": j.get("storage"),
-                "node": j.get("node"),
-                "selection": "all"
-                if str(j.get("all", 0)) == "1"
-                else f"pool {j['pool']}"
-                if j.get("pool")
-                else j.get("vmid"),
-                "exclude": j.get("exclude"),
-                "mode": j.get("mode"),
-                "comment": j.get("comment"),
-            }
-            for j in jobs
-        ],
-        "failed_tasks": [
-            {k: t.get(k) for k in ("upid", "node", "id", "status", "starttime", "endtime")}
-            for t in failed_tasks
-        ],
-        "storages": sorted(stores),
-        "errors": errors,
-    }
+    try:
+        return await backup_collect(
+            _access(request), str(key), max_age_h * 3600 if max_age_h else None
+        )
+    except PveError as exc:
+        raise _http(exc) from None
 
 
 # ---------------------------------------------------------------- console

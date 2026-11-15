@@ -516,8 +516,8 @@ Decisioni (Security):
 | Ciclo di vita: start/shutdown/reboot/stop/suspend/resume, snapshot (crea/elimina/rollback), clone, migrazione, task con log (FR-51) | ✅ parziale | Test con PVE finto (reboot) e unitari; sul cluster reale **non** sono state eseguite azioni che modificano le VM |
 | Console LXC e shell nodo via termproxy (xterm.js); VM tramite porta seriale (FR-52) | ✅ parziale | E2E: console LXC reale con prompt di login; noVNC (grafica) non incluso |
 | Audit backup: mancanti, falliti, troppo vecchi, senza job; soglia dedotta dalla schedule di ogni job (FR-53) | ✅ | Test unitari sulle regole; E2E: 2 guest senza backup rilevati su 12 |
-| Backup in PBS e replica | ⏳ | I contenuti PBS sono letti come qualunque storage `backup`; non provato con un PBS reale |
-| Alert dai backup (check verso il motore F3) | ⏳ | L'audit è consultabile ma non genera ancora problemi |
+| Backup in PBS e replica | ⏳ | I contenuti PBS sono letti come qualunque storage `backup` (test con la forma PBS di PVE, fixture); **da provare con un PBS reale**: il server non era raggiungibile da questo ambiente |
+| Alert dai backup (check `backup` verso il motore F3) | ✅ | Test unitari: nessun backup o backup falliti → CRIT, backup vecchi o guest fuori da ogni job → WARN, errore PVE → UNKNOWN, `max_age_h` rispettato. Audit condiviso tra API e motore (`proxmox/backup_audit.py`) |
 
 Decisioni (Security):
 - **Credenziali nel vault**, mai nel browser; utente con 2FA non supportato con password: usare un token API.

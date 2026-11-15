@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from janus_ops.agents.hub import AgentHub
 from janus_ops.monitoring.checks import Check, Result, clip, evaluate
+from janus_ops.proxmox.access import ProxmoxAccess
 
 log = logging.getLogger(__name__)
 
@@ -122,9 +123,12 @@ WHERE c.kind = 'host' AND c.enabled AND s.hard_state = 'crit'
 
 
 class Engine:
-    def __init__(self, engine: AsyncEngine, hub: AgentHub) -> None:
+    def __init__(
+        self, engine: AsyncEngine, hub: AgentHub, proxmox: ProxmoxAccess | None = None
+    ) -> None:
         self.db = engine
         self.hub = hub
+        self.proxmox = proxmox  # for the `backup` kind
         self.wake = asyncio.Event()
 
     async def run(self) -> None:
@@ -172,7 +176,7 @@ class Engine:
             result = Result("unknown", "Agent not connected")
         else:
             async with self.db.connect() as conn:
-                result = await evaluate(conn, check, online, row.last_seen_at)
+                result = await evaluate(conn, check, online, row.last_seen_at, self.proxmox)
         unreachable = row.parent_id is not None and str(row.parent_id) in down
         prev = (
             Prev(row.state, row.hard_state, row.consecutive, row.recent, row.is_flapping)
