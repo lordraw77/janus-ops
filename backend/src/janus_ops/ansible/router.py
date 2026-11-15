@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops.admin.common import record
-from janus_ops.ansible import git, runner
+from janus_ops.ansible import git, runner, sftp_source
 from janus_ops.ansible.catalog import (
     MAX_FILE_BYTES,
     MAX_UPLOAD_BYTES,
@@ -31,6 +31,7 @@ from janus_ops.ansible.catalog import (
     unpack_archive,
     validate_rel_path,
 )
+from janus_ops.ansible.survey import parse_survey, resolve, survey_path
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.scope import visible_ids
@@ -44,6 +45,7 @@ Runner = Annotated[Session, Depends(require_permission("ansible.run"))]
 
 WRITABLE_KINDS = frozenset({"upload", "editor"})
 RUN_NODE_LIMIT = 200
+RUN_SURVEY_LIMIT = 50
 NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$"
 STATUS_413 = {"upload_too_large", "file_too_large", "tree_too_large", "archive_too_large"}
 STATUS_502 = {"git_failed", "git_timeout"}
@@ -59,7 +61,7 @@ def _catalog_error(exc: CatalogError) -> HTTPException:
 
 class SourceIn(BaseModel):
     name: str = Field(pattern=NAME_PATTERN)
-    kind: Literal["git", "upload", "editor", "network"]
+    kind: Literal["git", "upload", "editor", "network", "sftp"]
     url: str | None = Field(default=None, max_length=2048)
     ref: str | None = Field(default=None, max_length=200)
     credential_id: uuid.UUID | None = None
@@ -126,6 +128,16 @@ class FileSave(BaseModel):
 class RunIn(BaseModel):
     node_ids: list[uuid.UUID] = Field(min_length=1, max_length=RUN_NODE_LIMIT)
     check: bool = False
+    survey: dict[str, str | int | bool] = Field(default_factory=dict, max_length=RUN_SURVEY_LIMIT)
+
+
+class SurveyQuestion(BaseModel):
+    name: str
+    label: str
+    type: Literal["text", "integer", "boolean", "choice"]
+    required: bool
+    choices: list[str] | None = None
+    default: str | int | bool | None = None
 
 
 class RunOut(BaseModel):
@@ -365,6 +377,12 @@ async def create_source(body: SourceIn, request: Request, session: Manager) -> d
             if not body.url:
                 raise CatalogError("url_required")
             config = {"url": git.validate_git_url(body.url), "ref": git.validate_ref(body.ref)}
+        elif body.kind == "sftp":
+            if not body.url:
+                raise CatalogError("url_required")
+            if credential_id is None:
+                raise CatalogError("credential_required")
+            config = sftp_source.parse_url(body.url)
         elif body.kind == "network":
             if not body.mount_path:
                 raise CatalogError("mount_path_required")
@@ -373,16 +391,25 @@ async def create_source(body: SourceIn, request: Request, session: Manager) -> d
             credential_id = None
     except CatalogError as exc:
         raise _catalog_error(exc) from None
-    if credential_id is not None and body.kind != "git":
+    if credential_id is not None and body.kind not in ("git", "sftp"):
         raise HTTPException(422, "credential_not_applicable")
     async with request.app.state.engine.begin() as conn:
         if credential_id is not None:
-            kind = await conn.scalar(
-                text("SELECT kind FROM credential WHERE id = CAST(:id AS uuid)"),
-                {"id": credential_id},
-            )
-            if kind != "ssh_key":
+            cred = (
+                await conn.execute(
+                    text("SELECT kind, username FROM credential WHERE id = CAST(:id AS uuid)"),
+                    {"id": credential_id},
+                )
+            ).first()
+            if body.kind == "git" and (cred is None or cred.kind != "ssh_key"):
                 raise HTTPException(422, "deploy_key_required")
+            if body.kind == "sftp":
+                if cred is None or cred.kind not in ("ssh_key", "ssh_password"):
+                    raise HTTPException(422, "credential_kind_unsupported")
+                config["username"] = config.get("username") or cred.username
+                if not config["username"]:
+                    raise HTTPException(422, "no_username")
+                config["url"] = sftp_source.canonical_url(config)
         try:
             sid = await conn.scalar(
                 text(
@@ -440,9 +467,10 @@ async def _sync(request: Request, source_id: uuid.UUID, session: Session) -> dic
     vault: Vault = request.app.state.vault
     async with engine.begin() as conn:
         source = await _source(conn, source_id)
-    if source.kind not in ("git", "network"):
+    if source.kind not in ("git", "network", "sftp"):
         raise HTTPException(422, "not_syncable")
     config: dict[str, Any] = source.config or {}
+    learned_host_key: str | None = None
     try:
         if source.kind == "git":
             async with engine.connect() as conn:
@@ -450,6 +478,19 @@ async def _sync(request: Request, source_id: uuid.UUID, session: Session) -> dic
                     conn, vault, str(source.credential_id) if source.credential_id else None
                 )
             files = await git.fetch(config["url"], config.get("ref"), key)
+        elif source.kind == "sftp":
+            if source.credential_id is None:
+                raise CatalogError("credential_required")
+            async with engine.connect() as conn:
+                auth = await sftp_source.credential_auth(conn, vault, str(source.credential_id))
+            files, host_key = await sftp_source.fetch(
+                config,
+                auth,
+                config.get("host_key"),
+                request.app.state.settings.ssh_connect_timeout_s,
+            )
+            if config.get("host_key") is None:
+                learned_host_key = host_key  # trust on first use: pinned with this sync
         else:
             mount = _mount_allowed(config["mount_path"], request.app.state.settings.ansible_roots)
             files = scan_tree(mount)
@@ -500,7 +541,17 @@ async def _sync(request: Request, source_id: uuid.UUID, session: Session) -> dic
             ),
             {"id": source_id},
         )
+        if learned_host_key is not None:
+            await conn.execute(
+                text(
+                    "UPDATE ansible_source SET config ="
+                    " config || jsonb_build_object('host_key', CAST(:k AS text)) WHERE id = :id"
+                ),
+                {"k": learned_host_key, "id": source_id},
+            )
     result = {"files": len(kept), "changed": changed, "skipped": skipped}
+    if learned_host_key is not None:
+        result["host_key_pinned"] = True
     await record(
         request,
         session,
@@ -782,6 +833,51 @@ async def diff_versions(
 # -------------------------------------------------------------------- runs
 
 
+async def _survey_questions(
+    conn: AsyncConnection, source_id: Any, path: str
+) -> list[dict[str, Any]]:
+    """Questions of the survey next to a playbook (current version), [] when there is none."""
+    raw = await conn.scalar(
+        text(
+            "SELECT v.content FROM ansible_file f"
+            " JOIN ansible_file_version v ON v.file_id = f.id AND v.version = f.current_version"
+            " WHERE f.source_id = :s AND f.path = :p AND f.present"
+        ),
+        {"s": source_id, "p": survey_path(path)},
+    )
+    if raw is None:
+        return []
+    try:
+        return parse_survey(raw)
+    except CatalogError as exc:
+        raise _catalog_error(exc) from None
+
+
+async def _survey_values(
+    conn: AsyncConnection, source_id: Any, path: str, answers: dict[str, Any]
+) -> dict[str, Any]:
+    questions = await _survey_questions(conn, source_id, path)
+    try:
+        return resolve(questions, answers)
+    except CatalogError as exc:
+        raise _catalog_error(exc) from None
+
+
+@router.get("/files/{file_id}/survey", responses={404: {}, 422: {}})
+async def get_survey(file_id: uuid.UUID, request: Request, session: Reader) -> dict[str, Any]:
+    async with request.app.state.engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text("SELECT f.path, f.source_id, f.present FROM ansible_file f WHERE f.id = :id"),
+                {"id": file_id},
+            )
+        ).first()
+        if row is None or not row.present:
+            raise HTTPException(404, "not_found")
+        questions = await _survey_questions(conn, row.source_id, row.path)
+    return {"questions": questions}
+
+
 @router.post("/files/{file_id}/runs", status_code=202, responses={404: {}, 422: {}})
 async def start_run(
     file_id: uuid.UUID, body: RunIn, request: Request, session: Runner
@@ -805,6 +901,7 @@ async def start_run(
             raise HTTPException(404, "not_found")
         if not is_playbook(row.path):
             raise HTTPException(422, "not_a_playbook")
+        survey_values = await _survey_values(conn, row.source_id, row.path, body.survey)
         visible = await _visible_nodes(conn, session)
         if visible is not None and any(n not in visible for n in node_ids):
             raise HTTPException(404, "node_not_found")
@@ -827,9 +924,10 @@ async def start_run(
             text(
                 "INSERT INTO job_run (source_id, source_name, path, file_version, sha256,"
                 " playbook_content, manifest, node_ids, node_names, skipped, check_mode,"
-                " started_by, status, error, finished_at) VALUES (:src, :sname, :path, :ver, :sha,"
-                " :content, CAST(:manifest AS jsonb), CAST(:nodes AS uuid[]),"
-                " CAST(:names AS jsonb), CAST(:skipped AS jsonb), :check, :by, :status, :error,"
+                " survey_values, started_by, status, error, finished_at) VALUES (:src, :sname,"
+                " :path, :ver, :sha, :content, CAST(:manifest AS jsonb), CAST(:nodes AS uuid[]),"
+                " CAST(:names AS jsonb), CAST(:skipped AS jsonb), :check,"
+                " CAST(:survey AS jsonb), :by, :status, :error,"
                 " CASE WHEN :status = 'error' THEN now() END) RETURNING id"
             ),
             {
@@ -844,6 +942,7 @@ async def start_run(
                 "names": json.dumps({n.node_id: n.name for n in runnable}),
                 "skipped": json.dumps(skipped),
                 "check": body.check,
+                "survey": json.dumps(survey_values),
                 "by": session.username,
                 "status": status,
                 "error": error,
@@ -862,6 +961,7 @@ async def start_run(
             "check": body.check,
             "nodes": [n.name for n in runnable],
             "skipped": skipped,
+            "survey": survey_values,
         },
     )
     if runnable:

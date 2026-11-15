@@ -4,7 +4,16 @@ import { api, message } from "@/lib/api";
 
 /** Playbook catalog API types (backend: janus_ops.ansible). */
 
-export type SourceKind = "git" | "upload" | "editor" | "network";
+export type SourceKind = "git" | "upload" | "editor" | "network" | "sftp";
+
+export type SurveyQuestion = {
+  name: string;
+  label: string;
+  type: "text" | "integer" | "boolean" | "choice";
+  required: boolean;
+  choices?: string[] | null;
+  default?: string | number | boolean | null;
+};
 
 export type Source = {
   id: string;

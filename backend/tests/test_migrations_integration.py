@@ -28,6 +28,10 @@ pytestmark = [
 ]
 
 EXPECTED_TABLES = {
+    "ansible_file",
+    "ansible_file_version",
+    "ansible_source",
+    "job_run",
     "app_user",
     "role",
     "role_permission",
@@ -127,6 +131,8 @@ def test_builtin_roles_seeded(migrated: None) -> None:
         ("auditor", "inventory.read"),
         ("auditor", "users.read"),
         ("operator", "agents.manage"),
+        ("operator", "ansible.read"),
+        ("operator", "ansible.run"),
         ("operator", "containers.exec"),
         ("operator", "containers.manage"),
         ("operator", "inventory.manage"),

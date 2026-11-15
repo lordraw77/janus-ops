@@ -314,11 +314,103 @@ def test_skip_reasons_for_unusable_nodes() -> None:
         "ssh_disabled": {"enabled": False},
         "ssh_no_credential": {"credential_id": None},
         "unsupported_credential_kind": {"cred_kind": "generic"},
-        "jump_host_not_supported": {"config": {"jump_host_id": "j"}},
         "host_key_not_pinned": {"host_key": None},
     }
     for reason, change in cases.items():
         assert runner._skip_reason(SimpleNamespace(**{**base, **change})) == reason
+
+
+def _jump_row(**change: object) -> SimpleNamespace:
+    base: dict[str, object] = dict(
+        id="j-1",
+        name="bastion",
+        address="203.0.113.7",
+        enabled=True,
+        config={"port": 2200, "username": "jump"},
+        credential_id="jc",
+        cred_kind="ssh_key",
+        cred_user="root",
+        host_key="ssh-ed25519 AAAAJUMP",
+    )
+    return SimpleNamespace(**{**base, **change})
+
+
+def test_jump_host_is_planned_when_it_is_a_pinned_key_node() -> None:
+    node = SimpleNamespace(id="n-1", name="app", config={"jump_host_id": "j-1"})
+    reason, jump = runner._plan_jump(node, {"j-1": _jump_row()})
+    assert reason is None
+    assert jump == runner.JumpHost(
+        node_id="j-1",
+        name="bastion",
+        address="203.0.113.7",
+        port=2200,
+        username="jump",
+        credential_id="jc",
+        host_key="ssh-ed25519 AAAAJUMP",
+    )
+
+
+@pytest.mark.parametrize(
+    ("jump", "reason"),
+    [
+        (None, "jump_host_not_found"),
+        (_jump_row(enabled=None), "jump_host_ssh_disabled"),
+        (_jump_row(enabled=False), "jump_host_ssh_disabled"),
+        (_jump_row(cred_kind="ssh_password"), "jump_host_needs_key"),
+        (_jump_row(config={"jump_host_id": "x"}), "jump_host_chained"),
+        (_jump_row(config={}, cred_user=None), "jump_host_no_username"),
+        (_jump_row(host_key=None), "jump_host_not_pinned"),
+    ],
+)
+def test_jump_host_refusals(jump: SimpleNamespace | None, reason: str) -> None:
+    node = SimpleNamespace(id="n-1", name="app", config={"jump_host_id": "j-1"})
+    planned, _ = runner._plan_jump(node, {} if jump is None else {"j-1": jump})
+    assert planned == reason
+
+
+def test_node_without_jump_host_has_no_hop() -> None:
+    node = SimpleNamespace(id="n-1", name="app", config={})
+    assert runner._plan_jump(node, {}) == (None, None)
+
+
+def test_inventory_routes_through_jump_host_with_its_own_key(tmp_path: Path) -> None:
+    jump = runner.JumpHost(
+        node_id="j-1",
+        name="bastion",
+        address="203.0.113.7",
+        port=2200,
+        username="jump",
+        credential_id="jc",
+        host_key="ssh-ed25519 AAAAJUMP",
+    )
+    node = runner.Runnable(
+        node_id="n-1",
+        name="app",
+        address="10.0.0.9",
+        port=22,
+        username="root",
+        credential_id="c",
+        host_key="ssh-ed25519 AAAAAPP",
+        jump=jump,
+    )
+    key = tmp_path / "node_key"
+    jump_key = tmp_path / "jump_key"
+    kh = tmp_path / "kh"
+    inv = json.loads(runner.inventory([node], {"n-1": key}, {}, kh, {"j-1": jump_key}))
+    common = inv["all"]["hosts"]["h_n1"]["ansible_ssh_common_args"]
+    assert f"-i {jump_key} -p 2200" in common
+    assert "-W %h:%p jump@203.0.113.7" in common
+    assert f"UserKnownHostsFile={kh}" in common
+    kh_text = runner.known_hosts_text([node, jump])
+    assert "[203.0.113.7]:2200 ssh-ed25519 AAAAJUMP" in kh_text
+    assert "10.0.0.9 ssh-ed25519 AAAAAPP" in kh_text
+
+
+def test_inventory_refuses_a_jump_without_key(tmp_path: Path) -> None:
+    jump = runner.JumpHost("j-1", "b", "203.0.113.7", 22, "jump", "jc", "ssh-ed25519 A")
+    node = runner.Runnable("n-1", "app", "10.0.0.9", 22, "root", "c", "ssh-ed25519 B", jump)
+    with pytest.raises(ValueError):
+        runner.inventory([node], {"n-1": tmp_path / "k"}, {}, tmp_path / "kh", {})
 
 
 def test_password_node_inventory_uses_password_not_batchmode(tmp_path: Path) -> None:

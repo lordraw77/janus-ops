@@ -141,6 +141,8 @@ def me(c: TestClient) -> dict[str, Any]:
             ["operator"],
             [
                 "agents.manage",
+                "ansible.read",
+                "ansible.run",
                 "containers.exec",
                 "containers.manage",
                 "inventory.manage",
@@ -369,6 +371,8 @@ def test_union_of_permissions_for_several_roles() -> None:
             assert info["roles"] == ["auditor", "operator"]
             assert info["permissions"] == [
                 "agents.manage",
+                "ansible.read",
+                "ansible.run",
                 "audit.read",
                 "containers.exec",
                 "containers.manage",

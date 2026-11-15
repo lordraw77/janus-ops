@@ -12,6 +12,7 @@ import {
   type RunStatus,
   type Source,
   type SourceKind,
+  type SurveyQuestion,
   type SyncResult,
   formatSize,
   shortHash,
@@ -196,10 +197,11 @@ export function AnsibleConsole() {
               <p className="text-[11px] text-fg-muted">
                 {source.kind === "git" && `Git: ${source.url}${source.ref ? ` @ ${source.ref}` : ""}`}
                 {source.kind === "network" && `Mount: ${source.mount_path}`}
+                {source.kind === "sftp" && `SFTP: ${source.url}`}
                 {(source.kind === "editor" || source.kind === "upload") && "Writable in Janus-Ops"}
               </p>
               <div className="flex flex-wrap gap-2">
-                {manage && (source.kind === "git" || source.kind === "network") && (
+                {manage && (source.kind === "git" || source.kind === "network" || source.kind === "sftp") && (
                   <Button disabled={busy} onClick={() => void syncSource(source)}>
                     <RefreshCw size={14} /> Sync
                   </Button>
@@ -539,8 +541,9 @@ function SourceModal({
   const [credentialId, setCredentialId] = useState("");
   const [mountPath, setMountPath] = useState("");
   const [saving, setSaving] = useState(false);
-  const credentials = useLoad<CredentialRow[]>(kind === "git" ? "/credentials" : null);
+  const credentials = useLoad<CredentialRow[]>(kind === "git" || kind === "sftp" ? "/credentials" : null);
   const keys = (credentials.data ?? []).filter((c) => c.kind === "ssh_key");
+  const sftpCredentials = (credentials.data ?? []).filter((c) => c.kind === "ssh_key" || c.kind === "ssh_password");
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -549,6 +552,10 @@ function SourceModal({
     if (kind === "git") {
       body.url = url.trim();
       body.ref = ref.trim() || null;
+      body.credential_id = credentialId || null;
+    }
+    if (kind === "sftp") {
+      body.url = url.trim();
       body.credential_id = credentialId || null;
     }
     if (kind === "network") body.mount_path = mountPath.trim();
@@ -570,6 +577,7 @@ function SourceModal({
             <option value="upload">Upload (file or archive)</option>
             <option value="git">Git repository (read-only)</option>
             <option value="network">Mounted directory on the server (read-only)</option>
+            <option value="sftp">Directory on an SFTP server (read-only)</option>
           </Select>
         </Field>
         {kind === "git" && (
@@ -584,6 +592,31 @@ function SourceModal({
               <Select value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
                 <option value="">None (public repository)</option>
                 {keys.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </>
+        )}
+        {kind === "sftp" && (
+          <>
+            <Field
+              label="SFTP URL"
+              hint="sftp://user@host[:port]/absolute/directory. The host key is pinned on the first sync."
+            >
+              <TextInput
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="sftp://deploy@files.example.lan/srv/ansible"
+                required
+              />
+            </Field>
+            <Field label="Credential (SSH key or password)" hint={credentials.error ?? undefined}>
+              <Select value={credentialId} onChange={(e) => setCredentialId(e.target.value)} required>
+                <option value="">Choose a credential</option>
+                {sftpCredentials.map((k) => (
                   <option key={k.id} value={k.id}>
                     {k.name}
                   </option>
@@ -664,8 +697,11 @@ function RunModal({
   onError: (text: string) => void;
 }) {
   const nodes = useLoad<NodeRow[]>(canReadNodes ? "/nodes" : null);
+  const survey = useLoad<{ questions: SurveyQuestion[] }>(`/ansible/files/${fileId}/survey`);
+  const questions = survey.data?.questions ?? [];
   const [picked, setPicked] = useState<string[]>([]);
   const [check, setCheck] = useState(true);
+  const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
   const [saving, setSaving] = useState(false);
   const sshNodes = (nodes.data ?? []).filter((n) => n.capabilities.some((c) => c.kind === "ssh" && c.enabled));
 
@@ -676,9 +712,16 @@ function RunModal({
   async function submit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
+    // Only the answers the user gave are sent: the server fills the defaults and checks the types
+    const survey: Record<string, string | boolean> = {};
+    for (const q of questions) {
+      const value = answers[q.name];
+      if (value === undefined || value === "") continue;
+      survey[q.name] = typeof value === "boolean" ? value : String(value);
+    }
     const r = await api<{ id: string; status: string; skipped: { node: string; reason: string }[] }>(
       `/ansible/files/${fileId}/runs`,
-      { method: "POST", body: { node_ids: picked, check } },
+      { method: "POST", body: { node_ids: picked, check, survey } },
     );
     setSaving(false);
     if (r.ok) onStarted(r.data.id, r.data.status, r.data.skipped);
@@ -694,6 +737,45 @@ function RunModal({
         </p>
         {!canReadNodes && <Alert>You need inventory.read to pick nodes.</Alert>}
         {nodes.error && <Alert>{nodes.error}</Alert>}
+        {questions.length > 0 && (
+          <fieldset className="space-y-3 rounded border border-line p-3">
+            <legend className="px-1 text-xs uppercase text-fg-muted">Survey</legend>
+            {questions.map((q) => {
+              const fallback = q.default ?? (q.type === "boolean" ? false : "");
+              const value = answers[q.name] ?? fallback;
+              const set = (next: string | boolean) => setAnswers((prev) => ({ ...prev, [q.name]: next }));
+              if (q.type === "boolean") {
+                return (
+                  <label key={q.name} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={value === true} onChange={(e) => set(e.target.checked)} />
+                    {q.label}
+                  </label>
+                );
+              }
+              return (
+                <Field key={q.name} label={`${q.label}${q.required ? " *" : ""}`} hint={q.type === "integer" ? "Whole number" : undefined}>
+                  {q.type === "choice" ? (
+                    <Select value={String(value)} onChange={(e) => set(e.target.value)}>
+                      {(q.choices ?? []).map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <TextInput
+                      value={String(value)}
+                      onChange={(e) => set(e.target.value)}
+                      required={q.required}
+                      inputMode={q.type === "integer" ? "numeric" : undefined}
+                    />
+                  )}
+                </Field>
+              );
+            })}
+          </fieldset>
+        )}
+        {survey.error && <Alert>{survey.error}</Alert>}
         <div className="max-h-72 overflow-auto rounded border border-line">
           {sshNodes.length === 0 && <p className="p-3 text-xs text-fg-muted">No nodes with SSH.</p>}
           {sshNodes.map((n) => (

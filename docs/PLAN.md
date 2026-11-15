@@ -82,6 +82,10 @@
 > `ansible.read`, `ansible.manage`, `ansible.run`). Sorgenti git, upload, editor e mount di rete
 > (solo directory elencate in `JANUS_ANSIBLE_MOUNT_ROOTS`); file versionati, diff, run con
 > storico congelato, UI in console. Avanzamento in §5.9.
+>
+> **v0.18** — **fase F6 completata** (con verifiche parziali, vedi §5.9): password SSH, jump host
+> (un salto, solo chiave), survey dei playbook (`<nome>.survey.json`, valori congelati nel run),
+> sorgente SFTP in sola lettura con host key TOFU, test d'integrazione dedicati. Migrazione `0013`.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -639,10 +643,12 @@ Regole comuni:
 | Run: nodi in ambito (404 fuori ambito), host key pinnata, solo chiavi SSH senza passphrase; chiave in file 0600 in cartella temporanea, rimossa a fine run | ✅ | Run end-to-end con `ansible-playbook` finto: inventory, `known_hosts`, permessi 600, segreto assente da log e storico |
 | Log del run aggiornato in background, storico e dettaglio per scope | ✅ parziale | Polling via API; nessuno streaming WebSocket |
 | Esecuzione reale con Ansible | ✅ parziale | `ansible-core` 2.21.5 nel venv e nell'immagine (`git` e `openssh-client` installati); `ansible-playbook` verificato nel container come utente 10001. Run su un host reale ancora da provare |
-| Password SSH, jump host, `survey` (variabili chieste prima del run) | ⏳ | Non supportati in questa versione; i nodi così configurati vengono saltati con motivo esplicito |
-| Sorgente SFTP/SCP | ⏳ | Non iniziata |
+| Password SSH (`sshpass`) | ✅ | Test unitari: inventory con `ansible_password` e senza BatchMode |
+| Jump host: un salto, solo chiave, `ProxyCommand` con la chiave del jump host | ✅ | Test unitari: rifiuti (non pinnato, con password, a catena), inventory e known_hosts con il jump host. Non provato su due host reali |
+| Survey: `<nome>.survey.json` accanto al playbook (text, integer, boolean, choice); valori congelati in `job_run.survey_values`, passati con `-e @file` 0600 | ✅ | Migrazione `0013`; test unitari su parsing, default e tipi; test d'integrazione: rifiuti API e valori salvati nel run |
+| Sorgente SFTP (sola lettura, `sftp://` con credenziale dal vault, host key TOFU salvata nella sorgente) | ⚠️ | Test unitari sugli URL; test d'integrazione sui rifiuti (credenziale, URL, tipo). SCP non implementato. Sync reale contro un server SFTP non provato |
 | UI: sorgenti, upload, editor con versioni e diff, avvio run con scelta dei nodi, storico con log | ✅ | `tsc`, ESLint, build statico; prova manuale nel browser non fatta |
-| Test d'integrazione dedicati nella suite | ⏳ | Verifiche fatte con script di smoke (API, SQL, run con stub), non committate |
+| Test d'integrazione dedicati nella suite | ✅ | `tests/test_ansible_integration.py`, `tests/test_ansible_*_unit.py`; suite completa con TimescaleDB 2.32 e lldap via `scripts/integration-test.sh` |
 
 ---
 
@@ -759,14 +765,14 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F5 completata; F2 con AC-04 verificato solo su Debian amd64
+  Phase:       Engineer — F6 completata (verifiche parziali in §5.9); F5 completata; F2 con AC-04 verificato solo su Debian amd64
   Delivered:   piano v0.15, migrazioni 0001–0011, F0–F5 (F3 allarmi, F4 container, F5 Proxmox); F0–F2: bastion SSH web, SFTP, snippet;
                agent Go (tunnel WSS, telemetria, buffer), enrollment con chiave ed25519,
                bootstrap SSH, ingest Timescale idempotente, dashboard NOC e pagina nodo
-  Open:        collaudo PBS reale (F5); CSP per l'UI esportata; rotazione KEK; retention delle registrazioni;
+  Open:        run Ansible su host reale (jump host incluso); sync SFTP su server reale; clone Git reale (F6); collaudo PBS reale (F5); CSP per l'UI esportata; rotazione KEK; retention delle registrazioni;
                secret manager esterno (ADR-011, in roadmap F8+);
                AC-04 su Rocky e arm64; E2E dietro squid (NFR-02); test di carico (NFR-05);
                continuous aggregates; installazione manuale dell'agent senza SSH;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        F6 — Ansible: inventario dinamico, catalogo playbook (Git, upload, editor, mount di rete, SFTP/SCP), run live
+  Next:        F7 — AI Copilot: Diagnose su problem CRIT, tool read-only, action plan con approvazione
 ```
