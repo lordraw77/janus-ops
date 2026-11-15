@@ -24,7 +24,9 @@ export type Permission =
   | "proxmox.console"
   | "ansible.read"
   | "ansible.manage"
-  | "ansible.run";
+  | "ansible.run"
+  | "ai.use"
+  | "ai.approve";
 
 export type SessionUser = {
   username: string;

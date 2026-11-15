@@ -28,6 +28,7 @@ pytestmark = [
 ]
 
 EXPECTED_TABLES = {
+    "ai_diagnosis",
     "ansible_file",
     "ansible_file_version",
     "ansible_source",
@@ -131,6 +132,8 @@ def test_builtin_roles_seeded(migrated: None) -> None:
         ("auditor", "inventory.read"),
         ("auditor", "users.read"),
         ("operator", "agents.manage"),
+        ("operator", "ai.approve"),
+        ("operator", "ai.use"),
         ("operator", "ansible.read"),
         ("operator", "ansible.run"),
         ("operator", "containers.exec"),

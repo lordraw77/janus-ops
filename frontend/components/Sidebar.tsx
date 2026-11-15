@@ -47,7 +47,7 @@ const NAV: NavItem[] = [
     icon: SquareTerminal,
     target: { href: "/terminal/", permission: ["ssh.connect", "sftp.transfer", "audit.read"] },
   },
-  { label: "Janus AI Copilot", icon: Sparkles, target: { phase: "F7" }, ai: true },
+  { label: "Janus AI Copilot", icon: Sparkles, target: { href: "/ai/", permission: "ai.use" }, ai: true },
   { label: "Users & roles", icon: Users, target: { href: "/admin/users/", permission: "users.read" } },
   { label: "Audit log", icon: ScrollText, target: { href: "/audit/", permission: "audit.read" } },
   { label: "Notifications", icon: Bell, target: { href: "/notifications/", permission: "notifications.manage" } },

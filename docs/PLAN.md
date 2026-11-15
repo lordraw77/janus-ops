@@ -86,6 +86,11 @@
 > **v0.18** — **fase F6 completata** (con verifiche parziali, vedi §5.9): password SSH, jump host
 > (un salto, solo chiave), survey dei playbook (`<nome>.survey.json`, valori congelati nel run),
 > sorgente SFTP in sola lettura con host key TOFU, test d'integrazione dedicati. Migrazione `0013`.
+>
+> **v0.19** — **fase F7 avviata** (ADR-007): Copilot su endpoint OpenAI-compatible self-hosted (https),
+> tool read-only (inventory, metriche, storico check, audit del nodo), diagnosi asincrona su un
+> problem aperto, action plan approvabile o modificabile (`ai.use`, `ai.approve`). Migrazione `0014`.
+> Avanzamento in §5.10.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -652,6 +657,22 @@ Regole comuni:
 
 ---
 
+### 5.10 Avanzamento F7
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Migrazione `0014`: `ai_diagnosis` (prompt e risposta del modello, piano d'azione in JSON); permessi `ai.use`, `ai.approve` per operator | ✅ | Upgrade e downgrade nella suite d'integrazione su TimescaleDB 2.32 |
+| Client OpenAI-compatible (`/chat/completions`), solo https, chiave bearer da `JANUS_AI_API_KEY` | ✅ | Test unitari con transport finto (richiesta, header, codici di errore stabili). Endpoint reale non provato |
+| Tool read-only: inventory (senza segreti), metriche ultima ora, storico check come log, audit del nodo | ✅ | Test unitari sulla redazione; nessun accesso al vault. Log dei container e del journal non raccolti dall'agent: non disponibili |
+| Diagnosi asincrona su problem aperto, in scope; stati pending, done, error | ✅ | Test d'integrazione: Copilot spento (503), permessi, decisioni sugli action plan |
+| Dati operativi incapsulati come dati, non istruzioni; output mai eseguito, solo parsato (C10) | ✅ parziale | Test unitari: un log non può chiudere il blocco dati; l'efficacia contro il modello reale non è misurata |
+| Action plan: approva, rifiuta, modifica finché `proposed`; decisione una sola volta; audit | ✅ | Test d'integrazione e unitari |
+| Audit di ogni richiesta e risposta (hash SHA-256 del prompt e della risposta) | ✅ | Test d'integrazione: l'evento `ai.diagnosis.finished` e `ai.action.decided` |
+| Esecuzione delle azioni approvate | ⏳ | Non implementata: serve un executor (exec via agent, F8). Le azioni approvate restano registrate |
+| Generatore IaC contestuale (FR-72, SHOULD) | ⏳ | Non iniziato |
+| Interfaccia Copilot (problemi aperti, diagnosi, decisioni) | ✅ | `tsc`, ESLint; prova manuale nel browser non fatta |
+| Valutazione qualità delle diagnosi con modelli locali | ⏳ | Non misurata: serve un set di casi con esito atteso |
+
 ## 6. Security — Threat model iniziale (STRIDE)
 
 Trust boundary: Browser ⇄ Server · Agent ⇄ Server · Server ⇄ target (SSH/PVE/SNMP) · Server ⇄ LLM · Server ⇄ Git.
@@ -765,7 +786,7 @@ Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le sin
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F6 completata (verifiche parziali in §5.9); F5 completata; F2 con AC-04 verificato solo su Debian amd64
+  Phase:       Engineer — F7 completata con verifiche parziali (§5.10); F6 completata (verifiche parziali in §5.9); F5 completata; F2 con AC-04 verificato solo su Debian amd64
   Delivered:   piano v0.15, migrazioni 0001–0011, F0–F5 (F3 allarmi, F4 container, F5 Proxmox); F0–F2: bastion SSH web, SFTP, snippet;
                agent Go (tunnel WSS, telemetria, buffer), enrollment con chiave ed25519,
                bootstrap SSH, ingest Timescale idempotente, dashboard NOC e pagina nodo
@@ -774,5 +795,5 @@ STATE
                AC-04 su Rocky e arm64; E2E dietro squid (NFR-02); test di carico (NFR-05);
                continuous aggregates; installazione manuale dell'agent senza SSH;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        F7 — AI Copilot: Diagnose su problem CRIT, tool read-only, action plan con approvazione
+  Next:        F8 — workflow, exec via agent (esecuzione delle azioni approvate), GitOps, SNMP
 ```

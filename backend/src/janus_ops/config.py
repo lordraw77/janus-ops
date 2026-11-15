@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     # by everyone with ansible.catalog.manage.
     ansible_mount_roots: str = Field(default="", max_length=4096)
 
+    # --- AI Copilot (F7): an OpenAI-compatible endpoint, self-hosted outside the stack (A6).
+    # Unset = the Copilot is disabled. Only https:// endpoints are accepted (C10).
+    ai_base_url: str | None = Field(default=None, max_length=2048)
+    ai_model: str | None = Field(default=None, max_length=200)
+    ai_api_key: SecretStr | None = None
+    ai_timeout_s: int = Field(default=120, ge=5, le=900)
+
     # --- Agent and telemetry (F2)
     agent_dir: Path | None = Field(
         default=None, description="Directory with janus-agent-linux-<arch> binaries for bootstrap"
@@ -179,6 +186,15 @@ class Settings(BaseSettings):
         if not value.get_secret_value().startswith("postgresql+asyncpg://"):
             raise ValueError("must start with postgresql+asyncpg://")
         return value
+
+    @field_validator("ai_base_url")
+    @classmethod
+    def _ai_url_https(cls, value: str | None) -> str | None:
+        if not value or not value.strip():
+            return None  # empty = Copilot disabled
+        if not value.startswith("https://"):
+            raise ValueError("must start with https://")
+        return value.rstrip("/")
 
     @field_validator("agent_server_url")
     @classmethod
