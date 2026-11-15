@@ -8,6 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
+	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 
@@ -29,10 +32,22 @@ const (
 	chunkSize     = 32 * 1024
 	streamBacklog = 256 // queued writes per stream before it is dropped (protects the tunnel)
 	maxStreams    = 64
+
+	// exec streams (F8): a command run without a shell, only when the local policy allows exec
+	maxExecs        = 4
+	execMaxArgs     = 64
+	execMaxArgLen   = 4096
+	execMaxOutput   = 256 * 1024
+	execDefaultSecs = 60
+	execMaxSecs     = 300
+	execWaitDelay   = 2 * time.Second
 )
 
 type openRequest struct {
 	Kind string `json:"kind"`
+	// exec only
+	Argv     []string `json:"argv,omitempty"`
+	TimeoutS int      `json:"timeout_s,omitempty"`
 }
 
 type stream struct {
@@ -52,11 +67,16 @@ type mux struct {
 	open   map[uint32]*stream
 	// dial is replaced in tests
 	dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// execSlots bounds the commands running at once
+	execSlots chan struct{}
 }
 
 func newMux(ws *websocket.Conn, policy proto.Policy, dockerSocket string, log *slog.Logger) *mux {
 	var d net.Dialer
-	return &mux{ws: ws, policy: policy, docker: dockerSocket, log: log, open: map[uint32]*stream{}, dial: d.DialContext}
+	return &mux{
+		ws: ws, policy: policy, docker: dockerSocket, log: log, open: map[uint32]*stream{},
+		dial: d.DialContext, execSlots: make(chan struct{}, maxExecs),
+	}
 }
 
 func frame(kind byte, id uint32, payload []byte) []byte {
@@ -112,6 +132,9 @@ func (m *mux) openStream(ctx context.Context, id uint32, payload []byte) error {
 	var req openRequest
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return m.refuse(ctx, id, "bad_request")
+	}
+	if req.Kind == "exec" {
+		return m.startExec(ctx, id, req)
 	}
 	if req.Kind != "docker" {
 		return m.refuse(ctx, id, "unknown_kind")
@@ -198,5 +221,123 @@ func (m *mux) closeAll() {
 	for id, s := range m.open {
 		s.close()
 		delete(m.open, id)
+	}
+}
+
+// validArgv: a non-empty command line of bounded size, without NUL bytes.
+func validArgv(argv []string) bool {
+	if len(argv) == 0 || len(argv) > execMaxArgs {
+		return false
+	}
+	for _, a := range argv {
+		if a == "" || len(a) > execMaxArgLen {
+			return false
+		}
+		for i := 0; i < len(a); i++ {
+			if a[i] == 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// startExec runs argv directly (no shell) and relays its output as DATA frames. The stream is
+// closed with CLOSE reason "exit:<code>", "timeout" or "output_limit". Nothing is read from the
+// server: the stream only carries output back.
+func (m *mux) startExec(ctx context.Context, id uint32, req openRequest) error {
+	if !m.policy.AllowExec {
+		// local policy (C9): only the node's administrator can change it
+		return m.refuse(ctx, id, "exec_not_allowed")
+	}
+	if !validArgv(req.Argv) {
+		return m.refuse(ctx, id, "bad_request")
+	}
+	timeout := time.Duration(req.TimeoutS) * time.Second
+	if req.TimeoutS <= 0 {
+		timeout = execDefaultSecs * time.Second
+	}
+	if timeout > execMaxSecs*time.Second {
+		timeout = execMaxSecs * time.Second
+	}
+	select {
+	case m.execSlots <- struct{}{}:
+	default:
+		return m.refuse(ctx, id, "too_many_streams")
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	cmd := exec.CommandContext(cctx, req.Argv[0], req.Argv[1:]...)
+	cmd.Dir = "/"
+	cmd.Env = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
+	cmd.WaitDelay = execWaitDelay
+	r, w, err := os.Pipe()
+	if err != nil {
+		cancel()
+		<-m.execSlots
+		return m.refuse(ctx, id, "exec_unavailable")
+	}
+	cmd.Stdout, cmd.Stderr = w, w
+	if err := cmd.Start(); err != nil {
+		cancel()
+		r.Close()
+		w.Close()
+		<-m.execSlots
+		return m.refuse(ctx, id, "exec_unavailable")
+	}
+	w.Close() // the child holds its own copy: EOF on r comes when the command ends
+	if err := m.send(ctx, frameOpenOK, id, nil); err != nil {
+		cancel()
+		r.Close()
+		_ = cmd.Wait()
+		<-m.execSlots
+		return err
+	}
+	go m.runExec(ctx, cctx, cancel, id, cmd, r)
+	return nil
+}
+
+func (m *mux) runExec(ctx, cctx context.Context, cancel context.CancelFunc, id uint32, cmd *exec.Cmd, r *os.File) {
+	defer func() { <-m.execSlots }()
+	defer cancel()
+	buf := make([]byte, chunkSize)
+	total, reason := 0, ""
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			total += n
+			if total > execMaxOutput {
+				reason = "output_limit"
+				break
+			}
+			if werr := m.send(ctx, frameData, id, buf[:n]); werr != nil {
+				reason = "server_gone"
+				break
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	r.Close()
+	if reason != "" {
+		cancel() // stop the command: its output is no longer wanted
+	}
+	waitErr := cmd.Wait()
+	switch {
+	case reason != "":
+	case errors.Is(cctx.Err(), context.DeadlineExceeded):
+		reason = "timeout"
+	case waitErr == nil:
+		reason = "exit:0"
+	default:
+		var ee *exec.ExitError
+		if errors.As(waitErr, &ee) {
+			reason = "exit:" + strconv.Itoa(ee.ExitCode())
+		} else {
+			reason = "exit:-1"
+		}
+	}
+	if ctx.Err() == nil {
+		_ = m.send(ctx, frameClose, id, []byte(reason))
 	}
 }

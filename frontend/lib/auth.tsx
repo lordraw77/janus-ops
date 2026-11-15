@@ -26,7 +26,8 @@ export type Permission =
   | "ansible.manage"
   | "ansible.run"
   | "ai.use"
-  | "ai.approve";
+  | "ai.approve"
+  | "actions.execute";
 
 export type SessionUser = {
   username: string;

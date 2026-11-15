@@ -160,6 +160,8 @@ class BootstrapIn(BaseModel):
     proxy: str | None = Field(default=None, max_length=512)
     # writes allow_docker in the node's local policy: Docker API access through the agent (F4)
     allow_docker: bool = False
+    # writes allow_exec in the node's local policy: commands of approved action plans (F8)
+    allow_exec: bool = False
 
     @field_validator("proxy")
     @classmethod
@@ -235,6 +237,7 @@ async def bootstrap_agent(
             ca_pem=_ca_pem(request),
             proxy=body.proxy,
             allow_docker=body.allow_docker,
+            allow_exec=body.allow_exec,
         )
         actor = (session.user_id, session.username)
         try:
@@ -261,6 +264,7 @@ async def bootstrap_agent(
                 "server_url": server_url,
                 "proxy": plan.proxy,
                 "allow_docker": plan.allow_docker,
+                "allow_exec": plan.allow_exec,
                 "steps": plan.steps,
                 "online": online,
             },

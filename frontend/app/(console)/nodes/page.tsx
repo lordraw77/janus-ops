@@ -149,11 +149,12 @@ function InstallDialog({ agent, onClose, onDone }: { agent: AgentDetail; onClose
     const form = new FormData(e.currentTarget);
     const proxy = String(form.get("proxy") ?? "").trim();
     const allowDocker = form.get("allow_docker") === "on";
+    const allowExec = form.get("allow_exec") === "on";
     setBusy(true);
     setError(null);
     const r = await api(`/agents/${agent.node_id}/bootstrap`, {
       method: "POST",
-      body: { proxy: proxy || null, allow_docker: allowDocker },
+      body: { proxy: proxy || null, allow_docker: allowDocker, allow_exec: allowExec },
     });
     setBusy(false);
     if (!r.ok) return setError(message(r.code));
@@ -180,6 +181,13 @@ function InstallDialog({ agent, onClose, onDone }: { agent: AgentDetail; onClose
           <span>
             Allow Docker: the agent relays the Docker Engine API (containers, logs, exec). This is root-equivalent
             access to the node; it is written in the node&apos;s local policy, which the server cannot change later.
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-xs text-fg-secondary">
+          <input type="checkbox" name="allow_exec" defaultChecked={agent.policy?.allow_exec ?? false} className="mt-0.5" />
+          <span>
+            Allow commands: the agent runs the commands of action plans approved in the AI Copilot, without a
+            shell, as root. Written in the node&apos;s local policy; the server cannot change it later.
           </span>
         </label>
         <div className="flex justify-end gap-2">

@@ -1,5 +1,5 @@
 export type ActionRisk = "low" | "medium" | "high";
-export type ActionStatus = "proposed" | "approved" | "rejected";
+export type ActionStatus = "proposed" | "approved" | "rejected" | "executing" | "executed" | "failed";
 
 export type DiagnosisAction = {
   id: string;
@@ -11,6 +11,18 @@ export type DiagnosisAction = {
   decided_by: string | null;
   decided_at: string | null;
   edited?: boolean;
+  executed_by?: string | null;
+  result?: ActionResult;
+};
+
+export type ActionResult = {
+  exit_code: number | null;
+  reason: string;
+  output: string;
+  truncated: boolean;
+  argv: string[];
+  at: string;
+  by: string;
 };
 
 export type Diagnosis = {

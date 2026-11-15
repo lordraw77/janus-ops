@@ -16,14 +16,17 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops import audit
 from janus_ops.admin.common import record
+from janus_ops.agents import exec as node_exec
 from janus_ops.ai import diagnose, llm
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+EXEC_TIMEOUT_S = 60
 
 User = Annotated[Session, Depends(require_permission("ai.use"))]
 Approver = Annotated[Session, Depends(require_permission("ai.approve"))]
+Executor = Annotated[Session, Depends(require_permission("actions.execute"))]
 
 LIST_COLUMNS = (
     "d.id, d.problem_id, d.node_name, d.check_name, d.status, d.model, d.requested_by,"
@@ -255,6 +258,148 @@ async def decide_action(
                 "model": row.model,
             },
         )
+    async with engine.connect() as conn:
+        fresh = await _visible_diagnosis(conn, session, diagnosis_id)
+    return _out(fresh)
+
+
+async def _audit_refusal(
+    engine: Any,
+    session: Session,
+    diagnosis_id: uuid.UUID,
+    node_name: str,
+    action_id: str,
+    argv: list[str],
+) -> None:
+    async with engine.begin() as conn:
+        await audit.append(
+            conn,
+            action="ai.action.execute_refused",
+            actor_name=session.username,
+            target_type="node",
+            target_id=node_name,
+            payload={
+                "diagnosis": str(diagnosis_id),
+                "action": action_id,
+                "argv": argv,
+                "refused": "exec_not_allowed",
+            },
+        )
+
+
+async def _claim_action(
+    engine: Any, session: Session, diagnosis_id: uuid.UUID, action_id: str
+) -> tuple[str, str, list[str]]:
+    """Moves an approved action to `executing` and returns (node id, node name, argv)."""
+    scope_sql, params = session.scope.sql("n")
+    async with engine.begin() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT d.id, d.status, d.actions, d.node_id, d.node_name, d.model"  # noqa: S608
+                    " FROM ai_diagnosis d JOIN node n ON n.id = d.node_id"
+                    f" WHERE d.id = :id AND {scope_sql} FOR UPDATE OF d"
+                ),
+                {"id": diagnosis_id, **params},
+            )
+        ).first()
+        if row is None:
+            raise HTTPException(404, "not_found")
+        if row.status != "done":
+            raise HTTPException(409, "diagnosis_not_ready")
+        actions: list[dict[str, Any]] = list(row.actions or [])
+        action = next((a for a in actions if a.get("id") == action_id), None)
+        if action is None:
+            raise HTTPException(404, "action_not_found")
+        if action["status"] != "approved":
+            raise HTTPException(409, "not_approved")
+        try:
+            argv = node_exec.argv_from_command(action.get("command") or "")
+        except node_exec.ExecError as exc:
+            raise HTTPException(422, exc.code) from None
+        if not await node_exec.policy_allows_exec(conn, str(row.node_id)):
+            # Recorded in its own transaction: the refusal must survive the rollback below
+            await _audit_refusal(engine, session, diagnosis_id, row.node_name, action_id, argv)
+            raise HTTPException(409, "exec_not_allowed")
+        action["status"] = "executing"
+        action["executed_by"] = session.username
+        await conn.execute(
+            text("UPDATE ai_diagnosis SET actions = CAST(:a AS jsonb) WHERE id = :id"),
+            {"a": json.dumps(actions), "id": diagnosis_id},
+        )
+        await audit.append(
+            conn,
+            action="ai.action.execute_started",
+            actor_name=session.username,
+            target_type="node",
+            target_id=row.node_name,
+            payload={"diagnosis": str(diagnosis_id), "action": action_id, "argv": argv},
+        )
+    return str(row.node_id), row.node_name, argv
+
+
+@router.post(
+    "/diagnoses/{diagnosis_id}/actions/{action_id}/execute",
+    responses={404: {}, 409: {}, 422: {}},
+)
+async def execute_action(
+    diagnosis_id: uuid.UUID, action_id: str, request: Request, session: Executor
+) -> DiagnosisOut:
+    engine = request.app.state.engine
+    node_id, node_name, argv = await _claim_action(engine, session, diagnosis_id, action_id)
+    now = datetime.now().astimezone().isoformat()
+    try:
+        result = await node_exec.run(request.app.state.agents, node_id, argv, EXEC_TIMEOUT_S)
+        outcome: dict[str, Any] = {
+            "exit_code": result.exit_code,
+            "reason": result.reason,
+            "output": result.output,
+            "truncated": result.truncated,
+            "argv": argv,
+            "at": now,
+            "by": session.username,
+        }
+        status = "executed" if result.exit_code == 0 else "failed"
+        refused: str | None = None
+    except node_exec.ExecError as exc:
+        # The command never ran: the action goes back to approved, so it can be tried again
+        outcome, status, refused = {}, "approved", exc.code
+    async with engine.begin() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT d.actions, d.node_name, d.model FROM ai_diagnosis d"
+                    " WHERE d.id = :id FOR UPDATE"
+                ),
+                {"id": diagnosis_id},
+            )
+        ).one()
+        actions: list[dict[str, Any]] = list(row.actions or [])
+        action = next(a for a in actions if a.get("id") == action_id)
+        action["status"] = status
+        if refused is None:
+            action["result"] = outcome
+        await conn.execute(
+            text("UPDATE ai_diagnosis SET actions = CAST(:a AS jsonb) WHERE id = :id"),
+            {"a": json.dumps(actions), "id": diagnosis_id},
+        )
+        await audit.append(
+            conn,
+            action="ai.action.executed" if refused is None else "ai.action.execute_refused",
+            actor_name=session.username,
+            target_type="node",
+            target_id=node_name,
+            payload={
+                "diagnosis": str(diagnosis_id),
+                "action": action_id,
+                "argv": argv,
+                "status": status,
+                "exit_code": outcome.get("exit_code"),
+                "refused": refused,
+            },
+        )
+    if refused is not None:
+        raise HTTPException(409, refused)
     async with engine.connect() as conn:
         fresh = await _visible_diagnosis(conn, session, diagnosis_id)
     return _out(fresh)

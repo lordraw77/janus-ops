@@ -113,9 +113,9 @@ binary frames). Binary WebSocket frames: `[type: 1 byte][stream id: 4 bytes big-
 
 | Type | Direction | Payload |
 |---|---|---|
-| 1 `OPEN` | server → agent | JSON `{"kind": "docker"}` |
+| 1 `OPEN` | server → agent | JSON `{"kind": "docker"}`, or `{"kind": "exec", "argv": [...], "timeout_s": 60}` |
 | 4 `OPEN_OK` | agent → server | — |
-| 5 `OPEN_FAIL` | agent → server | reason: `docker_not_allowed`, `docker_unavailable`, `unknown_kind`, `too_many_streams` |
+| 5 `OPEN_FAIL` | agent → server | reason: `docker_not_allowed`, `exec_not_allowed`, `docker_unavailable`, `exec_unavailable`, `bad_request`, `unknown_kind`, `too_many_streams` |
 | 2 `DATA` | both | bytes (at most 32 KiB per frame) |
 | 3 `CLOSE` | both | optional reason |
 
@@ -124,8 +124,16 @@ Kind `docker` relays the Docker Engine API socket (`docker_socket`, default
 interprets the bytes; the server decides which API calls are made. At most 64 open streams;
 a stream whose write backlog overflows is closed so that it cannot stall the tunnel.
 
+Kind `exec` (F8) runs `argv` directly, **without a shell**, only when the local policy has
+`allow_exec: true`. `argv` has 1 to 64 arguments of at most 4096 bytes, no NUL bytes; the working
+directory is `/`, the environment is minimal and stdin is empty. Output (stdout and stderr together)
+goes back as `DATA` frames, at most 256 KiB, then the agent closes the stream with a `CLOSE` whose
+payload is the reason: `exit:<code>`, `timeout` (`timeout_s`, default 60, at most 300),
+`output_limit`, or `server_gone`. At most 4 commands run at once. The server never sends input.
+
 ## Local policy (C9)
 
 `policy` in the agent configuration is reported in `hello` and stored by the server for display.
 The server cannot change it: exec, PTY and Docker streams (F4, F8) are refused by the agent unless
-the local policy allows them.
+the local policy allows them. `allow_exec` is chosen at installation (bootstrap) and is only
+changed by reinstalling the agent on the node.

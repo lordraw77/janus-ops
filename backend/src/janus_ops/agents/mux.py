@@ -10,6 +10,7 @@ import contextlib
 import json
 import struct
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 OPEN, DATA, CLOSE, OPEN_OK, OPEN_FAIL = 1, 2, 3, 4, 5
 CHUNK = 32 * 1024
@@ -37,6 +38,8 @@ class Stream:
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._buffered = 0
         self.closed = False
+        # why the agent closed the stream, e.g. "exit:0" for an exec stream (F8)
+        self.close_reason: str | None = None
         self.opened: asyncio.Future[None] = asyncio.get_running_loop().create_future()
 
     def _feed(self, data: bytes) -> None:
@@ -81,12 +84,13 @@ class Mux:
         self.streams: dict[int, Stream] = {}
         self._next = 1
 
-    async def open(self, kind: str, wait_s: float = 10) -> Stream:
+    async def open(self, kind: str, wait_s: float = 10, **args: Any) -> Stream:
         stream_id = self._next
         self._next = self._next % 0xFFFFFFFF + 1
         stream = Stream(self, stream_id)
         self.streams[stream_id] = stream
-        await self.send(frame(OPEN, stream_id, json.dumps({"kind": kind}).encode()))
+        request = json.dumps({"kind": kind, **args}).encode()
+        await self.send(frame(OPEN, stream_id, request))
         try:
             await asyncio.wait_for(asyncio.shield(stream.opened), wait_s)
         except TimeoutError:
@@ -117,6 +121,7 @@ class Mux:
             stream._feed(payload)
         elif kind == CLOSE:
             self.streams.pop(stream_id, None)
+            stream.close_reason = payload.decode(errors="replace")[:64] or None
             stream._eof()
 
     def close_all(self) -> None:

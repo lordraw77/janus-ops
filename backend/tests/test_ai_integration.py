@@ -115,3 +115,40 @@ def test_edits_are_allowed_only_while_proposed() -> None:
         assert missing.status_code == 404
         detail = operator.get(f"/api/v1/ai/diagnoses/{diagnosis}")
         assert detail.status_code == 200 and detail.json()["summary"] == "Disk full"
+
+
+def _approved(action_id: str, command: str) -> dict[str, object]:
+    return {**_action(action_id, "Run it"), "status": "approved", "command": command}
+
+
+def test_running_an_action_needs_the_execute_permission() -> None:
+    diagnosis = _seed_done_diagnosis([_approved("a1", "uptime")])
+    with signed_in("bob") as operator:
+        r = operator.post(f"/api/v1/ai/diagnoses/{diagnosis}/actions/a1/execute")
+        assert r.status_code == 403
+
+
+def test_only_approved_actions_run_and_a_refused_run_leaves_the_action_approved() -> None:
+    diagnosis = _seed_done_diagnosis(
+        [_action("a1", "Proposed only"), _approved("a2", "uptime"), _approved("a3", "uptime; id")]
+    )
+    with signed_in("alice") as admin:
+        proposed = admin.post(f"/api/v1/ai/diagnoses/{diagnosis}/actions/a1/execute")
+        assert proposed.status_code == 409 and proposed.json()["detail"] == "not_approved"
+
+        chained = admin.post(f"/api/v1/ai/diagnoses/{diagnosis}/actions/a3/execute")
+        assert chained.status_code == 422
+        assert chained.json()["detail"] == "command_not_executable"
+
+        # no agent for this node, so exec is not allowed: refused before anything runs
+        refused = admin.post(f"/api/v1/ai/diagnoses/{diagnosis}/actions/a2/execute")
+        assert refused.status_code == 409 and refused.json()["detail"] == "exec_not_allowed"
+        after = admin.get(f"/api/v1/ai/diagnoses/{diagnosis}").json()
+        status = {a["id"]: a["status"] for a in after["actions"]}
+        assert status == {"a1": "proposed", "a2": "approved", "a3": "approved"}
+    audited = run_sql(
+        "SELECT count(*) FROM audit_event WHERE action = 'ai.action.execute_refused'"
+        " AND payload->>'diagnosis' = :d",
+        {"d": diagnosis},
+    )
+    assert audited[0][0] == 1

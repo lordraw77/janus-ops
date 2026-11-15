@@ -40,6 +40,7 @@ export function CopilotConsole() {
   const selectedProblem = (problems.data ?? []).find((p) => p.id === problemId) ?? null;
   const canUse = can("ai.use");
   const canApprove = can("ai.approve");
+  const canExecute = can("actions.execute");
 
   async function diagnose() {
     if (!problemId) return;
@@ -66,6 +67,23 @@ export function CopilotConsole() {
       return;
     }
     setNotice({ kind: "ok", text: `Action "${action.title}" updated.` });
+    detail.reload();
+    diagnoses.reload();
+  }
+
+  async function execute(action: DiagnosisAction) {
+    if (!diagnosisId) return;
+    setBusy(true);
+    const r = await api<DiagnosisDetail>(`/ai/diagnoses/${diagnosisId}/actions/${action.id}/execute`, {
+      method: "POST",
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setNotice({ kind: "error", text: `Not run: ${message(r.code)}` });
+    } else {
+      const code = r.data.actions.find((a) => a.id === action.id)?.result?.exit_code;
+      setNotice({ kind: "ok", text: `"${action.title}" ran on ${r.data.node_name} (exit ${code ?? "n/a"}).` });
+    }
     detail.reload();
     diagnoses.reload();
   }
@@ -129,7 +147,16 @@ export function CopilotConsole() {
                   ))}
                 </Select>
               </Field>
-              {detail.data && <DiagnosisView detail={detail.data} canApprove={canApprove} onDecide={decide} />}
+              {detail.data && (
+                <DiagnosisView
+                  detail={detail.data}
+                  canApprove={canApprove}
+                  canExecute={canExecute}
+                  busy={busy}
+                  onDecide={decide}
+                  onExecute={execute}
+                />
+              )}
             </div>
           )}
         </Card>
@@ -141,11 +168,17 @@ export function CopilotConsole() {
 function DiagnosisView({
   detail,
   canApprove,
+  canExecute,
+  busy,
   onDecide,
+  onExecute,
 }: {
   detail: DiagnosisDetail;
   canApprove: boolean;
+  canExecute: boolean;
+  busy: boolean;
   onDecide: (action: DiagnosisAction, change: Record<string, unknown>) => Promise<void>;
+  onExecute: (action: DiagnosisAction) => Promise<void>;
 }) {
   return (
     <div className="space-y-3 text-sm">
@@ -158,7 +191,15 @@ function DiagnosisView({
       {detail.actions.length > 0 && (
         <ol className="space-y-2">
           {detail.actions.map((action) => (
-            <ActionRow key={action.id} action={action} canApprove={canApprove} onDecide={onDecide} />
+            <ActionRow
+              key={action.id}
+              action={action}
+              canApprove={canApprove}
+              canExecute={canExecute}
+              busy={busy}
+              onDecide={onDecide}
+              onExecute={onExecute}
+            />
           ))}
         </ol>
       )}
@@ -173,11 +214,17 @@ function DiagnosisView({
 function ActionRow({
   action,
   canApprove,
+  canExecute,
+  busy,
   onDecide,
+  onExecute,
 }: {
   action: DiagnosisAction;
   canApprove: boolean;
+  canExecute: boolean;
+  busy: boolean;
   onDecide: (action: DiagnosisAction, change: Record<string, unknown>) => Promise<void>;
+  onExecute: (action: DiagnosisAction) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(action.title);
@@ -199,6 +246,24 @@ function ActionRow({
         <p className="mt-1 text-xs text-fg-muted">
           {action.status} by {action.decided_by}
         </p>
+      )}
+      {action.result && (
+        <div className="mt-2 space-y-1">
+          <p className="text-xs text-fg-muted">
+            exit {action.result.exit_code ?? "–"} · {action.result.reason || "no reason"} · by {action.result.by}
+            {action.result.truncated ? " · output truncated" : ""}
+          </p>
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-elevated p-2 font-mono text-xs">
+            {action.result.output || "(no output)"}
+          </pre>
+        </div>
+      )}
+      {canExecute && action.status === "approved" && !editing && action.command && (
+        <div className="mt-2">
+          <Button variant="primary" disabled={busy} onClick={() => void onExecute(action)}>
+            Run on node
+          </Button>
+        </div>
       )}
       {editing && (
         <div className="mt-2 space-y-2">

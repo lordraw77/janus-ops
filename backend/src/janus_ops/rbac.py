@@ -36,6 +36,7 @@ PERMISSIONS: dict[str, str] = {
     "ansible.run": "Run playbooks against nodes in scope (runs as the Janus-Ops host)",
     "ai.use": "Ask the AI Copilot to diagnose problems in scope (data goes to the AI endpoint)",
     "ai.approve": "Approve, reject or edit the action plans proposed by the AI Copilot",
+    "actions.execute": "Run approved action plans on nodes; the node's agent must allow exec",
 }
 
 ROLE_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,31}$"
