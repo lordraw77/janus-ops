@@ -69,6 +69,19 @@
 > ambiente, tag, gruppo, capability e nodi specifici; più ruoli si sommano. Applicato a inventory,
 > check, problemi, downtime, dashboard, agent, terminale, SFTP, container, Proxmox e storico delle
 > sessioni; i nodi fuori ambito rispondono 404. Migrazione `0011`. Dettagli in §5.7.
+>
+> **v0.16** — **F6 — catalogo playbook da più sorgenti**: oltre a Git, i playbook possono arrivare
+> da upload di un file locale, da un editor incorporato nella UI, da una mount di rete (NFS/SMB)
+> o da un host remoto via SFTP/SCP. Ogni sorgente è registrata con il suo tipo; le sorgenti remote
+> usano credenziali dal vault (ADR-004). Le sorgenti sono lette in sola lettura, tranne l'editor e
+> l'upload che scrivono nel catalogo interno. Ulteriori dettagli in §5.8 (decisioni F6).
+> In questa versione chiuso in F5 l'alert dai backup verso il motore F3 (check `backup`); resta
+> aperto il collaudo con un PBS reale.
+>
+> **v0.17** — **fase F6 avviata**: backend del catalogo playbook (migrazione `0012`, permessi
+> `ansible.read`, `ansible.manage`, `ansible.run`). Sorgenti git, upload, editor e mount di rete
+> (solo directory elencate in `JANUS_ANSIBLE_MOUNT_ROOTS`); file versionati, diff, run con
+> storico congelato, UI in console. Avanzamento in §5.9.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -158,7 +171,7 @@ Punti delle specifiche che vanno corretti, chiariti o ridimensionati prima di sc
 | FR-52 | Console VM/LXC (xterm.js seriale; noVNC) | SHOULD | F5 |
 | FR-53 | Audit backup vzdump/PBS: mancanti, falliti, troppo vecchi | MUST | F5 |
 | FR-60 | Inventory Ansible dinamico dal DB | MUST | F6 |
-| FR-61 | Catalogo playbook (Git), survey, esecuzione con output live, storico | MUST | F6 |
+| FR-61 | Catalogo playbook da più sorgenti: Git, upload da file locale, editor incorporato, mount di rete (NFS/SMB), SFTP/SCP; survey, esecuzione con output live, storico | MUST | F6 |
 | FR-70 | AI "Diagnose" su servizio CRIT: raccolta log/metriche/audit → diagnosi + action plan | MUST | F7 |
 | FR-71 | Action plan approvabile/modificabile prima dell'esecuzione | MUST | F7 |
 | FR-72 | Generatore IaC contestuale | SHOULD | F7 |
@@ -435,7 +448,7 @@ Ogni fase termina con un rilascio installabile e i propri criteri di accettazion
 | **F3 Alerting** | Check engine, isteresi, problems, ack, downtime, dipendenze, flapping, notifiche, discovery | AC-06..08 |
 | **F4 Containers** | Docker proxy nell'agent, viste container, log/stats/exec, compose stack | |
 | **F5 Proxmox** | Client PVE, overview cluster, lifecycle VM/LXC, backup audit, console | |
-| **F6 Ansible** | Inventory dinamico, catalogo da Git, survey, run live, storico | |
+| **F6 Ansible** | Inventory dinamico, catalogo playbook da Git, upload locale, editor incorporato, mount di rete (NFS/SMB), SFTP/SCP; survey, run live, storico | |
 | **F7 AI Copilot** | Diagnose su problem, tool read-only, action plan + approvazione | |
 | **F8+** | Workflow visuale, GitOps, SNMP, PTY/exec via agent, auto-update firmato, NTLM, AD/LDAP esterno, OIDC, agent Windows, **secret manager esterno OpenBao / HashiCorp Vault (ADR-011)** | FR-86 |
 
@@ -589,6 +602,48 @@ Rimandati alla fase che li usa, per la regola "nessun componente senza requisito
 **worker/scheduler** (F2–F3), **agent-gateway** (F2).
 da tutto il resto; F2–F3 sono il cuore "Checkmk"; Docker prima di Proxmox perché riusa il tunnel appena costruito.
 
+### 5.8 F6 — Sorgenti del catalogo playbook (decisioni)
+
+Un playbook è sempre una cartella (o un file) con un percorso relativo stabile dentro la sorgente.
+Ogni sorgente ha: nome, tipo, percorso base, ambiente/ambito (come per i nodi) e permesso di scrittura.
+
+| Sorgente | Lettura | Scrittura | Note di sicurezza |
+|---|---|---|---|
+| **Git** | clone/pull (branch o tag) | no | URL e chiave deploy nel vault; checkout in una cartella di Janus-Ops, non nel percorso di lavoro |
+| **Upload locale** | file caricato dal browser | sì (nel catalogo interno) | limite di dimensione; solo `.yml`/`.yaml` e archivi `.tar.gz`/`.zip` estratti senza link simbolici né percorsi assoluti |
+| **Editor incorporato** | sì | sì (nel catalogo interno) | salvataggio con versione; diff prima del salvataggio; il run usa sempre la versione salvata |
+| **Mount di rete** (NFS/SMB) | sì | opzionale, di default solo lettura | la mount è gestita dall'host Janus-Ops o dall'agent; il percorso è validato contro traversal e symlink fuori dalla radice |
+| **SFTP / SCP** | sì (listing e download) | opzionale | credenziali dal vault; riuso del client SFTP già presente (F1); host key con pinning TOFU |
+
+Regole comuni:
+- Ogni sorgente è scritta in audit (creazione, modifica, sync, eliminazione); il contenuto del playbook
+  eseguito è congelato nel `job_run` (hash SHA-256 e copia), così lo storico resta riproducibile
+  anche se la sorgente cambia.
+- Il run non legge mai direttamente la sorgente remota: il catalogo viene sincronizzato prima, con
+  hash verificato.
+- Le sorgenti con ambito di nodo rispettano lo stesso ambito del §5.7: un playbook non si esegue su
+  nodi fuori ambito.
+- Permessi: `ansible.read` (lettura), `ansible.manage` (sorgenti e scrittura),
+  `ansible.run` (esecuzione); l'editor richiede `ansible.manage`.
+
+### 5.9 Avanzamento F6
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Migrazione `0012`: sorgenti, file, versioni immutabili (sha256 + contenuto), run congelati; permessi per operator | ✅ | Upgrade, downgrade a `0011` e upgrade su TimescaleDB 2.32 reale |
+| Sorgenti: `editor` e `upload` scrivibili; `git` e `network` in sola lettura, sincronizzate in versioni | ✅ | Smoke API: creazione, conflitto nome, mount fuori dalle radici rifiutato, salvataggio con `expected_version` (409 se diverso) |
+| Upload `.yml`, `.zip`, `.tar.gz`: link simbolici, device, percorsi assoluti, `..`, binari, dimensioni rifiutati | ✅ | Test unitari sugli archivi e sui percorsi |
+| Versioni e diff; salvataggio identico non crea versione | ✅ | Smoke SQL e API |
+| Git: solo `https://`, `ssh://` o `user@host:path`, nessuna credenziale nell'URL, deploy key dal vault, ref validato | ⚠️ | Test unitari sugli URL; clone reale non provato (nessun repository raggiungibile da questo ambiente). Host key di Git in `accept-new` per clone temporaneo: nessun pinning persistente |
+| Mount di rete: solo sotto le radici di `JANUS_ANSIBLE_MOUNT_ROOTS` (default: disattivate), symlink ignorati | ✅ | Test unitari con symlink che escono dalla radice |
+| Run: nodi in ambito (404 fuori ambito), host key pinnata, solo chiavi SSH senza passphrase; chiave in file 0600 in cartella temporanea, rimossa a fine run | ✅ | Run end-to-end con `ansible-playbook` finto: inventory, `known_hosts`, permessi 600, segreto assente da log e storico |
+| Log del run aggiornato in background, storico e dettaglio per scope | ✅ parziale | Polling via API; nessuno streaming WebSocket |
+| Esecuzione reale con Ansible | ⏳ | `ansible-playbook` non è installato in questo ambiente: da provare su un host reale |
+| Password SSH, jump host, `survey` (variabili chieste prima del run) | ⏳ | Non supportati in questa versione; i nodi così configurati vengono saltati con motivo esplicito |
+| Sorgente SFTP/SCP | ⏳ | Non iniziata |
+| UI: sorgenti, upload, editor con versioni e diff, avvio run con scelta dei nodi, storico con log | ✅ | `tsc`, ESLint, build statico; prova manuale nel browser non fatta |
+| Test d'integrazione dedicati nella suite | ⏳ | Verifiche fatte con script di smoke (API, SQL, run con stub), non committate |
+
 ---
 
 ## 6. Security — Threat model iniziale (STRIDE)
@@ -708,10 +763,10 @@ STATE
   Delivered:   piano v0.15, migrazioni 0001–0011, F0–F5 (F3 allarmi, F4 container, F5 Proxmox); F0–F2: bastion SSH web, SFTP, snippet;
                agent Go (tunnel WSS, telemetria, buffer), enrollment con chiave ed25519,
                bootstrap SSH, ingest Timescale idempotente, dashboard NOC e pagina nodo
-  Open:        CSP per l'UI esportata; rotazione KEK; retention delle registrazioni;
+  Open:        collaudo PBS reale (F5); CSP per l'UI esportata; rotazione KEK; retention delle registrazioni;
                secret manager esterno (ADR-011, in roadmap F8+);
                AC-04 su Rocky e arm64; E2E dietro squid (NFR-02); test di carico (NFR-05);
                continuous aggregates; installazione manuale dell'agent senza SSH;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        F6 — Ansible: inventario dinamico, catalogo da Git, run live
+  Next:        F6 — Ansible: inventario dinamico, catalogo playbook (Git, upload, editor, mount di rete, SFTP/SCP), run live
 ```

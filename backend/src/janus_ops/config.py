@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     sftp_max_upload_mb: int = Field(default=1024, ge=1, le=102400)
     sftp_idle_s: int = Field(default=300, ge=30, le=3600)
 
+    # --- Ansible catalog (F6): directories a network source may mount (comma-separated).
+    # Empty = network sources disabled. Keep it narrow: anything under these roots is readable
+    # by everyone with ansible.catalog.manage.
+    ansible_mount_roots: str = Field(default="", max_length=4096)
+
     # --- Agent and telemetry (F2)
     agent_dir: Path | None = Field(
         default=None, description="Directory with janus-agent-linux-<arch> binaries for bootstrap"
@@ -152,6 +157,10 @@ class Settings(BaseSettings):
             if not ok:
                 raise ValueError("must be 64 hexadecimal characters (32 bytes)")
         return value
+
+    @property
+    def ansible_roots(self) -> list[Path]:
+        return [Path(p.strip()) for p in self.ansible_mount_roots.split(",") if p.strip()]
 
     @property
     def directory_managed(self) -> bool:

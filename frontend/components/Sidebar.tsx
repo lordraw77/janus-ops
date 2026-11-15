@@ -41,6 +41,7 @@ const NAV: NavItem[] = [
   { label: "Problems", icon: TriangleAlert, target: { href: "/problems/", permission: "inventory.read" } },
   { label: "Containers", icon: Container, target: { href: "/containers/", permission: "inventory.read" } },
   { label: "Proxmox VE", icon: Boxes, target: { href: "/proxmox/", permission: "inventory.read" } },
+  { label: "Ansible", icon: Workflow, target: { href: "/ansible/", permission: "ansible.read" } },
   { label: "Ansible & Workflows", icon: Workflow, target: { phase: "F6" } },
   {
     label: "SSH Bastion",

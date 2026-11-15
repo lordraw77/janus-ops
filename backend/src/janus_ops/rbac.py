@@ -31,6 +31,9 @@ PERMISSIONS: dict[str, str] = {
     "containers.exec": "Open interactive shells inside containers",
     "proxmox.manage": "Power, snapshot, clone and migrate Proxmox VMs and containers",
     "proxmox.console": "Open Proxmox consoles (VM serial, LXC; node shell also needs ssh.connect)",
+    "ansible.read": "Browse playbook sources, files, versions and the run history",
+    "ansible.manage": "Add, sync and delete playbook sources; edit and upload files",
+    "ansible.run": "Run playbooks against nodes in scope (runs as the Janus-Ops host)",
 }
 
 ROLE_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,31}$"

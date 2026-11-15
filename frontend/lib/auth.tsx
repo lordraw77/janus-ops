@@ -21,7 +21,10 @@ export type Permission =
   | "containers.exec"
   | "environments.manage"
   | "proxmox.manage"
-  | "proxmox.console";
+  | "proxmox.console"
+  | "ansible.read"
+  | "ansible.manage"
+  | "ansible.run";
 
 export type SessionUser = {
   username: string;
