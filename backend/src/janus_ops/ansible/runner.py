@@ -5,9 +5,9 @@ sees at once which nodes are skipped and why. Execution happens in a background 
 reads the frozen file versions, reveals the SSH keys from the vault for the time of the run only,
 and removes everything it wrote in a private temporary directory afterwards.
 
-Known limits of this release: only SSH key credentials (passphrase-less), no jump hosts, host
-keys must already be pinned by the SSH bastion (ssh_host_key), and ansible-playbook must be
-installed on the Janus-Ops host.
+Known limits of this release: SSH key (passphrase-less) and password credentials (password
+nodes need sshpass), no jump hosts, host keys must already be pinned by the SSH bastion
+(ssh_host_key), and ansible-playbook must be installed on the Janus-Ops host.
 """
 
 import asyncio
@@ -103,9 +103,9 @@ def _skip_reason(row: Any) -> str | None:
     if not row.enabled:
         return "ssh_disabled"
     if row.credential_id is None:
-        return "no_credential"
-    if row.cred_kind != "ssh_key":
-        return "password_credentials_not_supported"
+        return "ssh_no_credential"
+    if row.cred_kind not in ("ssh_key", "ssh_password"):
+        return "unsupported_credential_kind"
     config: dict[str, Any] = row.config or {}
     if config.get("jump_host_id"):
         return "jump_host_not_supported"
@@ -116,20 +116,37 @@ def _skip_reason(row: Any) -> str | None:
     return None
 
 
-def inventory(nodes: list[Runnable], key_paths: dict[str, Path], known_hosts: Path) -> str:
-    """JSON is valid YAML, so the file is read by ansible's YAML inventory plugin."""
+def inventory(
+    nodes: list[Runnable],
+    key_paths: dict[str, Path],
+    passwords: dict[str, str],
+    known_hosts: Path,
+) -> str:
+    """JSON is valid YAML, so the file is read by ansible's YAML inventory plugin.
+
+    The file holds passwords for password nodes, so it is written 0600 in the private run
+    directory and removed with it. Key nodes use BatchMode (no prompts); password nodes need
+    the prompt-free sshpass path instead, so BatchMode is left out for them.
+    """
     hosts: dict[str, Any] = {}
     for node in nodes:
-        hosts[f"h_{node.node_id.replace('-', '')}"] = {
+        entry: dict[str, Any] = {
             "ansible_host": node.address,
             "ansible_port": node.port,
             "ansible_user": node.username,
-            "ansible_ssh_private_key_file": str(key_paths[node.node_id]),
-            "ansible_ssh_common_args": (
-                f"-o UserKnownHostsFile={known_hosts} -o StrictHostKeyChecking=yes"
-                " -o IdentitiesOnly=yes -o BatchMode=yes"
-            ),
         }
+        common = (
+            f"-o UserKnownHostsFile={known_hosts} -o StrictHostKeyChecking=yes"
+            " -o IdentitiesOnly=yes"
+        )
+        if node.node_id in passwords:
+            entry["ansible_password"] = passwords[node.node_id]
+            common += " -o PubkeyAuthentication=no"
+        else:
+            entry["ansible_ssh_private_key_file"] = str(key_paths[node.node_id])
+            common += " -o BatchMode=yes"
+        entry["ansible_ssh_common_args"] = common
+        hosts[f"h_{node.node_id.replace('-', '')}"] = entry
     return json.dumps({"all": {"hosts": hosts}}, indent=2)
 
 
@@ -239,7 +256,7 @@ async def _execute(engine: AsyncEngine, vault: Vault, run_id: str) -> None:
         secrets: dict[str, dict[str, Any]] = {}
         credentials = await conn.execute(
             text(
-                "SELECT id, ciphertext, nonce, dek_wrapped FROM credential"
+                "SELECT id, kind, ciphertext, nonce, dek_wrapped FROM credential"
                 " WHERE id = ANY(CAST(:ids AS uuid[]))"
             ),
             {"ids": list({n.credential_id for n in runnable})},
@@ -263,7 +280,7 @@ async def _execute(engine: AsyncEngine, vault: Vault, run_id: str) -> None:
         if secret.get("passphrase"):
             skipped.append({"node": node.name, "reason": "passphrase_key_not_supported"})
             continue
-        secrets[node.node_id] = {"secret": secret["secret"]}
+        secrets[node.node_id] = {"secret": secret["secret"], "kind": cred.kind}
         usable.append(node)
 
     if not usable:
@@ -280,14 +297,20 @@ async def _execute(engine: AsyncEngine, vault: Vault, run_id: str) -> None:
         src = home / "src"
         src.mkdir()
         keys: dict[str, Path] = {}
+        passwords: dict[str, str] = {}
         for node in usable:
+            material = secrets[node.node_id]
+            if material["kind"] == "ssh_password":
+                passwords[node.node_id] = material["secret"]
+                continue
             key = home / f"key_{node.node_id.replace('-', '')}"
-            write_private(key, secrets[node.node_id]["secret"].rstrip("\n") + "\n")
+            write_private(key, material["secret"].rstrip("\n") + "\n")
             keys[node.node_id] = key
         known = home / "known_hosts"
         write_private(known, known_hosts_text(usable))
         inv = home / "inventory.yml"
-        write_private(inv, inventory(usable, keys, known))
+        write_private(inv, inventory(usable, keys, passwords, known))
+        passwords.clear()
         write_private(home / "ansible.cfg", _runner_config(home))
         materialise(src, source_files)
         secrets.clear()

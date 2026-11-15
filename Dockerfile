@@ -55,9 +55,10 @@ LABEL org.opencontainers.image.title="Janus-Ops" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
 
-# git: Git playbook sources; openssh-client: ansible-playbook and the SSH deploy keys
+# git: Git playbook sources; openssh-client: ansible-playbook and the SSH deploy keys;
+# sshpass: Ansible's password authentication for password credentials
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git openssh-client \
+ && apt-get install -y --no-install-recommends git openssh-client sshpass \
  && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 10001 janus \

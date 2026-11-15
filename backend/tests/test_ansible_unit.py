@@ -269,7 +269,7 @@ def test_inventory_uses_node_id_and_pinned_known_hosts(tmp_path: Path) -> None:
     node = _node("web-01")
     keys = {node.node_id: tmp_path / "key"}
     known = tmp_path / "known_hosts"
-    inv = json.loads(runner.inventory([node], keys, known))
+    inv = json.loads(runner.inventory([node], keys, {}, known))
     host = inv["all"]["hosts"]["h_0b5f0c1e6a3e4e8c9d2a1f2e3d4c5b6a"]
     assert host["ansible_host"] == "10.0.0.5"
     assert host["ansible_user"] == "ansible"
@@ -312,10 +312,35 @@ def test_skip_reasons_for_unusable_nodes() -> None:
     cases = {
         "no_ssh_capability": {"enabled": None},
         "ssh_disabled": {"enabled": False},
-        "no_credential": {"credential_id": None},
-        "password_credentials_not_supported": {"cred_kind": "ssh_password"},
+        "ssh_no_credential": {"credential_id": None},
+        "unsupported_credential_kind": {"cred_kind": "generic"},
         "jump_host_not_supported": {"config": {"jump_host_id": "j"}},
         "host_key_not_pinned": {"host_key": None},
     }
     for reason, change in cases.items():
         assert runner._skip_reason(SimpleNamespace(**{**base, **change})) == reason
+
+
+def test_password_node_inventory_uses_password_not_batchmode(tmp_path: Path) -> None:
+    key_node = _node("key-host")
+    pw_node = runner.Runnable(
+        node_id="1c6f0c1e-6a3e-4e8c-9d2a-1f2e3d4c5b6b",
+        name="pw-host",
+        address="10.0.0.6",
+        port=22,
+        username="root",
+        credential_id="p",
+        host_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIT",
+    )
+    keys = {key_node.node_id: tmp_path / "key"}
+    inv = json.loads(
+        runner.inventory([key_node, pw_node], keys, {pw_node.node_id: "s3cret"}, tmp_path / "kh")
+    )
+    key_host = inv["all"]["hosts"]["h_0b5f0c1e6a3e4e8c9d2a1f2e3d4c5b6a"]
+    pw_host = inv["all"]["hosts"]["h_1c6f0c1e6a3e4e8c9d2a1f2e3d4c5b6b"]
+    assert key_host["ansible_ssh_private_key_file"] == str(keys[key_node.node_id])
+    assert "BatchMode=yes" in key_host["ansible_ssh_common_args"]
+    assert "ansible_password" not in key_host
+    assert pw_host["ansible_password"] == "s3cret"
+    assert "BatchMode" not in pw_host["ansible_ssh_common_args"]
+    assert "ansible_ssh_private_key_file" not in pw_host
