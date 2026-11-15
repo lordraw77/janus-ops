@@ -638,7 +638,7 @@ Regole comuni:
 | Mount di rete: solo sotto le radici di `JANUS_ANSIBLE_MOUNT_ROOTS` (default: disattivate), symlink ignorati | ✅ | Test unitari con symlink che escono dalla radice |
 | Run: nodi in ambito (404 fuori ambito), host key pinnata, solo chiavi SSH senza passphrase; chiave in file 0600 in cartella temporanea, rimossa a fine run | ✅ | Run end-to-end con `ansible-playbook` finto: inventory, `known_hosts`, permessi 600, segreto assente da log e storico |
 | Log del run aggiornato in background, storico e dettaglio per scope | ✅ parziale | Polling via API; nessuno streaming WebSocket |
-| Esecuzione reale con Ansible | ⏳ | `ansible-playbook` non è installato in questo ambiente: da provare su un host reale |
+| Esecuzione reale con Ansible | ✅ parziale | `ansible-core` 2.21.5 nel venv e nell'immagine (`git` e `openssh-client` installati); `ansible-playbook` verificato nel container come utente 10001. Run su un host reale ancora da provare |
 | Password SSH, jump host, `survey` (variabili chieste prima del run) | ⏳ | Non supportati in questa versione; i nodi così configurati vengono saltati con motivo esplicito |
 | Sorgente SFTP/SCP | ⏳ | Non iniziata |
 | UI: sorgenti, upload, editor con versioni e diff, avvio run con scelta dei nodi, storico con log | ✅ | `tsc`, ESLint, build statico; prova manuale nel browser non fatta |

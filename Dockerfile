@@ -55,6 +55,11 @@ LABEL org.opencontainers.image.title="Janus-Ops" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
 
+# git: Git playbook sources; openssh-client: ansible-playbook and the SSH deploy keys
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git openssh-client \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system --gid 10001 janus \
  && useradd --system --uid 10001 --gid janus --home-dir /app --shell /usr/sbin/nologin janus \
  && install -d -o 10001 -g 10001 -m 0700 /var/lib/janus-ops/recordings
