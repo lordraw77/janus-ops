@@ -1,0 +1,17 @@
+---
+# Uptime and load of each host. Read-only: nothing is changed on the nodes.
+- name: Report uptime and load
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Read uptime
+      ansible.builtin.command: uptime -p
+      register: uptime_pretty
+      changed_when: false
+
+    - name: Show uptime summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: {{ uptime_pretty.stdout }},
+          since {{ ansible_facts.uptime_seconds | default('?') }} s,
+          load {{ ansible_facts.loadavg | default({}) | list | join(' ') }}

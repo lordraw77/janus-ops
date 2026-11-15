@@ -1,0 +1,33 @@
+---
+# Lists the package updates available on each host, without installing them.
+# Debian/Ubuntu: simulated upgrade (apt-get -s). RHEL-like: dnf check-update (exit 100 = updates).
+- name: Check for package updates
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Simulate upgrade (Debian family)
+      ansible.builtin.command: apt-get -s -q upgrade
+      register: apt_sim
+      changed_when: false
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Count pending updates (Debian family)
+      ansible.builtin.set_fact:
+        pending_updates: "{{ apt_sim.stdout_lines | select('match', '^Inst ') | list | length }}"
+      when: ansible_facts.os_family == "Debian"
+
+    - name: Check for updates (RHEL family)
+      ansible.builtin.command: dnf -q check-update
+      register: dnf_check
+      changed_when: false
+      failed_when: dnf_check.rc not in [0, 100]
+      when: ansible_facts.os_family == "RedHat"
+
+    - name: Count pending updates (RHEL family)
+      ansible.builtin.set_fact:
+        pending_updates: "{{ dnf_check.stdout_lines | select('match', '^[A-Za-z0-9_.+-]+\\.[a-z0-9_]+\\s') | list | length }}"
+      when: ansible_facts.os_family == "RedHat"
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ pending_updates | default('unknown') }} update(s) available"
