@@ -8,6 +8,13 @@ import { useLoad } from "@/lib/ansible";
 import { api, message } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
+// Same rule as the server (janus_ops/agents/exec.py): no shell syntax can run on a node
+const SHELL_CHARS = /[;|&`$<>()\\\n\r]/;
+
+function hasShellSyntax(command: string): boolean {
+  return SHELL_CHARS.test(command);
+}
+
 const RISK_STYLE: Record<string, string> = {
   low: "text-ok",
   medium: "text-warn",
@@ -259,10 +266,16 @@ function ActionRow({
         </div>
       )}
       {canExecute && action.status === "approved" && !editing && action.command && (
-        <div className="mt-2">
-          <Button variant="primary" disabled={busy} onClick={() => void onExecute(action)}>
-            Run on node
-          </Button>
+        <div className="mt-2 space-y-1">
+          {hasShellSyntax(action.command) ? (
+            <p className="text-xs text-warn">
+              This command uses shell syntax and cannot run on a node. Edit it to a single program with arguments.
+            </p>
+          ) : (
+            <Button variant="primary" disabled={busy} onClick={() => void onExecute(action)}>
+              Run on node
+            </Button>
+          )}
         </div>
       )}
       {editing && (

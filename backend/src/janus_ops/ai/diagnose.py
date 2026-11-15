@@ -37,8 +37,12 @@ Rules:
 - Answer with one JSON object and nothing else:
   {"summary": "<diagnosis in at most 1500 characters>",
    "actions": [{"title": "<short>", "description": "<what to do and why>",
-                "command": "<optional command, for display only>",
+                "command": "<one program with its arguments, e.g. \"df -h /\", or empty>",
                 "risk": "low" | "medium" | "high"}]}
+- A command is run on the node WITHOUT a shell: it must be one program with its arguments.
+  Never use pipes (|), redirects (>, <, 2>), lists (;, &&, ||), substitutions ($, backticks) or
+  globs for a command. If a result needs filtering, propose separate actions instead.
+- Prefer read-only commands. Leave the command empty when no single command fits.
 - At most 8 actions. Write in English."""
 
 
