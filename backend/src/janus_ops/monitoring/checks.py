@@ -36,7 +36,7 @@ from janus_ops.proxmox.backup_audit import collect as collect_backups
 from janus_ops.proxmox.client import PveError
 
 State = Literal["ok", "warn", "crit", "unknown"]
-Kind = Literal["host", "metric", "systemd", "port", "tcp", "http", "backup", "snmp"]
+Kind = Literal["host", "metric", "systemd", "service", "port", "tcp", "http", "backup", "snmp"]
 FACTS_STALE = timedelta(minutes=3)
 METRIC_STALE = timedelta(minutes=5)
 MAX_OUTPUT = 1000
@@ -67,6 +67,11 @@ class MetricParams(_Params):
 
 class SystemdParams(_Params):
     unit: str | None = Field(default=None, pattern=r"^[A-Za-z0-9@:._\\-]{1,256}$")
+
+
+class ServiceParams(_Params):
+    # one unit, checked with `systemctl is-active`: the command is fixed, only the name varies
+    unit: str = Field(pattern=r"^[A-Za-z0-9@:._\\-]{1,256}$")
 
 
 class PortParams(_Params):
@@ -105,6 +110,7 @@ PARAMS: dict[str, type[_Params]] = {
     "host": HostParams,
     "metric": MetricParams,
     "systemd": SystemdParams,
+    "service": ServiceParams,
     "port": PortParams,
     "tcp": TcpParams,
     "http": HttpParams,
@@ -355,6 +361,18 @@ def evaluate_snmp(c: Check, reading: Reading) -> Result:
     limits = f" (warn {op} {_fmt(c.warn) if c.warn is not None else '-'},"
     limits += f" crit {op} {_fmt(c.crit) if c.crit is not None else '-'})"
     return Result(state, f"{p.oid} = {_fmt(value)}{limits}", {"value": value})
+
+
+def grade_service(unit: str, output: str) -> Result:
+    """`systemctl is-active` prints one word: active is ok, activating or reloading is a warning,
+    anything else (inactive, failed, unknown) is critical."""
+    lines = output.strip().splitlines()
+    state = lines[0].strip() if lines else ""
+    if state == "active":
+        return Result("ok", f"{unit} is active")
+    if state in ("activating", "reloading"):
+        return Result("warn", f"{unit} is {state}")
+    return Result("crit", f"{unit} is {state or 'not reported'}")
 
 
 async def evaluate(

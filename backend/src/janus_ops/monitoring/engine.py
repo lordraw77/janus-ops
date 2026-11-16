@@ -26,9 +26,19 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from janus_ops.agents import exec as node_exec
 from janus_ops.agents.hub import AgentHub
 from janus_ops.monitoring import snmp_poll
-from janus_ops.monitoring.checks import Check, Result, SnmpParams, clip, evaluate, evaluate_snmp
+from janus_ops.monitoring.checks import (
+    Check,
+    Result,
+    ServiceParams,
+    SnmpParams,
+    clip,
+    evaluate,
+    evaluate_snmp,
+    grade_service,
+)
 from janus_ops.proxmox.access import ProxmoxAccess
 from janus_ops.vault import Vault
 
@@ -178,7 +188,9 @@ class Engine:
             crit=row.crit_threshold,
         )
         online = self.hub.get(check.node_id) is not None
-        if check.kind in ("metric", "systemd", "port") and not online:
+        if check.kind == "service":
+            result = await self._service(check, online)
+        elif check.kind in ("metric", "systemd", "port") and not online:
             # no fresh data while the agent is away: the host check reports it
             result = Result("unknown", "Agent not connected")
         elif check.kind == "snmp":
@@ -193,6 +205,23 @@ class Engine:
             else None
         )
         await record(self.db, check.id, row.check_cycles, prev, result, unreachable)
+
+    async def _service(self, check: Check, online: bool) -> Result:
+        """`systemctl is-active <unit>` through the agent (agent connected, exec allowed)."""
+        if not online:
+            return Result("unknown", "Agent not connected")
+        unit = ServiceParams.model_validate(check.params).unit
+        async with self.db.connect() as conn:
+            allowed = await node_exec.policy_allows_exec(conn, check.node_id)
+        if not allowed:
+            return Result("unknown", "exec is not allowed on this node (agent policy allow_exec)")
+        try:
+            result = await node_exec.run(
+                self.hub, check.node_id, ["systemctl", "is-active", unit], 15
+            )
+        except node_exec.ExecError as exc:
+            return Result("crit", f"{unit}: the command did not run ({exc.code})")
+        return grade_service(unit, result.output)
 
     async def _snmp(self, check: Check) -> Result:
         """One SNMP GET from the server; the credentials are read from the vault here."""

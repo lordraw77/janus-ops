@@ -1,7 +1,7 @@
 /** Alerting API types (backend: janus_ops.monitoring). */
 
 export type CheckState = "ok" | "warn" | "crit" | "unknown";
-export type CheckKind = "host" | "metric" | "systemd" | "port" | "tcp" | "http" | "backup" | "snmp";
+export type CheckKind = "host" | "metric" | "systemd" | "service" | "port" | "tcp" | "http" | "backup" | "snmp";
 
 export type CheckDef = {
   node_id?: string;
@@ -116,6 +116,7 @@ export const KIND_LABEL: Record<CheckKind, string> = {
   http: "HTTP(S) request (from server)",
   backup: "Backups (Proxmox cluster)",
   snmp: "SNMP OID (from server)",
+  service: "Systemd service (via agent)",
 };
 
 export const CHANNEL_LABEL: Record<ChannelKind, string> = {
@@ -153,6 +154,8 @@ export function describeCheck(c: CheckDef): string {
       return `GET ${p.url} → ${p.expect_status ?? "200-399"}${limits}`;
     case "backup":
       return p.max_age_h ? `guests backed up within ${p.max_age_h} h` : "guests backed up on schedule";
+    case "service":
+      return `${p.unit} is active`;
     case "snmp":
       return `${p.oid}${p.scale && p.scale !== 1 ? ` × ${p.scale}` : ""}${limits}`;
     default:

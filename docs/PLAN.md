@@ -113,6 +113,10 @@
 > `GOARCH=arm GOARM=7` nel Makefile e nel Dockerfile, bootstrap che riconosce `armv7l`. Il Pi a 64 bit
 > usa già l'agent `arm64`.
 >
+> Check **service** (systemd via agent): `systemctl is-active <unità>` eseguito dall'agent (serve agent
+> connesso e `allow_exec`). Il comando è fisso, nel parametro c'è solo il nome dell'unità (validato): `active`
+> è ok, `activating`/`reloading` avviso, il resto critico. Il check `systemd` resta per gli unit falliti.
+>
 > Inventario: colonne **Agent** (versione e architettura) e **Installed at** (il percorso del binario,
 > `/usr/local/bin/janus-agent`, o `—` se l'agent non è installato o è revocato). Migrazione `0022`: il
 > vincolo sull'architettura accetta `arm`, altrimenti l'agent di un Pi a 32 bit non potrebbe registrarsi.
