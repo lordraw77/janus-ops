@@ -27,7 +27,12 @@ export type Permission =
   | "ansible.run"
   | "ai.use"
   | "ai.approve"
-  | "actions.execute";
+  | "actions.execute"
+  | "gitops.manage"
+  | "gitops.deploy"
+  | "workflow.manage"
+  | "workflow.run"
+  | "workflow.approve";
 
 export type SessionUser = {
   username: string;
