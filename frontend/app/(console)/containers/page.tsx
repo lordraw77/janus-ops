@@ -27,9 +27,19 @@ import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 // xterm.js touches `window`: load it in the browser only
-const TerminalView = dynamic(() => import("@/components/TerminalView").then((m) => m.TerminalView), { ssr: false });
+const TerminalView = dynamic(
+  () => import("@/components/TerminalView").then((m) => m.TerminalView),
+  { ssr: false },
+);
 
-type Host = { node_id: string; node_name: string; environment: string; via: "agent" | "ssh"; address: string; agent_online: boolean };
+type Host = {
+  node_id: string;
+  node_name: string;
+  environment: string;
+  via: "agent" | "ssh";
+  address: string;
+  agent_online: boolean;
+};
 type Container = {
   id: string;
   name: string;
@@ -44,8 +54,22 @@ type Container = {
   project: string | null;
   service: string | null;
 };
-type Stack = { name: string; working_dir: string | null; services: string[]; containers: number; running: number };
-type Info = { version: string; os: string; cpus: number; memory: number; containers: number; running: number; images: number };
+type Stack = {
+  name: string;
+  working_dir: string | null;
+  services: string[];
+  containers: number;
+  running: number;
+};
+type Info = {
+  version: string;
+  os: string;
+  cpus: number;
+  memory: number;
+  containers: number;
+  running: number;
+  images: number;
+};
 type Stats = {
   cpu_pct: number;
   mem_bytes: number | null;
@@ -58,24 +82,42 @@ type Stats = {
   pids: number | null;
 };
 
-
-function LogsDialog({ host, c, onClose }: { host: Host; c: Container; onClose: () => void }) {
+function LogsDialog({
+  host,
+  c,
+  onClose,
+}: {
+  host: Host;
+  c: Container;
+  onClose: () => void;
+}) {
   const [lines, setLines] = useState<{ stream: string; data: string }[]>([]);
   const [status, setStatus] = useState("connecting");
   const box = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const params = new URLSearchParams({ node_id: host.node_id, container: c.name, tail: "300" });
-    const ws = new WebSocket(`${proto}//${window.location.host}/api/v1/containers/logs/ws?${params}`);
+    const params = new URLSearchParams({
+      node_id: host.node_id,
+      container: c.name,
+      tail: "300",
+    });
+    const ws = new WebSocket(
+      `${proto}//${window.location.host}/api/v1/containers/logs/ws?${params}`,
+    );
     ws.onopen = () => setStatus("following");
     ws.onmessage = (e: MessageEvent<string>) => {
       const msg = JSON.parse(e.data);
-      if (msg.type === "log") setLines((prev) => [...prev.slice(-4000), { stream: msg.stream, data: msg.data }]);
+      if (msg.type === "log")
+        setLines((prev) => [
+          ...prev.slice(-4000),
+          { stream: msg.stream, data: msg.data },
+        ]);
       else if (msg.type === "error") setStatus(message(msg.code));
       else if (msg.type === "end") setStatus("container stopped");
     };
-    ws.onclose = () => setStatus((s) => (s === "following" ? "disconnected" : s));
+    ws.onclose = () =>
+      setStatus((s) => (s === "following" ? "disconnected" : s));
     return () => ws.close();
   }, [host.node_id, c.name]);
 
@@ -87,9 +129,17 @@ function LogsDialog({ host, c, onClose }: { host: Host; c: Container; onClose: (
     <Modal title={`Logs · ${c.name}`} onClose={onClose} wide>
       <div>
         <div className="mb-1 font-mono text-[10px] text-fg-muted">{status}</div>
-        <pre ref={box} className="h-[60vh] overflow-auto rounded bg-canvas p-2 font-mono text-[11px] leading-snug">
+        <pre
+          ref={box}
+          className="h-[60vh] overflow-auto rounded bg-canvas p-2 font-mono text-[11px] leading-snug"
+        >
           {lines.map((l, i) => (
-            <span key={i} className={l.stream === "stderr" ? "text-warn" : "text-fg-secondary"}>
+            <span
+              key={i}
+              className={
+                l.stream === "stderr" ? "text-warn" : "text-fg-secondary"
+              }
+            >
               {l.data}
             </span>
           ))}
@@ -99,17 +149,27 @@ function LogsDialog({ host, c, onClose }: { host: Host; c: Container; onClose: (
   );
 }
 
-function StatsDialog({ host, c, onClose }: { host: Host; c: Container; onClose: () => void }) {
+function StatsDialog({
+  host,
+  c,
+  onClose,
+}: {
+  host: Host;
+  c: Container;
+  onClose: () => void;
+}) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const load = () =>
-      void api<Stats>(`/containers/${host.node_id}/c/${c.name}/stats`).then((r) => {
-        if (cancelled) return;
-        if (r.ok) setStats(r.data);
-        else setError(message(r.code));
-      });
+      void api<Stats>(`/containers/${host.node_id}/c/${c.name}/stats`).then(
+        (r) => {
+          if (cancelled) return;
+          if (r.ok) setStats(r.data);
+          else setError(message(r.code));
+        },
+      );
     load();
     const t = setInterval(load, 5000);
     return () => {
@@ -120,9 +180,20 @@ function StatsDialog({ host, c, onClose }: { host: Host; c: Container; onClose: 
   const rows: [string, string][] = stats
     ? [
         ["CPU", `${stats.cpu_pct.toFixed(1)}%`],
-        ["Memory", stats.mem_bytes === null ? "–" : `${formatBytes(stats.mem_bytes)}${stats.mem_pct !== null ? ` (${stats.mem_pct.toFixed(1)}%)` : ""}`],
-        ["Network in / out", `${formatBytes(stats.net_rx_bytes)} / ${formatBytes(stats.net_tx_bytes)}`],
-        ["Disk read / write", `${formatBytes(stats.blk_read_bytes)} / ${formatBytes(stats.blk_write_bytes)}`],
+        [
+          "Memory",
+          stats.mem_bytes === null
+            ? "–"
+            : `${formatBytes(stats.mem_bytes)}${stats.mem_pct !== null ? ` (${stats.mem_pct.toFixed(1)}%)` : ""}`,
+        ],
+        [
+          "Network in / out",
+          `${formatBytes(stats.net_rx_bytes)} / ${formatBytes(stats.net_tx_bytes)}`,
+        ],
+        [
+          "Disk read / write",
+          `${formatBytes(stats.blk_read_bytes)} / ${formatBytes(stats.blk_write_bytes)}`,
+        ],
         ["Processes", String(stats.pids ?? "–")],
       ]
     : [];
@@ -138,12 +209,23 @@ function StatsDialog({ host, c, onClose }: { host: Host; c: Container; onClose: 
           </div>
         ))}
       </dl>
-      <p className="mt-2 text-[10px] text-fg-muted">Refreshed every 5 s; network and disk are totals since the container started.</p>
+      <p className="mt-2 text-[10px] text-fg-muted">
+        Refreshed every 5 s; network and disk are totals since the container
+        started.
+      </p>
     </Modal>
   );
 }
 
-function ExecDialog({ host, c, onClose }: { host: Host; c: Container; onClose: () => void }) {
+function ExecDialog({
+  host,
+  c,
+  onClose,
+}: {
+  host: Host;
+  c: Container;
+  onClose: () => void;
+}) {
   const [status, setStatus] = useState<TerminalStatus>({ state: "connecting" });
   const [cmd, setCmd] = useState<string | null>(null);
   return (
@@ -152,16 +234,28 @@ function ExecDialog({ host, c, onClose }: { host: Host; c: Container; onClose: (
         {cmd === null ? (
           <div className="flex gap-2">
             {["/bin/sh", "/bin/bash"].map((s) => (
-              <Button key={s} onClick={() => setCmd(s)} variant={s === "/bin/sh" ? "primary" : "secondary"}>
+              <Button
+                key={s}
+                onClick={() => setCmd(s)}
+                variant={s === "/bin/sh" ? "primary" : "secondary"}
+              >
                 {s}
               </Button>
             ))}
-            <span className="self-center text-xs text-fg-muted">The session is recorded in the audit log.</span>
+            <span className="self-center text-xs text-fg-muted">
+              The session is recorded in the audit log.
+            </span>
           </div>
         ) : (
           <>
             <div className="mb-1 font-mono text-[10px] text-fg-muted">
-              {status.state === "connected" ? `connected · ${status.user}` : status.state === "error" ? message(status.code) : status.state === "closed" ? `closed (${status.reason})` : "connecting…"}
+              {status.state === "connected"
+                ? `connected · ${status.user}`
+                : status.state === "error"
+                  ? message(status.code)
+                  : status.state === "closed"
+                    ? `closed (${status.reason})`
+                    : "connecting…"}
             </div>
             <div className="h-[60vh] rounded bg-canvas p-1">
               <TerminalView
@@ -180,7 +274,17 @@ function ExecDialog({ host, c, onClose }: { host: Host; c: Container; onClose: (
 }
 
 type Live = Stats & { restarts: number; started_at: string | null };
-type SortKey = "name" | "image" | "state" | "health" | "uptime" | "restarts" | "cpu" | "mem" | "ip" | "stack";
+type SortKey =
+  | "name"
+  | "image"
+  | "state"
+  | "health"
+  | "uptime"
+  | "restarts"
+  | "cpu"
+  | "mem"
+  | "ip"
+  | "stack";
 
 const STATE_BADGE: Record<string, string> = {
   running: "border-ok/40 bg-ok/15 text-ok",
@@ -194,6 +298,7 @@ const HEALTH_DOT: Record<string, { color: string; label: string }> = {
   starting: { color: "var(--color-warn)", label: "health check starting" },
 };
 const LIVE_REFRESH_MS = 15_000;
+const ALL_HOSTS = "*";
 
 /** docker-stats style sizes: 26.3M, 12G. */
 function short(v: number | null | undefined): string {
@@ -209,7 +314,10 @@ function short(v: number | null | undefined): string {
 }
 
 function uptime(c: Container, live: Live | undefined, now: number): string {
-  if (c.state !== "running" || !live?.started_at) return c.status.replace(/^Up /, "").replace(/ \((un)?healthy\)| \(health: starting\)/, "");
+  if (c.state !== "running" || !live?.started_at)
+    return c.status
+      .replace(/^Up /, "")
+      .replace(/ \((un)?healthy\)| \(health: starting\)/, "");
   const s = Math.max(0, (now - new Date(live.started_at).getTime()) / 1000);
   if (s < 60) return `${Math.floor(s)} s`;
   if (s < 3600) return `${Math.floor(s / 60)} min`;
@@ -218,7 +326,19 @@ function uptime(c: Container, live: Live | undefined, now: number): string {
   return `${d} ${d === 1 ? "day" : "days"}`;
 }
 
-function IconButton({ title, onClick, disabled, danger, children }: { title: string; onClick: () => void; disabled?: boolean; danger?: boolean; children: ReactNode }) {
+function IconButton({
+  title,
+  onClick,
+  disabled,
+  danger,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"
@@ -233,6 +353,247 @@ function IconButton({ title, onClick, disabled, danger, children }: { title: str
   );
 }
 
+type DialogKind = "logs" | "stats" | "exec";
+
+type RowProps = {
+  host: Host;
+  c: Container;
+  l: Live | undefined;
+  now: number;
+  showHost?: boolean;
+  manage: boolean;
+  canExec: boolean;
+  busy: boolean;
+  onAct: (action: string) => void;
+  onDialog: (kind: DialogKind) => void;
+  onStack: (name: string) => void;
+};
+
+/** One container row; shared by the per-host table and the all-hosts table. */
+function ContainerRow({
+  host,
+  c,
+  l,
+  now,
+  showHost = false,
+  manage,
+  canExec,
+  busy,
+  onAct,
+  onDialog,
+  onStack,
+}: RowProps) {
+  const running = c.state === "running";
+  const health = c.health ? HEALTH_DOT[c.health] : undefined;
+  return (
+    <tr className="hover:bg-elevated/50">
+      {showHost && (
+        <td className="whitespace-nowrap px-2 py-2">
+          <div className="font-semibold">{host.node_name}</div>
+          <div className="font-mono text-[10px] text-fg-muted">
+            {host.address}
+          </div>
+        </td>
+      )}
+      <td
+        className="whitespace-nowrap px-2 py-2 font-semibold"
+        title={`${c.id}${c.service ? ` · service ${c.service}` : ""}`}
+      >
+        {c.name}
+      </td>
+      <td
+        className="max-w-44 truncate px-2 py-2 text-fg-secondary"
+        title={c.image}
+      >
+        {c.image}
+      </td>
+      <td className="px-2 py-2">
+        <span
+          className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-semibold ${STATE_BADGE[c.state] ?? "border-line bg-elevated text-fg-muted"}`}
+        >
+          {running ? (
+            <Play className="h-3 w-3" aria-hidden />
+          ) : c.state === "paused" ? (
+            <Pause className="h-3 w-3" aria-hidden />
+          ) : (
+            <Square className="h-3 w-3" aria-hidden />
+          )}
+          {c.state}
+        </span>
+      </td>
+      <td className="px-2 py-2 text-center">
+        {health ? (
+          <span
+            className="inline-block h-2.5 w-2.5 rounded-full"
+            style={{ background: health.color }}
+            title={health.label}
+            aria-label={health.label}
+          />
+        ) : (
+          <span className="text-fg-muted" title="No health check">
+            –
+          </span>
+        )}
+      </td>
+      <td className="whitespace-nowrap px-2 py-2 text-fg-secondary">
+        {uptime(c, l, now)}
+      </td>
+      <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-secondary">
+        {l ? (l.restarts ? l.restarts : "–") : "–"}
+      </td>
+      <td className="px-2 py-2 text-right font-mono tabular-nums">
+        {l ? `${l.cpu_pct.toFixed(1)}%` : running ? "…" : "–"}
+      </td>
+      <td className="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">
+        {l && l.mem_bytes !== null ? (
+          <>
+            {short(l.mem_bytes)}
+            <span className="text-fg-muted">/{short(l.mem_limit)}</span>
+          </>
+        ) : (
+          "–"
+        )}
+      </td>
+      <td className="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">
+        {l ? (
+          <span title="Received / sent since the container started">
+            <span className="text-primary">↓</span>
+            {short(l.net_rx_bytes)} <span className="text-warn">↑</span>
+            {short(l.net_tx_bytes)}
+          </span>
+        ) : (
+          "–"
+        )}
+      </td>
+      <td className="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">
+        {l ? (
+          <span title="Read / written since the container started">
+            <span className="text-fg-muted">r</span>
+            {short(l.blk_read_bytes)} <span className="text-fg-muted">w</span>
+            {short(l.blk_write_bytes)}
+          </span>
+        ) : (
+          "–"
+        )}
+      </td>
+      <td className="whitespace-nowrap px-2 py-2 font-mono">
+        {c.ips.join(", ") || "–"}
+      </td>
+      <td className="px-2 py-2">
+        <div className="flex flex-wrap gap-1">
+          {c.published.length === 0 && <span className="text-fg-muted">–</span>}
+          {c.published.map((p) => (
+            <a
+              key={`${p.public}:${p.private}`}
+              href={`http://${host.address}:${p.public}`}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-0.5 rounded bg-elevated px-1.5 py-0.5 font-mono hover:text-primary"
+              title={`Open http://${host.address}:${p.public}`}
+            >
+              {p.public}:{p.private}
+              <ExternalLink className="h-2.5 w-2.5" aria-hidden />
+            </a>
+          ))}
+        </div>
+      </td>
+      <td className="px-2 py-2">
+        {c.project ? (
+          <button
+            type="button"
+            onClick={() => onStack(c.project as string)}
+            className="whitespace-nowrap rounded border border-line px-1.5 py-0.5 font-semibold hover:border-primary"
+            title={`Show only the stack ${c.project}`}
+          >
+            {c.project}
+          </button>
+        ) : (
+          <span className="text-fg-muted">–</span>
+        )}
+      </td>
+      <td className="px-2 py-2">
+        <div className="flex justify-end gap-0.5">
+          <IconButton
+            title={`Logs of ${c.name}`}
+            onClick={() => onDialog("logs")}
+          >
+            <FileText className="h-3.5 w-3.5" aria-hidden />
+          </IconButton>
+          {running && canExec && (
+            <IconButton
+              title={`Shell in ${c.name}`}
+              onClick={() => onDialog("exec")}
+            >
+              <SquareTerminal className="h-3.5 w-3.5" aria-hidden />
+            </IconButton>
+          )}
+          {running && (
+            <IconButton
+              title={`Stats of ${c.name}`}
+              onClick={() => onDialog("stats")}
+            >
+              <Activity className="h-3.5 w-3.5" aria-hidden />
+            </IconButton>
+          )}
+          {manage && running && (
+            <>
+              <IconButton
+                title={`Restart ${c.name}`}
+                onClick={() => onAct("restart")}
+                disabled={busy}
+              >
+                <RotateCw className="h-3.5 w-3.5" aria-hidden />
+              </IconButton>
+              <IconButton
+                title={`Pause ${c.name}`}
+                onClick={() => onAct("pause")}
+                disabled={busy}
+              >
+                <Pause className="h-3.5 w-3.5" aria-hidden />
+              </IconButton>
+              <IconButton
+                title={`Stop ${c.name}`}
+                onClick={() => onAct("stop")}
+                disabled={busy}
+              >
+                <Square className="h-3.5 w-3.5" aria-hidden />
+              </IconButton>
+            </>
+          )}
+          {manage && c.state === "paused" && (
+            <IconButton
+              title={`Resume ${c.name}`}
+              onClick={() => onAct("unpause")}
+              disabled={busy}
+            >
+              <Play className="h-3.5 w-3.5" aria-hidden />
+            </IconButton>
+          )}
+          {manage && !running && c.state !== "paused" && (
+            <IconButton
+              title={`Start ${c.name}`}
+              onClick={() => onAct("start")}
+              disabled={busy}
+            >
+              <Play className="h-3.5 w-3.5" aria-hidden />
+            </IconButton>
+          )}
+          {manage && !running && (
+            <IconButton
+              title={`Remove ${c.name}`}
+              onClick={() => onAct("remove")}
+              disabled={busy}
+              danger
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+            </IconButton>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function HostView({ host }: { host: Host }) {
   const { can } = useAuth();
   const manage = can("containers.manage");
@@ -241,20 +602,31 @@ function HostView({ host }: { host: Host }) {
   const info = useResource<Info>(`/containers/${host.node_id}/info`);
   const [live, setLive] = useState<Record<string, Live>>({});
   const [liveTick, setLiveTick] = useState(0);
-  const [dialog, setDialog] = useState<{ kind: "logs" | "stats" | "exec"; c: Container } | null>(null);
-  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [dialog, setDialog] = useState<{
+    kind: "logs" | "stats" | "exec";
+    c: Container;
+  } | null>(null);
+  const [notice, setNotice] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState("");
   const [stackFilter, setStackFilter] = useState("");
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "name", desc: false });
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
+    key: "name",
+    desc: false,
+  });
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
-      const r = await api<Record<string, Live>>(`/containers/${host.node_id}/live`);
+      const r = await api<Record<string, Live>>(
+        `/containers/${host.node_id}/live`,
+      );
       if (cancelled) return;
       if (r.ok) {
         setLive(r.data);
@@ -277,29 +649,54 @@ function HostView({ host }: { host: Host }) {
   };
 
   async function act(c: Container, action: string) {
-    if (action === "remove" && !window.confirm(`Remove the container ${c.name}?`)) return;
-    if ((action === "stop" || action === "kill") && !window.confirm(`${action} ${c.name}?`)) return;
+    if (
+      action === "remove" &&
+      !window.confirm(`Remove the container ${c.name}?`)
+    )
+      return;
+    if (
+      (action === "stop" || action === "kill") &&
+      !window.confirm(`${action} ${c.name}?`)
+    )
+      return;
     setBusy(c.name);
     const r =
       action === "remove"
-        ? await api(`/containers/${host.node_id}/c/${c.name}`, { method: "DELETE" })
-        : await api(`/containers/${host.node_id}/c/${c.name}/${action}`, { method: "POST" });
+        ? await api(`/containers/${host.node_id}/c/${c.name}`, {
+            method: "DELETE",
+          })
+        : await api(`/containers/${host.node_id}/c/${c.name}/${action}`, {
+            method: "POST",
+          });
     setBusy(null);
-    setNotice(r.ok ? { kind: "ok", text: `${c.name}: ${action} done.` } : { kind: "error", text: message(r.code) });
+    setNotice(
+      r.ok
+        ? { kind: "ok", text: `${c.name}: ${action} done.` }
+        : { kind: "error", text: message(r.code) },
+    );
     reload();
   }
 
   async function stackAct(name: string, action: string) {
-    if (!window.confirm(`${action} every container of the stack ${name}?`)) return;
+    if (!window.confirm(`${action} every container of the stack ${name}?`))
+      return;
     setBusy(name);
-    const r = await api<{ results: Record<string, string> }>(`/containers/${host.node_id}/stacks/${name}/${action}`, { method: "POST" });
+    const r = await api<{ results: Record<string, string> }>(
+      `/containers/${host.node_id}/stacks/${name}/${action}`,
+      { method: "POST" },
+    );
     setBusy(null);
     if (!r.ok) setNotice({ kind: "error", text: message(r.code) });
     else {
-      const failed = Object.entries(r.data.results).filter(([, v]) => v !== "ok");
+      const failed = Object.entries(r.data.results).filter(
+        ([, v]) => v !== "ok",
+      );
       setNotice(
         failed.length
-          ? { kind: "error", text: `${name}: ${failed.map(([k, v]) => `${k}: ${v}`).join("; ")}` }
+          ? {
+              kind: "error",
+              text: `${name}: ${failed.map(([k, v]) => `${k}: ${v}`).join("; ")}`,
+            }
           : { kind: "ok", text: `${name}: ${action} done.` },
       );
     }
@@ -312,10 +709,17 @@ function HostView({ host }: { host: Host }) {
   const rows = all.filter(
     (c) =>
       (!stateFilter || c.state === stateFilter) &&
-      (!stackFilter || (stackFilter === "~" ? !c.project : c.project === stackFilter)) &&
-      (!q || [c.name, c.image, c.project ?? "", c.id, ...c.ips].some((v) => v.toLowerCase().includes(q))),
+      (!stackFilter ||
+        (stackFilter === "~" ? !c.project : c.project === stackFilter)) &&
+      (!q ||
+        [c.name, c.image, c.project ?? "", c.id, ...c.ips].some((v) =>
+          v.toLowerCase().includes(q),
+        )),
   );
-  const startedAt = (c: Container) => (live[c.name]?.started_at ? new Date(live[c.name].started_at as string).getTime() : Infinity);
+  const startedAt = (c: Container) =>
+    live[c.name]?.started_at
+      ? new Date(live[c.name].started_at as string).getTime()
+      : Infinity;
   const sortValue: Record<SortKey, (c: Container) => string | number> = {
     name: (c) => c.name,
     image: (c) => c.image,
@@ -325,49 +729,86 @@ function HostView({ host }: { host: Host }) {
     restarts: (c) => live[c.name]?.restarts ?? -1,
     cpu: (c) => live[c.name]?.cpu_pct ?? -1,
     mem: (c) => live[c.name]?.mem_bytes ?? -1,
-    ip: (c) => (c.ips[0] ?? "~").split(".").map((p) => p.padStart(3, "0")).join("."),
+    ip: (c) =>
+      (c.ips[0] ?? "~")
+        .split(".")
+        .map((p) => p.padStart(3, "0"))
+        .join("."),
     stack: (c) => c.project ?? "~",
   };
   rows.sort((a, b) => {
     const va = sortValue[sort.key](a);
     const vb = sortValue[sort.key](b);
-    const cmp = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
+    const cmp =
+      typeof va === "number" && typeof vb === "number"
+        ? va - vb
+        : String(va).localeCompare(String(vb));
     return sort.desc ? -cmp : cmp;
   });
 
   const header = (key: SortKey | null, label: string, cls = "") => (
-    <th className={`whitespace-nowrap px-2 py-2 font-semibold ${cls}`} aria-sort={key && sort.key === key ? (sort.desc ? "descending" : "ascending") : undefined}>
+    <th
+      className={`whitespace-nowrap px-2 py-2 font-semibold ${cls}`}
+      aria-sort={
+        key && sort.key === key
+          ? sort.desc
+            ? "descending"
+            : "ascending"
+          : undefined
+      }
+    >
       {key ? (
         <button
           type="button"
           className="inline-flex items-center gap-1 hover:text-fg"
-          onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : false }))}
+          onClick={() =>
+            setSort((s) => ({ key, desc: s.key === key ? !s.desc : false }))
+          }
         >
           {label}
-          {sort.key === key ? (sort.desc ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+          {sort.key === key ? (
+            sort.desc ? (
+              <ArrowDown className="h-3 w-3" />
+            ) : (
+              <ArrowUp className="h-3 w-3" />
+            )
+          ) : (
+            <ArrowUpDown className="h-3 w-3 opacity-40" />
+          )}
         </button>
       ) : (
         label
       )}
     </th>
   );
-  const stackInfo = stackFilter && stackFilter !== "~" ? (stacks.data ?? []).find((s) => s.name === stackFilter) : undefined;
+  const stackInfo =
+    stackFilter && stackFilter !== "~"
+      ? (stacks.data ?? []).find((s) => s.name === stackFilter)
+      : undefined;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-elevated px-2 py-0.5 font-mono text-xs" title="Containers shown">
+        <span
+          className="rounded-full bg-elevated px-2 py-0.5 font-mono text-xs"
+          title="Containers shown"
+        >
           {rows.length}
           {rows.length !== all.length ? ` / ${all.length}` : ""}
         </span>
         {info.data && (
           <span className="font-mono text-[11px] text-fg-muted">
-            Docker {info.data.version} · {info.data.os} · {info.data.cpus} CPU · {formatBytes(info.data.memory)} · {info.data.images} images · via {host.via}
+            Docker {info.data.version} · {info.data.os} · {info.data.cpus} CPU ·{" "}
+            {formatBytes(info.data.memory)} · {info.data.images} images · via{" "}
+            {host.via}
           </span>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-muted" aria-hidden />
+            <Search
+              className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-muted"
+              aria-hidden
+            />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -376,7 +817,12 @@ function HostView({ host }: { host: Host }) {
               className="w-60 rounded border border-line bg-canvas py-1.5 pl-7 pr-2 text-xs outline-none focus:border-primary"
             />
           </div>
-          <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)} aria-label="Filter by state" className="rounded border border-line bg-canvas px-2 py-1.5 text-xs">
+          <select
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value)}
+            aria-label="Filter by state"
+            className="rounded border border-line bg-canvas px-2 py-1.5 text-xs"
+          >
             <option value="">All states</option>
             {states.map((s) => (
               <option key={s} value={s}>
@@ -384,7 +830,12 @@ function HostView({ host }: { host: Host }) {
               </option>
             ))}
           </select>
-          <select value={stackFilter} onChange={(e) => setStackFilter(e.target.value)} aria-label="Filter by stack" className="rounded border border-line bg-canvas px-2 py-1.5 text-xs">
+          <select
+            value={stackFilter}
+            onChange={(e) => setStackFilter(e.target.value)}
+            aria-label="Filter by stack"
+            className="rounded border border-line bg-canvas px-2 py-1.5 text-xs"
+          >
             <option value="">All stacks</option>
             {(stacks.data ?? []).map((s) => (
               <option key={s.name} value={s.name}>
@@ -403,12 +854,17 @@ function HostView({ host }: { host: Host }) {
           <Layers className="h-3.5 w-3.5 text-fg-muted" aria-hidden />
           <span className="font-semibold">{stackInfo.name}</span>
           <span className="font-mono text-fg-muted">
-            {stackInfo.running}/{stackInfo.containers} running{stackInfo.working_dir ? ` · ${stackInfo.working_dir}` : ""}
+            {stackInfo.running}/{stackInfo.containers} running
+            {stackInfo.working_dir ? ` · ${stackInfo.working_dir}` : ""}
           </span>
           {manage && (
             <span className="ml-auto flex gap-1">
               {(["start", "restart", "stop"] as const).map((a) => (
-                <Button key={a} onClick={() => void stackAct(stackInfo.name, a)} disabled={busy === stackInfo.name}>
+                <Button
+                  key={a}
+                  onClick={() => void stackAct(stackInfo.name, a)}
+                  disabled={busy === stackInfo.name}
+                >
                   {a} stack
                 </Button>
               ))}
@@ -420,7 +876,8 @@ function HostView({ host }: { host: Host }) {
       {containers.error && (
         <Alert>
           {containers.error}
-          {host.via === "agent" && " — the agent must be online and installed with “Allow Docker” (node page → Reinstall)."}
+          {host.via === "agent" &&
+            " — the agent must be online and installed with “Allow Docker” (node page → Reinstall)."}
         </Alert>
       )}
       {containers.data && (
@@ -447,160 +904,325 @@ function HostView({ host }: { host: Host }) {
             <tbody className="divide-y divide-line">
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="px-2 py-4 text-center text-fg-muted">
-                    {all.length ? "No container matches the filters." : "No containers."}
+                  <td
+                    colSpan={14}
+                    className="px-2 py-4 text-center text-fg-muted"
+                  >
+                    {all.length
+                      ? "No container matches the filters."
+                      : "No containers."}
                   </td>
                 </tr>
               )}
-              {rows.map((c) => {
-                const l = live[c.name];
-                const running = c.state === "running";
-                const health = c.health ? HEALTH_DOT[c.health] : undefined;
-                return (
-                  <tr key={c.id} className="hover:bg-elevated/50">
-                    <td className="whitespace-nowrap px-2 py-2 font-semibold" title={`${c.id}${c.service ? ` · service ${c.service}` : ""}`}>
-                      {c.name}
-                    </td>
-                    <td className="max-w-44 truncate px-2 py-2 text-fg-secondary" title={c.image}>
-                      {c.image}
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-semibold ${STATE_BADGE[c.state] ?? "border-line bg-elevated text-fg-muted"}`}>
-                        {running ? <Play className="h-3 w-3" aria-hidden /> : c.state === "paused" ? <Pause className="h-3 w-3" aria-hidden /> : <Square className="h-3 w-3" aria-hidden />}
-                        {c.state}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      {health ? (
-                        <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: health.color }} title={health.label} aria-label={health.label} />
-                      ) : (
-                        <span className="text-fg-muted" title="No health check">–</span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 text-fg-secondary">{uptime(c, l, now)}</td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-secondary">{l ? (l.restarts ? l.restarts : "–") : "–"}</td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums">{l ? `${l.cpu_pct.toFixed(1)}%` : running ? "…" : "–"}</td>
-                    <td className="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">
-                      {l && l.mem_bytes !== null ? (
-                        <>
-                          {short(l.mem_bytes)}
-                          <span className="text-fg-muted">/{short(l.mem_limit)}</span>
-                        </>
-                      ) : (
-                        "–"
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">
-                      {l ? (
-                        <span title="Received / sent since the container started">
-                          <span className="text-primary">↓</span>
-                          {short(l.net_rx_bytes)} <span className="text-warn">↑</span>
-                          {short(l.net_tx_bytes)}
-                        </span>
-                      ) : (
-                        "–"
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 text-right font-mono tabular-nums">
-                      {l ? (
-                        <span title="Read / written since the container started">
-                          <span className="text-fg-muted">r</span>
-                          {short(l.blk_read_bytes)} <span className="text-fg-muted">w</span>
-                          {short(l.blk_write_bytes)}
-                        </span>
-                      ) : (
-                        "–"
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 font-mono">{c.ips.join(", ") || "–"}</td>
-                    <td className="px-2 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {c.published.length === 0 && <span className="text-fg-muted">–</span>}
-                        {c.published.map((p) => (
-                          <a
-                            key={`${p.public}:${p.private}`}
-                            href={`http://${host.address}:${p.public}`}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            className="inline-flex items-center gap-0.5 rounded bg-elevated px-1.5 py-0.5 font-mono hover:text-primary"
-                            title={`Open http://${host.address}:${p.public}`}
-                          >
-                            {p.public}:{p.private}
-                            <ExternalLink className="h-2.5 w-2.5" aria-hidden />
-                          </a>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-2 py-2">
-                      {c.project ? (
-                        <button
-                          type="button"
-                          onClick={() => setStackFilter(c.project as string)}
-                          className="whitespace-nowrap rounded border border-line px-1.5 py-0.5 font-semibold hover:border-primary"
-                          title={`Show only the stack ${c.project}`}
-                        >
-                          {c.project}
-                        </button>
-                      ) : (
-                        <span className="text-fg-muted">–</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-2">
-                      <div className="flex justify-end gap-0.5">
-                        <IconButton title={`Logs of ${c.name}`} onClick={() => setDialog({ kind: "logs", c })}>
-                          <FileText className="h-3.5 w-3.5" aria-hidden />
-                        </IconButton>
-                        {running && can("containers.exec") && (
-                          <IconButton title={`Shell in ${c.name}`} onClick={() => setDialog({ kind: "exec", c })}>
-                            <SquareTerminal className="h-3.5 w-3.5" aria-hidden />
-                          </IconButton>
-                        )}
-                        {running && (
-                          <IconButton title={`Stats of ${c.name}`} onClick={() => setDialog({ kind: "stats", c })}>
-                            <Activity className="h-3.5 w-3.5" aria-hidden />
-                          </IconButton>
-                        )}
-                        {manage && running && (
-                          <>
-                            <IconButton title={`Restart ${c.name}`} onClick={() => void act(c, "restart")} disabled={busy === c.name}>
-                              <RotateCw className="h-3.5 w-3.5" aria-hidden />
-                            </IconButton>
-                            <IconButton title={`Pause ${c.name}`} onClick={() => void act(c, "pause")} disabled={busy === c.name}>
-                              <Pause className="h-3.5 w-3.5" aria-hidden />
-                            </IconButton>
-                            <IconButton title={`Stop ${c.name}`} onClick={() => void act(c, "stop")} disabled={busy === c.name}>
-                              <Square className="h-3.5 w-3.5" aria-hidden />
-                            </IconButton>
-                          </>
-                        )}
-                        {manage && c.state === "paused" && (
-                          <IconButton title={`Resume ${c.name}`} onClick={() => void act(c, "unpause")} disabled={busy === c.name}>
-                            <Play className="h-3.5 w-3.5" aria-hidden />
-                          </IconButton>
-                        )}
-                        {manage && !running && c.state !== "paused" && (
-                          <IconButton title={`Start ${c.name}`} onClick={() => void act(c, "start")} disabled={busy === c.name}>
-                            <Play className="h-3.5 w-3.5" aria-hidden />
-                          </IconButton>
-                        )}
-                        {manage && !running && (
-                          <IconButton title={`Remove ${c.name}`} onClick={() => void act(c, "remove")} disabled={busy === c.name} danger>
-                            <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                          </IconButton>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+              {rows.map((c) => (
+                <ContainerRow
+                  key={c.id}
+                  host={host}
+                  c={c}
+                  l={live[c.name]}
+                  now={now}
+                  manage={manage}
+                  canExec={can("containers.exec")}
+                  busy={busy === c.name}
+                  onAct={(a) => void act(c, a)}
+                  onDialog={(kind) => setDialog({ kind, c })}
+                  onStack={setStackFilter}
+                />
+              ))}
             </tbody>
           </table>
         </div>
       )}
-      <p className="text-[10px] text-fg-muted">CPU, memory and I/O refresh every {LIVE_REFRESH_MS / 1000} s; network and disk are totals since the container started.</p>
-      {dialog?.kind === "logs" && <LogsDialog host={host} c={dialog.c} onClose={() => setDialog(null)} />}
-      {dialog?.kind === "stats" && <StatsDialog host={host} c={dialog.c} onClose={() => setDialog(null)} />}
-      {dialog?.kind === "exec" && <ExecDialog host={host} c={dialog.c} onClose={() => setDialog(null)} />}
+      <p className="text-[10px] text-fg-muted">
+        CPU, memory and I/O refresh every {LIVE_REFRESH_MS / 1000} s; network
+        and disk are totals since the container started.
+      </p>
+      {dialog?.kind === "logs" && (
+        <LogsDialog host={host} c={dialog.c} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "stats" && (
+        <StatsDialog host={host} c={dialog.c} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "exec" && (
+        <ExecDialog host={host} c={dialog.c} onClose={() => setDialog(null)} />
+      )}
+    </div>
+  );
+}
+
+type HostData = {
+  containers: Container[];
+  live: Record<string, Live>;
+  error: string | null;
+};
+
+/** Every container of every Docker host in one table, with a host column. */
+function AllHostsView({ hosts }: { hosts: Host[] }) {
+  const { can } = useAuth();
+  const manage = can("containers.manage");
+  const canExec = can("containers.exec");
+  const [data, setData] = useState<Record<string, HostData>>({});
+  const [loaded, setLoaded] = useState(false);
+  const [tick, setTick] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const [query, setQuery] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+  const [hostFilter, setHostFilter] = useState("");
+  const [dialog, setDialog] = useState<{
+    kind: DialogKind;
+    host: Host;
+    c: Container;
+  } | null>(null);
+  const [notice, setNotice] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const load = async () => {
+      const entries = await Promise.all(
+        hosts.map(async (h): Promise<[string, HostData]> => {
+          const [cs, lv] = await Promise.all([
+            api<Container[]>(`/containers/${h.node_id}`),
+            api<Record<string, Live>>(`/containers/${h.node_id}/live`),
+          ]);
+          return [
+            h.node_id,
+            {
+              containers: cs.ok ? cs.data : [],
+              live: lv.ok ? lv.data : {},
+              error: cs.ok ? null : message(cs.code),
+            },
+          ];
+        }),
+      );
+      if (cancelled) return;
+      setData(Object.fromEntries(entries));
+      setLoaded(true);
+      setNow(Date.now());
+      timer = setTimeout(() => void load(), LIVE_REFRESH_MS);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [hosts, tick]);
+
+  async function act(h: Host, c: Container, action: string) {
+    if (
+      action === "remove" &&
+      !window.confirm(`Remove the container ${c.name} on ${h.node_name}?`)
+    )
+      return;
+    if (
+      (action === "stop" || action === "kill") &&
+      !window.confirm(`${action} ${c.name} on ${h.node_name}?`)
+    )
+      return;
+    setBusy(`${h.node_id}/${c.name}`);
+    const r =
+      action === "remove"
+        ? await api(`/containers/${h.node_id}/c/${c.name}`, {
+            method: "DELETE",
+          })
+        : await api(`/containers/${h.node_id}/c/${c.name}/${action}`, {
+            method: "POST",
+          });
+    setBusy(null);
+    setNotice(
+      r.ok
+        ? { kind: "ok", text: `${h.node_name} · ${c.name}: ${action} done.` }
+        : { kind: "error", text: message(r.code) },
+    );
+    setTick((t) => t + 1);
+  }
+
+  const rows = hosts
+    .filter((h) => !hostFilter || h.node_id === hostFilter)
+    .flatMap((h) =>
+      (data[h.node_id]?.containers ?? []).map((c) => ({
+        host: h,
+        c,
+        l: data[h.node_id]?.live[c.name],
+      })),
+    )
+    .sort(
+      (a, b) =>
+        a.host.node_name.localeCompare(b.host.node_name) ||
+        a.c.name.localeCompare(b.c.name),
+    );
+  const q = query.trim().toLowerCase();
+  const visible = rows.filter(
+    ({ host: h, c }) =>
+      (!stateFilter || c.state === stateFilter) &&
+      (!q ||
+        [c.name, c.image, c.project ?? "", c.id, h.node_name, ...c.ips].some(
+          (v) => v.toLowerCase().includes(q),
+        )),
+  );
+  const total = rows.length;
+  const states = [...new Set(rows.map((r) => r.c.state))].sort();
+  const failed = hosts.filter((h) => data[h.node_id]?.error);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className="rounded-full bg-elevated px-2 py-0.5 font-mono text-xs"
+          title="Containers shown"
+        >
+          {visible.length}
+          {visible.length !== total ? ` / ${total}` : ""}
+        </span>
+        <span className="font-mono text-[11px] text-fg-muted">
+          {hosts.length} hosts
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-muted"
+              aria-hidden
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search host, name, image, stack, IP…"
+              aria-label="Search containers"
+              className="w-60 rounded border border-line bg-canvas py-1.5 pl-7 pr-2 text-xs outline-none focus:border-primary"
+            />
+          </div>
+          <select
+            value={hostFilter}
+            onChange={(e) => setHostFilter(e.target.value)}
+            aria-label="Filter by host"
+            className="rounded border border-line bg-canvas px-2 py-1.5 text-xs"
+          >
+            <option value="">All hosts</option>
+            {hosts.map((h) => (
+              <option key={h.node_id} value={h.node_id}>
+                {h.node_name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value)}
+            aria-label="Filter by state"
+            className="rounded border border-line bg-canvas px-2 py-1.5 text-xs"
+          >
+            <option value="">All states</option>
+            {states.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <Button onClick={() => setTick((t) => t + 1)}>
+            <RefreshCw className="h-3 w-3" aria-hidden /> Refresh
+          </Button>
+        </div>
+      </div>
+      {notice && <Alert kind={notice.kind}>{notice.text}</Alert>}
+      {failed.length > 0 && (
+        <Alert>
+          {failed
+            .map((h) => `${h.node_name}: ${data[h.node_id]?.error}`)
+            .join(" · ")}
+        </Alert>
+      )}
+      {loaded && (
+        <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+          <table className="w-full text-xs">
+            <thead className="bg-elevated text-left text-fg-secondary">
+              <tr>
+                {[
+                  "Host",
+                  "Name",
+                  "Image",
+                  "State",
+                  "Health",
+                  "Uptime",
+                  "Restarts",
+                  "CPU",
+                  "Memory",
+                  "Net I/O",
+                  "Disk I/O",
+                  "IP",
+                  "Ports",
+                  "Stack",
+                  "Actions",
+                ].map((label) => (
+                  <th
+                    key={label}
+                    className="whitespace-nowrap px-2 py-2 font-semibold"
+                  >
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {visible.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={15}
+                    className="px-2 py-4 text-center text-fg-muted"
+                  >
+                    {total
+                      ? "No container matches the filters."
+                      : "No containers."}
+                  </td>
+                </tr>
+              )}
+              {visible.map(({ host: h, c, l }) => (
+                <ContainerRow
+                  key={`${h.node_id}/${c.id}`}
+                  host={h}
+                  c={c}
+                  l={l}
+                  now={now}
+                  showHost
+                  manage={manage}
+                  canExec={canExec}
+                  busy={busy === `${h.node_id}/${c.name}`}
+                  onAct={(a) => void act(h, c, a)}
+                  onDialog={(kind) => setDialog({ kind, host: h, c })}
+                  onStack={(name) => setQuery(name)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-[10px] text-fg-muted">
+        CPU, memory and I/O refresh every {LIVE_REFRESH_MS / 1000} s; network
+        and disk are totals since the container started.
+      </p>
+      {dialog?.kind === "logs" && (
+        <LogsDialog
+          host={dialog.host}
+          c={dialog.c}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === "stats" && (
+        <StatsDialog
+          host={dialog.host}
+          c={dialog.c}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === "exec" && (
+        <ExecDialog
+          host={dialog.host}
+          c={dialog.c}
+          onClose={() => setDialog(null)}
+        />
+      )}
     </div>
   );
 }
@@ -609,19 +1231,34 @@ export default function ContainersPage() {
   const hosts = useResource<Host[]>("/containers/hosts");
   const [selected, setSelected] = useState<string | null>(null);
   const list = hosts.data ?? [];
-  const current = list.find((h) => h.node_id === selected) ?? list[0];
+  const showAll = selected === ALL_HOSTS;
+  const current = showAll
+    ? undefined
+    : (list.find((h) => h.node_id === selected) ?? list[0]);
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold">Containers</h1>
       {hosts.error && <Alert>{hosts.error}</Alert>}
       {hosts.data && list.length === 0 && (
         <p className="text-sm text-fg-muted">
-          No Docker hosts. Give a node the Docker capability in the inventory: via agent (installed with “Allow
-          Docker”) or via SSH (a user allowed to use Docker).
+          No Docker hosts. Give a node the Docker capability in the inventory:
+          via agent (installed with “Allow Docker”) or via SSH (a user allowed
+          to use Docker).
         </p>
       )}
       {list.length > 0 && (
-        <div className="flex flex-wrap gap-1 border-b border-line" role="tablist">
+        <div
+          className="flex flex-wrap gap-1 border-b border-line"
+          role="tablist"
+        >
+          <button
+            role="tab"
+            aria-selected={showAll}
+            onClick={() => setSelected(ALL_HOSTS)}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-xs font-semibold ${showAll ? "border-primary text-primary" : "border-transparent text-fg-muted hover:text-fg"}`}
+          >
+            All hosts
+          </button>
           {list.map((h) => (
             <button
               key={h.node_id}
@@ -632,13 +1269,19 @@ export default function ContainersPage() {
             >
               <span
                 className="inline-block h-1.5 w-1.5 rounded-full"
-                style={{ background: h.via === "ssh" || h.agent_online ? "var(--color-ok)" : "var(--color-crit)" }}
+                style={{
+                  background:
+                    h.via === "ssh" || h.agent_online
+                      ? "var(--color-ok)"
+                      : "var(--color-crit)",
+                }}
               />
               {h.node_name}
             </button>
           ))}
         </div>
       )}
+      {showAll && <AllHostsView hosts={list} />}
       {current && <HostView key={current.node_id} host={current} />}
     </div>
   );
