@@ -4,6 +4,7 @@ import {
   Bell,
   Boxes,
   GitBranch,
+  GitFork,
   Container,
   KeyRound,
   LayoutDashboard,
@@ -44,6 +45,7 @@ const NAV: NavItem[] = [
   { label: "Proxmox VE", icon: Boxes, target: { href: "/proxmox/", permission: "inventory.read" } },
   { label: "Ansible", icon: Workflow, target: { href: "/ansible/", permission: "ansible.read" } },
   { label: "Workflows", icon: GitBranch, target: { href: "/workflows/", permission: "inventory.read" } },
+  { label: "GitOps", icon: GitFork, target: { href: "/gitops/", permission: "inventory.read" } },
   {
     label: "SSH Bastion",
     icon: SquareTerminal,
