@@ -25,8 +25,8 @@ COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 COPY agent/ ./
 ARG VERSION=dev
-RUN for arch in amd64 arm64; do \
-      CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+RUN for arch in amd64 arm64 arm; do \
+      CGO_ENABLED=0 GOOS=linux GOARCH=$arch GOARM=7 go build -trimpath \
         -ldflags "-s -w -X main.version=${VERSION}" \
         -o /out/janus-agent-linux-$arch ./cmd/janus-agent; \
     done

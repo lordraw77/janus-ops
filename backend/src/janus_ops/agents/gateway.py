@@ -184,7 +184,7 @@ async def authenticate(engine: AsyncEngine, hello: Hello, public: bytes, ip: str
             "k": public,
             "f": key_fingerprint(public),
             "version": hello.version,
-            "arch": hello.arch if hello.arch in ("amd64", "arm64") else None,
+            "arch": hello.arch if hello.arch in ("amd64", "arm64", "arm") else None,
             "os": hello.os,
             "kernel": hello.kernel,
             "hostname": hello.hostname,

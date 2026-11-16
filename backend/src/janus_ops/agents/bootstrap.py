@@ -19,7 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops.agents.gateway import token_hash
 
-ARCHES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+# uname -m -> the binary to copy. armv7l is a 32-bit Raspberry Pi (2, 3, and later on a 32-bit OS)
+ARCHES = {
+    "x86_64": "amd64",
+    "amd64": "amd64",
+    "aarch64": "arm64",
+    "arm64": "arm64",
+    "armv7l": "arm",
+}
 BINARY = "janus-agent-linux-{arch}"
 TMP_DIR = re.compile(r"^/tmp/janus-agent\.[A-Za-z0-9]{6,}$")
 COMMAND_TIMEOUT_S = 120

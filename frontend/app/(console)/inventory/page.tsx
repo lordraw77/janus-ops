@@ -405,6 +405,8 @@ function NodesTab({ groups }: { groups: Group[] }) {
                 <th className="py-2 pr-3 font-medium">Address</th>
                 <th className="py-2 pr-3 font-medium">Env</th>
                 <th className="py-2 pr-3 font-medium">Capabilities</th>
+                <th className="py-2 pr-3 font-medium">Agent</th>
+                <th className="py-2 pr-3 font-medium">Installed at</th>
                 <th className="py-2 pr-3 font-medium">Tags / groups</th>
                 <th className="py-2 pr-3 font-medium">Depends on</th>
                 <th />
@@ -432,6 +434,20 @@ function NodesTab({ groups }: { groups: Group[] }) {
                         </Chip>
                       ))}
                     </div>
+                  </td>
+                  <td className="py-2 pr-3 font-mono text-[11px]">
+                    {n.agent ? (
+                      <span className={n.agent.revoked ? "text-fg-muted line-through" : "text-fg-secondary"}>
+                        {n.agent.version ?? "?"}
+                        {n.agent.arch ? ` · ${n.agent.arch}` : ""}
+                        {n.agent.revoked ? " · revoked" : ""}
+                      </span>
+                    ) : (
+                      <span className="text-fg-muted">—</span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3 font-mono text-[11px] text-fg-secondary">
+                    {n.agent && !n.agent.revoked ? n.agent.install_path : <span className="text-fg-muted">—</span>}
                   </td>
                   <td className="py-2 pr-3">
                     <div className="flex flex-wrap gap-1">

@@ -39,9 +39,9 @@ agent/test: ## Agent: gofmt check, vet and tests
 	cd agent && $(GO) vet ./... && $(GO) test ./...
 
 .PHONY: agent/build
-agent/build: ## Agent: static binaries for amd64 and arm64 in agent/dist
-	for arch in amd64 arm64; do \
-	  cd $(CURDIR)/agent && GOOS=linux GOARCH=$$arch $(GO) build -trimpath \
+agent/build: ## Agent: static binaries for amd64, arm64 and arm (32-bit Raspberry Pi) in agent/dist
+	for arch in amd64 arm64 arm; do \
+	  cd $(CURDIR)/agent && GOOS=linux GOARCH=$$arch GOARM=7 $(GO) build -trimpath \
 	    -ldflags "-s -w -X main.version=$(VERSION)" -o dist/janus-agent-linux-$$arch ./cmd/janus-agent; \
 	done
 

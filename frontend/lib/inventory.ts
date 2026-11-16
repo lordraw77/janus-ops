@@ -43,8 +43,17 @@ export type InventoryNode = {
   tags: string[];
   groups: string[];
   capabilities: Capability[];
+  agent: AgentSummary | null;
   created_at: string;
   updated_at: string;
+};
+
+/** The agent of a node: what runs (version, architecture) and where it is installed. */
+export type AgentSummary = {
+  version: string | null;
+  arch: string | null;
+  revoked: boolean;
+  install_path: string;
 };
 
 export type Group = {

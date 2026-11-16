@@ -109,6 +109,14 @@
 > segnano come verificate dalla UI. Lettura con `inventory.read`, modifica con `monitoring.manage`, audit
 > di ogni modifica. Dettagli in §5.11.
 >
+> **v0.26** — **agent per Raspberry Pi a 32 bit** (`armv7l`, Pi 2 e 3 con sistema a 32 bit): build
+> `GOARCH=arm GOARM=7` nel Makefile e nel Dockerfile, bootstrap che riconosce `armv7l`. Il Pi a 64 bit
+> usa già l'agent `arm64`.
+>
+> Inventario: colonne **Agent** (versione e architettura) e **Installed at** (il percorso del binario,
+> `/usr/local/bin/janus-agent`, o `—` se l'agent non è installato o è revocato). Migrazione `0022`: il
+> vincolo sull'architettura accetta `arm`, altrimenti l'agent di un Pi a 32 bit non potrebbe registrarsi.
+>
 > **v0.25** — **F8, workflow** (FR-80, migrazione `0021`): definizioni con trigger manuale, a intervallo e
 > alert; passi exec (via agent), notify (verso un canale di notifica) e approval; approvazioni con rifiuto; i passi fatti non si ripetono.
 > Esecuzione in background con scheduler di 30 secondi. Dettagli in §5.11.

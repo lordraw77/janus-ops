@@ -108,6 +108,19 @@ class NodeRef(BaseModel):
     name: str
 
 
+# where the bootstrap installs the agent binary (agents/bootstrap.py: UNIT and the install steps)
+AGENT_INSTALL_PATH = "/usr/local/bin/janus-agent"
+
+
+class AgentSummary(BaseModel):
+    """The agent of a node as the inventory shows it: what it runs, and where it lives."""
+
+    version: str | None
+    arch: str | None
+    revoked: bool
+    install_path: str  # the binary on the node; the row exists only while the agent is installed
+
+
 class NodeOut(BaseModel):
     id: str
     name: str
@@ -118,6 +131,7 @@ class NodeOut(BaseModel):
     tags: list[str]
     groups: list[str]
     capabilities: list[CapabilityOut]
+    agent: AgentSummary | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -200,6 +214,22 @@ async def _load(
         ),
         {"ids": ids},
     )
+    agents = await conn.execute(
+        text(
+            "SELECT node_id, version, arch, revoked_at IS NOT NULL AS revoked FROM agent"
+            " WHERE node_id = ANY(:ids)"
+        ),
+        {"ids": ids},
+    )
+    agent_map: dict[Any, AgentSummary] = {
+        r.node_id: AgentSummary(
+            version=r.version or None,
+            arch=r.arch or None,
+            revoked=bool(r.revoked),
+            install_path=AGENT_INSTALL_PATH,
+        )
+        for r in agents
+    }
     tag_map: dict[Any, list[str]] = {}
     for r in tags:
         tag_map.setdefault(r.node_id, []).append(r.name)
@@ -229,6 +259,7 @@ async def _load(
             tags=tag_map.get(n.id, []),
             groups=group_map.get(n.id, []),
             capabilities=cap_map.get(n.id, []),
+            agent=agent_map.get(n.id),
             created_at=n.created_at,
             updated_at=n.updated_at,
         )
