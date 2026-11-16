@@ -36,6 +36,8 @@ from janus_ops.proxmox.access import ProxmoxAccess
 from janus_ops.terminal import router as terminal
 from janus_ops.terminal import sftp, snippets
 from janus_ops.vault import Vault
+from janus_ops.workflows import engine as workflow_engine
+from janus_ops.workflows.router import router as workflows
 
 API_PREFIX = "/api/v1"
 
@@ -91,6 +93,11 @@ def create_app(
         app.state.agents = AgentHub()
         app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
         app.state.gitops_jobs = set()  # GitOps deploys running in the background
+        app.state.workflow_jobs = set()  # workflow runs advancing in the background
+        # a run interrupted by a restart is marked failed: a person decides whether to rerun it
+        # (skipped when the schema is not migrated yet: /ready reports that)
+        with contextlib.suppress(Exception):
+            await workflow_engine.recover(engine)
         app.state.docker = DockerAccess(engine, app.state.vault, settings, app.state.agents)
         app.state.proxmox = ProxmoxAccess(engine, app.state.vault)
         app.state.check_engine = check_engine.Engine(
@@ -101,6 +108,11 @@ def create_app(
         if settings.monitoring_enabled:
             tasks.append(asyncio.create_task(app.state.check_engine.run()))
             tasks.append(asyncio.create_task(app.state.dispatcher.run()))
+            tasks.append(
+                asyncio.create_task(
+                    workflow_engine.scheduler(engine, app.state.agents, app.state.workflow_jobs)
+                )
+            )
         if settings.recordings_dir is not None:
             settings.recordings_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
@@ -166,6 +178,7 @@ def create_app(
         monitoring.router,
         snmp_oids.router,
         snmp_templates.router,
+        workflows,
         containers.router,
         proxmox.router,
         ansible,

@@ -33,6 +33,10 @@ EXPECTED_TABLES = {
     "gitops_run",
     "snmp_oid",
     "snmp_template",
+    "workflow",
+    "workflow_run",
+    "workflow_step_run",
+    "workflow_approval",
     "ansible_file",
     "ansible_file_version",
     "ansible_source",
@@ -150,6 +154,8 @@ def test_builtin_roles_seeded(migrated: None) -> None:
         ("operator", "proxmox.manage"),
         ("operator", "sftp.transfer"),
         ("operator", "ssh.connect"),
+        ("operator", "workflow.approve"),
+        ("operator", "workflow.run"),
     ]
 
 

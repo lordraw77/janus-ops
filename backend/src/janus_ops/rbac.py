@@ -39,6 +39,9 @@ PERMISSIONS: dict[str, str] = {
     "actions.execute": "Run approved action plans on nodes; the node's agent must allow exec",
     "gitops.manage": "Create, change and delete GitOps stacks and rotate their webhook secrets",
     "gitops.deploy": "Deploy GitOps stacks now; the node's agent must allow exec",
+    "workflow.manage": "Create, change, enable and delete workflows",
+    "workflow.run": "Start workflows by hand; the workflow's steps still need their approvals",
+    "workflow.approve": "Approve or reject the steps of a workflow that wait for a person",
 }
 
 ROLE_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,31}$"

@@ -155,6 +155,8 @@ def me(c: TestClient) -> dict[str, Any]:
                 "proxmox.manage",
                 "sftp.transfer",
                 "ssh.connect",
+                "workflow.approve",
+                "workflow.run",
             ],
         ),
         ("carol", ["auditor"], ["audit.read", "inventory.read", "users.read"]),
@@ -390,6 +392,8 @@ def test_union_of_permissions_for_several_roles() -> None:
                 "sftp.transfer",
                 "ssh.connect",
                 "users.read",
+                "workflow.approve",
+                "workflow.run",
             ]
         admin.delete("/api/v1/users/olga")
 
