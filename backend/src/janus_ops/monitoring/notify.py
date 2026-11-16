@@ -67,6 +67,8 @@ class Message:
         label = "RECOVERY" if self.event == "recovery" else self.state.upper()
         if self.event == "test":
             label = "TEST"
+        if self.event == "workflow":
+            label = "WORKFLOW"
         return f"[{label}] {self.node} / {self.check}"
 
     @property

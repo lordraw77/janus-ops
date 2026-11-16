@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from janus_ops.agents.hub import AgentHub
 from janus_ops.db import alembic_config
+from janus_ops.monitoring import notify
 from janus_ops.workflows import engine as wf_engine
 
 from ._it import CONFIGURED, DB_URL, run_sql, signed_in
@@ -35,6 +36,9 @@ def migrated() -> Iterator[None]:
     command.downgrade(cfg, "base")
 
 
+PLACEHOLDER_CHANNEL = str(uuid.UUID(int=0))
+
+
 def _name(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
@@ -48,8 +52,36 @@ def _plain_node(client: Any) -> str:
     return str(r.json()["id"])
 
 
-def _notify(step_id: str, message: str = "hello") -> dict[str, Any]:
-    return {"id": step_id, "action": "notify", "params": {"message": message}}
+@pytest.fixture(scope="module")
+def channel() -> Iterator[str]:
+    """A notification channel for the notify steps. Its sender is replaced by a recorder below,
+    so no message leaves the test."""
+    cid = str(uuid.uuid4())
+    run_sql(
+        "INSERT INTO notification_channel (id, name, kind, config, enabled)"
+        " VALUES (CAST(:id AS uuid), :name, 'webhook', CAST(:c AS jsonb), true)",
+        {"id": cid, "name": _name("wf-channel"), "c": '{"url": "https://example.invalid/hook"}'},
+    )
+    yield cid
+
+
+@pytest.fixture(autouse=True)
+def recorded(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    sent: list[Any] = []
+
+    async def fake_deliver(vault: Any, channel_row: Any, message: Any, channel_id: str) -> None:
+        sent.append((channel_id, message.title, message.output))
+
+    monkeypatch.setattr(notify, "deliver", fake_deliver)
+    return sent
+
+
+def _notify(step_id: str, channel_id: str, message: str = "hello") -> dict[str, Any]:
+    return {
+        "id": step_id,
+        "action": "notify",
+        "params": {"channel_id": channel_id, "message": message},
+    }
 
 
 def _exec(step_id: str, node: str, command_line: str, read_only: bool = False) -> dict[str, Any]:
@@ -101,7 +133,10 @@ def test_an_auditor_cannot_manage_workflows_and_an_operator_cannot_create_them()
         assert auditor.get("/api/v1/workflows").status_code == 200
         body = {
             "name": _name("x"),
-            "definition": {"trigger": {"type": "manual"}, "steps": [_notify("a")]},
+            "definition": {
+                "trigger": {"type": "manual"},
+                "steps": [_notify("a", PLACEHOLDER_CHANNEL)],
+            },
         }
         assert auditor.post("/api/v1/workflows", json=body).status_code == 403
     with signed_in("bob") as operator:
@@ -112,8 +147,14 @@ def test_an_auditor_cannot_manage_workflows_and_an_operator_cannot_create_them()
     "definition",
     [
         {"trigger": {"type": "manual"}, "steps": []},
-        {"trigger": {"type": "manual"}, "steps": [_notify("a"), _notify("a")]},
-        {"trigger": {"type": "interval", "interval_s": 10}, "steps": [_notify("a")]},
+        {
+            "trigger": {"type": "manual"},
+            "steps": [_notify("a", PLACEHOLDER_CHANNEL), _notify("a", PLACEHOLDER_CHANNEL)],
+        },
+        {
+            "trigger": {"type": "interval", "interval_s": 10},
+            "steps": [_notify("a", PLACEHOLDER_CHANNEL)],
+        },
         {
             "trigger": {"type": "manual"},
             "steps": [{"id": "a", "action": "exec", "params": {"command": "uptime"}}],
@@ -126,9 +167,11 @@ def test_invalid_definitions_are_refused(definition: dict[str, Any]) -> None:
     assert r.status_code == 422
 
 
-def test_a_notify_only_workflow_runs_to_done() -> None:
+def test_a_notify_only_workflow_runs_to_done(channel: str) -> None:
     with signed_in("alice") as admin:
-        wf = _workflow(admin, [_notify("hello", "first"), _notify("bye", "second")])
+        wf = _workflow(
+            admin, [_notify("hello", channel, "first"), _notify("bye", channel, "second")]
+        )
         run_id = _run(admin, wf["id"])
         run = _wait_until(admin, run_id, {"done", "failed"})
     assert run["status"] == "done"
@@ -181,12 +224,16 @@ def test_a_read_only_exec_needs_no_approval() -> None:
     assert run["approvals"] == []
 
 
-def test_steps_that_are_done_are_not_repeated_after_an_approval() -> None:
+def test_steps_that_are_done_are_not_repeated_after_an_approval(channel: str) -> None:
     with signed_in("alice") as admin:
         node = _plain_node(admin)
         wf = _workflow(
             admin,
-            [_notify("before", "one"), _exec("gate", node, "reboot"), _notify("after", "two")],
+            [
+                _notify("before", channel, "one"),
+                _exec("gate", node, "reboot"),
+                _notify("after", channel, "two"),
+            ],
         )
         run_id = _run(admin, wf["id"])
         _wait_until(admin, run_id, {"waiting_approval"})
@@ -234,7 +281,7 @@ def test_a_cancelled_run_stops_and_cannot_be_cancelled_twice() -> None:
     assert again.status_code == 409
 
 
-def test_the_alert_and_interval_triggers_start_runs_on_a_scheduler_pass() -> None:
+def test_the_alert_and_interval_triggers_start_runs_on_a_scheduler_pass(channel: str) -> None:
     node = str(uuid.uuid4())
     check = str(uuid.uuid4())
     run_sql(
@@ -253,9 +300,11 @@ def test_the_alert_and_interval_triggers_start_runs_on_a_scheduler_pass() -> Non
         {"c": check, "t": opened},
     )
     with signed_in("alice") as admin:
-        alert_wf = _workflow(admin, [_notify("a", "alert")], {"type": "alert", "check_id": check})
+        alert_wf = _workflow(
+            admin, [_notify("a", channel, "alert")], {"type": "alert", "check_id": check}
+        )
         interval_wf = _workflow(
-            admin, [_notify("i", "tick")], {"type": "interval", "interval_s": 60}
+            admin, [_notify("i", channel, "tick")], {"type": "interval", "interval_s": 60}
         )
 
     async def one_pass() -> int:
@@ -277,3 +326,50 @@ def test_the_alert_and_interval_triggers_start_runs_on_a_scheduler_pass() -> Non
         )
     }
     assert triggers == {"alert", "interval"}
+
+
+def test_a_notify_step_is_delivered_to_its_channel(channel: str, recorded: list[Any]) -> None:
+    with signed_in("alice") as admin:
+        wf = _workflow(admin, [_notify("hello", channel, "first")])
+        run = _wait_until(admin, _run(admin, wf["id"]), {"done", "failed"})
+    assert run["status"] == "done"
+    sent = [item for item in recorded if item[2] == "first"]
+    assert sent and sent[-1][0] == channel
+    assert sent[-1][1] == f"[WORKFLOW] {wf['name']} / hello"
+
+
+def test_a_missing_channel_fails_the_step(channel: str) -> None:
+    gone = str(uuid.uuid4())
+    with signed_in("alice") as admin:
+        wf = _workflow(admin, [_notify("lost", gone)])
+        run = _wait_until(admin, _run(admin, wf["id"]), {"done", "failed"})
+    assert run["status"] == "failed"
+    assert run["error"] == "lost: channel_not_found"
+
+
+def test_a_disabled_channel_fails_the_step(channel: str) -> None:
+    off = str(uuid.uuid4())
+    run_sql(
+        "INSERT INTO notification_channel (id, name, kind, config, enabled)"
+        " VALUES (CAST(:id AS uuid), :name, 'webhook', CAST(:c AS jsonb), false)",
+        {"id": off, "name": _name("off-channel"), "c": '{"url": "https://example.invalid/hook"}'},
+    )
+    with signed_in("alice") as admin:
+        wf = _workflow(admin, [_notify("muted", off)])
+        run = _wait_until(admin, _run(admin, wf["id"]), {"done", "failed"})
+    assert run["status"] == "failed"
+    assert run["error"] == "muted: channel_disabled"
+
+
+def test_a_notify_step_without_a_channel_fails_with_a_reason(channel: str) -> None:
+    # a definition saved before notify steps named a channel must not crash the run
+    with signed_in("alice") as admin:
+        wf = _workflow(admin, [_notify("old", channel)])
+        run_sql(
+            "UPDATE workflow SET definition = jsonb_set(definition, '{steps,0,params}',"
+            ' \'{"message": "old"}\'::jsonb) WHERE id = CAST(:id AS uuid)',
+            {"id": wf["id"]},
+        )
+        run = _wait_until(admin, _run(admin, wf["id"]), {"done", "failed"})
+    assert run["status"] == "failed"
+    assert run["error"] == "old: channel_not_set"

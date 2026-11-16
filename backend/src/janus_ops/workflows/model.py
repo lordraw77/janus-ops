@@ -33,6 +33,7 @@ class NotifyParams(BaseModel):
     # an unknown parameter (for example a shell switch) is an error, not ignored
     model_config = ConfigDict(extra="forbid")
 
+    channel_id: uuid.UUID  # a notification channel: its secrets stay in the vault
     message: str = Field(min_length=1, max_length=500)
 
 

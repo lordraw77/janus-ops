@@ -19,7 +19,9 @@ def _definition(
 
 def test_a_notify_step_needs_no_approval() -> None:
     d = DefinitionIn.model_validate(
-        _definition([{"id": "a", "action": "notify", "params": {"message": "hi"}}])
+        _definition(
+            [{"id": "a", "action": "notify", "params": {"channel_id": NODE, "message": "hi"}}]
+        )
     )
     assert [needs_approval(s) for s in d.normal()["steps"]] == [False]
 
@@ -37,6 +39,13 @@ def test_a_destructive_exec_waits_for_approval_and_a_read_only_one_does_not() ->
     assert [needs_approval(s) for s in out] == [True, False]
 
 
+def test_a_notify_step_without_a_channel_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        DefinitionIn.model_validate(
+            _definition([{"id": "a", "action": "notify", "params": {"message": "x"}}])
+        )
+
+
 def test_an_approval_step_always_waits() -> None:
     d = DefinitionIn.model_validate(
         _definition([{"id": "ok", "action": "approval", "params": {"reason": "go?"}}])
@@ -51,7 +60,7 @@ def test_exec_nodes_are_listed_for_the_scope_check() -> None:
             "action": "exec",
             "params": {"node_id": NODE, "command": "uptime", "read_only": True},
         },
-        {"id": "b", "action": "notify", "params": {"message": "x"}},
+        {"id": "b", "action": "notify", "params": {"channel_id": NODE, "message": "x"}},
     ]
     assert exec_nodes(DefinitionIn.model_validate(_definition(steps)).normal()) == {NODE}
 
@@ -60,7 +69,9 @@ def test_exec_nodes_are_listed_for_the_scope_check() -> None:
     "definition",
     [
         _definition([]),  # no steps
-        _definition([{"id": "a", "action": "notify", "params": {"message": "x"}}] * 2),  # same id
+        _definition(
+            [{"id": "a", "action": "notify", "params": {"channel_id": NODE, "message": "x"}}] * 2
+        ),  # same id
         _definition([{"id": "A!", "action": "notify", "params": {"message": "x"}}]),  # bad id
         _definition([{"id": "a", "action": "exec", "params": {"command": "uptime"}}]),  # no node
         _definition(
@@ -73,13 +84,15 @@ def test_exec_nodes_are_listed_for_the_scope_check() -> None:
             ]
         ),
         _definition(
-            [{"id": "a", "action": "notify", "params": {"message": "x"}}], {"type": "cron"}
+            [{"id": "a", "action": "notify", "params": {"channel_id": NODE, "message": "x"}}],
+            {"type": "cron"},
         ),
         _definition(
-            [{"id": "a", "action": "notify", "params": {"message": "x"}}], {"type": "interval"}
+            [{"id": "a", "action": "notify", "params": {"channel_id": NODE, "message": "x"}}],
+            {"type": "interval"},
         ),
         _definition(
-            [{"id": "a", "action": "notify", "params": {"message": "x"}}],
+            [{"id": "a", "action": "notify", "params": {"channel_id": NODE, "message": "x"}}],
             {"type": "manual", "interval_s": 60},
         ),
     ],
@@ -91,12 +104,12 @@ def test_invalid_definitions_are_refused(definition: dict[str, object]) -> None:
 
 def test_an_interval_trigger_needs_a_period_of_at_least_a_minute() -> None:
     ok = _definition(
-        [{"id": "a", "action": "notify", "params": {"message": "x"}}],
+        [{"id": "a", "action": "notify", "params": {"channel_id": NODE, "message": "x"}}],
         {"type": "interval", "interval_s": 60},
     )
     DefinitionIn.model_validate(ok)
     bad = _definition(
-        [{"id": "a", "action": "notify", "params": {"message": "x"}}],
+        [{"id": "a", "action": "notify", "params": {"channel_id": NODE, "message": "x"}}],
         {"type": "interval", "interval_s": 30},
     )
     with pytest.raises(ValidationError):

@@ -21,6 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from janus_ops import audit
 from janus_ops.agents import exec as node_exec
 from janus_ops.agents.hub import AgentHub
+from janus_ops.monitoring import notify
+from janus_ops.vault import Vault
 from janus_ops.workflows.model import needs_approval
 
 log = logging.getLogger(__name__)
@@ -50,6 +52,7 @@ async def start_run(
     trigger: str,
     actor: str,
     context: dict[str, Any],
+    vault: Vault | None = None,
 ) -> str:
     """Records a run and advances it in the background. Returns the run id."""
     async with engine.begin() as conn:
@@ -71,7 +74,7 @@ async def start_run(
             target_id=name,
             payload={"run": run_id, "trigger": trigger},
         )
-    _spawn(jobs, advance(engine, hub, run_id))
+    _spawn(jobs, advance(engine, hub, run_id, vault))
     return run_id
 
 
@@ -85,7 +88,9 @@ def _json(value: Any) -> str:
     return json.dumps(value, default=str)
 
 
-async def advance(engine: AsyncEngine, hub: AgentHub, run_id: str) -> None:
+async def advance(
+    engine: AsyncEngine, hub: AgentHub, run_id: str, vault: Vault | None = None
+) -> None:
     """Runs the next steps of a run until it is done, failed, cancelled, or waiting for a person."""
     try:
         while True:
@@ -121,7 +126,7 @@ async def advance(engine: AsyncEngine, hub: AgentHub, run_id: str) -> None:
                     await _step_failed(engine, run_id, step["id"], "rejected")
                     await _set_run(engine, run_id, "failed", f"{step['id']}: rejected")
                     return
-            outcome = await _execute(engine, hub, run, step)
+            outcome = await _execute(engine, hub, run, step, vault)
             await _step_finished(engine, run_id, step["id"], outcome)
             if not outcome["ok"]:
                 await _set_run(engine, run_id, "failed", f"{step['id']}: {outcome['error']}")
@@ -238,7 +243,7 @@ async def _wait(engine: AsyncEngine, run_id: str, step_id: str) -> None:
 
 
 async def _execute(
-    engine: AsyncEngine, hub: AgentHub, run: _Run, step: dict[str, Any]
+    engine: AsyncEngine, hub: AgentHub, run: _Run, step: dict[str, Any], vault: Vault | None
 ) -> dict[str, Any]:
     """Runs one step and says how it went: ok, the output, the exit code and an error code."""
     params = step["params"]
@@ -255,16 +260,7 @@ async def _execute(
         by = state.decided_by if state else "?"
         return {"ok": True, "output": f"approved by {by}", "exit_code": None, "error": None}
     if step["action"] == "notify":
-        async with engine.begin() as conn:
-            await audit.append(
-                conn,
-                action="workflow.notify",
-                actor_name="workflow",
-                target_type="workflow",
-                target_id=run.name,
-                payload={"run": run.id, "step": step["id"], "message": params["message"]},
-            )
-        return {"ok": True, "output": params["message"], "exit_code": None, "error": None}
+        return await _notify(engine, run, step, vault)
     # exec
     async with engine.connect() as conn:
         if not await node_exec.policy_allows_exec(conn, str(params["node_id"])):
@@ -280,6 +276,60 @@ async def _execute(
         "exit_code": result.exit_code,
         "error": None if result.exit_code == 0 else f"exit {result.exit_code}",
     }
+
+
+async def _notify(
+    engine: AsyncEngine, run: _Run, step: dict[str, Any], vault: Vault | None
+) -> dict[str, Any]:
+    """Sends the step's message to its channel. A missing or disabled channel fails the step."""
+    params = step["params"]
+    if not params.get("channel_id"):
+        # a definition saved before notify steps named a channel: the step fails, with a reason
+        return {"ok": False, "output": "", "exit_code": None, "error": "channel_not_set"}
+    channel_id = str(params["channel_id"])
+    async with engine.connect() as conn:
+        channel = (
+            await conn.execute(
+                text(
+                    "SELECT id, kind, config, enabled, secret_ciphertext, secret_nonce, secret_dek"
+                    " FROM notification_channel WHERE id = CAST(:id AS uuid)"
+                ),
+                {"id": channel_id},
+            )
+        ).first()
+    if channel is None:
+        return {"ok": False, "output": "", "exit_code": None, "error": "channel_not_found"}
+    if not channel.enabled:
+        return {"ok": False, "output": "", "exit_code": None, "error": "channel_disabled"}
+    if vault is None:
+        return {"ok": False, "output": "", "exit_code": None, "error": "vault_unavailable"}
+    message = notify.Message(
+        event="workflow",
+        state="ok",
+        node=run.name,
+        check=step["id"],
+        output=params["message"],
+        problem_id=run.id,
+    )
+    try:
+        await notify.deliver(vault, channel, message, channel_id)
+    except (notify.SendError, OSError, KeyError, ValueError) as exc:
+        return {
+            "ok": False,
+            "output": "",
+            "exit_code": None,
+            "error": f"delivery_failed: {type(exc).__name__}",
+        }
+    async with engine.begin() as conn:
+        await audit.append(
+            conn,
+            action="workflow.notify",
+            actor_name="workflow",
+            target_type="workflow",
+            target_id=run.name,
+            payload={"run": run.id, "step": step["id"], "channel": channel_id},
+        )
+    return {"ok": True, "output": params["message"], "exit_code": None, "error": None}
 
 
 async def _step_finished(
@@ -328,6 +378,7 @@ async def decide(
     approve: bool,
     actor: str,
     reason: str,
+    vault: Vault | None = None,
 ) -> str:
     """Approves or rejects the pending approval of a step. Returns the new status of the approval.
 
@@ -371,7 +422,7 @@ async def decide(
             )
         ).first()
     if resumed is not None:
-        _spawn(jobs, advance(engine, hub, run_id))
+        _spawn(jobs, advance(engine, hub, run_id, vault))
     return status
 
 
@@ -425,6 +476,7 @@ async def tick(
     hub: AgentHub,
     jobs: set[asyncio.Task[None]],
     cursor: datetime,
+    vault: Vault | None = None,
 ) -> tuple[int, datetime]:
     """One scheduler pass: interval workflows that are due, and alerts opened since `cursor`.
     Returns the number of runs started and the cursor for the next pass."""
@@ -447,7 +499,7 @@ async def tick(
                 text("UPDATE workflow SET last_fired_at = now() WHERE id = CAST(:id AS uuid)"),
                 {"id": str(wf.id)},
             )
-        await start_run(engine, hub, jobs, str(wf.id), wf.name, "interval", "scheduler", {})
+        await start_run(engine, hub, jobs, str(wf.id), wf.name, "interval", "scheduler", {}, vault)
         started += 1
     async with engine.connect() as conn:
         problems = list(
@@ -484,17 +536,20 @@ async def tick(
                 "alert",
                 "scheduler",
                 {"problem_id": str(problem.id), "check_id": str(problem.check_id)},
+                vault,
             )
             started += 1
     return started, next_cursor
 
 
-async def scheduler(engine: AsyncEngine, hub: AgentHub, jobs: set[asyncio.Task[None]]) -> None:
+async def scheduler(
+    engine: AsyncEngine, hub: AgentHub, jobs: set[asyncio.Task[None]], vault: Vault | None = None
+) -> None:
     """Background loop of the app: starts the interval and alert runs. Stopped with the app."""
     cursor = datetime.now(UTC)
     while True:
         try:
-            _, cursor = await tick(engine, hub, jobs, cursor)
+            _, cursor = await tick(engine, hub, jobs, cursor, vault)
         except asyncio.CancelledError:
             raise
         except Exception:

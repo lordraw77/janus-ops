@@ -218,6 +218,7 @@ async def run_now(workflow_id: uuid.UUID, request: Request, session: Runner) -> 
         "manual",
         session.username,
         {},
+        request.app.state.vault,
     )
     return {"run_id": run_id}
 
@@ -352,6 +353,7 @@ async def _decide(
             approve,
             session.username,
             reason,
+            request.app.state.vault,
         )
     except LookupError:
         raise HTTPException(409, "no_pending_approval") from None

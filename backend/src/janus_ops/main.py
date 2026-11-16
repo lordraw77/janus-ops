@@ -110,7 +110,9 @@ def create_app(
             tasks.append(asyncio.create_task(app.state.dispatcher.run()))
             tasks.append(
                 asyncio.create_task(
-                    workflow_engine.scheduler(engine, app.state.agents, app.state.workflow_jobs)
+                    workflow_engine.scheduler(
+                        engine, app.state.agents, app.state.workflow_jobs, app.state.vault
+                    )
                 )
             )
         if settings.recordings_dir is not None:
