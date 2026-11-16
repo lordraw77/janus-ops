@@ -1,7 +1,7 @@
 /** Alerting API types (backend: janus_ops.monitoring). */
 
 export type CheckState = "ok" | "warn" | "crit" | "unknown";
-export type CheckKind = "host" | "metric" | "systemd" | "service" | "port" | "tcp" | "http" | "backup" | "snmp";
+export type CheckKind = "host" | "metric" | "systemd" | "service" | "port" | "tcp" | "http" | "backup" | "snmp" | "fritzbox";
 
 export type CheckDef = {
   node_id?: string;
@@ -117,6 +117,7 @@ export const KIND_LABEL: Record<CheckKind, string> = {
   backup: "Backups (Proxmox cluster)",
   snmp: "SNMP OID (from server)",
   service: "Systemd service (via agent)",
+  fritzbox: "FRITZ!Box (TR-064, from server)",
 };
 
 export const CHANNEL_LABEL: Record<ChannelKind, string> = {
@@ -156,6 +157,8 @@ export function describeCheck(c: CheckDef): string {
       return p.max_age_h ? `guests backed up within ${p.max_age_h} h` : "guests backed up on schedule";
     case "service":
       return `${p.unit} is active`;
+    case "fritzbox":
+      return `FRITZ!Box ${p.item ?? "item"}`;
     case "snmp":
       return `${p.oid}${p.scale && p.scale !== 1 ? ` × ${p.scale}` : ""}${limits}`;
     default:

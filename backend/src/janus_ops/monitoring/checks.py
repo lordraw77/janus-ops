@@ -36,7 +36,9 @@ from janus_ops.proxmox.backup_audit import collect as collect_backups
 from janus_ops.proxmox.client import PveError
 
 State = Literal["ok", "warn", "crit", "unknown"]
-Kind = Literal["host", "metric", "systemd", "service", "port", "tcp", "http", "backup", "snmp"]
+Kind = Literal[
+    "host", "metric", "systemd", "service", "port", "tcp", "http", "backup", "snmp", "fritzbox"
+]
 FACTS_STALE = timedelta(minutes=3)
 METRIC_STALE = timedelta(minutes=5)
 MAX_OUTPUT = 1000
@@ -101,6 +103,11 @@ class SnmpParams(_Params):
     timeout_s: float = Field(default=5, gt=0, le=30)
 
 
+class FritzParams(_Params):
+    # one item of the FRITZ!Box reading (see monitoring/fritz.py: ITEMS)
+    item: Literal["wan_link", "wan_connection", "uptime", "traffic"]
+
+
 class BackupParams(_Params):
     # longer than the schedule of the jobs when set; default: each guest's own job period
     max_age_h: int | None = Field(default=None, ge=1, le=24 * 90)
@@ -116,6 +123,7 @@ PARAMS: dict[str, type[_Params]] = {
     "http": HttpParams,
     "backup": BackupParams,
     "snmp": SnmpParams,
+    "fritzbox": FritzParams,
 }
 # kinds whose value can be compared with thresholds
 THRESHOLDS = {"metric", "tcp", "http", "snmp"}

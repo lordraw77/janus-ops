@@ -13,6 +13,7 @@ const USERNAME_HINT: Record<string, string> = {
   ssh_password: "SSH user",
   proxmox_token: "Token id, e.g. root@pam!janus",
   proxmox_password: "User with realm, e.g. root@pam or admin@pve",
+  fritzbox_password: "FRITZ!Box user, e.g. janus",
   docker_registry: "Registry user",
   snmp_v3: "SNMPv3 user",
 };
@@ -21,6 +22,7 @@ const SECRET_LABEL: Record<string, string> = {
   ssh_key: "Private key (OpenSSH or PEM)",
   proxmox_token: "Token secret",
   proxmox_password: "Password",
+  fritzbox_password: "Password of the FRITZ!Box user",
   generic: "Secret (e.g. SNMP v2c community)",
   snmp_v3: "Authentication passphrase (8+ characters)",
 };

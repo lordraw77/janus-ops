@@ -28,9 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from janus_ops.agents import exec as node_exec
 from janus_ops.agents.hub import AgentHub
-from janus_ops.monitoring import snmp_poll
+from janus_ops.monitoring import fritz, snmp_poll
 from janus_ops.monitoring.checks import (
     Check,
+    FritzParams,
     Result,
     ServiceParams,
     SnmpParams,
@@ -195,6 +196,8 @@ class Engine:
             result = Result("unknown", "Agent not connected")
         elif check.kind == "snmp":
             result = await self._snmp(check)
+        elif check.kind == "fritzbox":
+            result = await self._fritzbox(check)
         else:
             async with self.db.connect() as conn:
                 result = await evaluate(conn, check, online, row.last_seen_at, self.proxmox)
@@ -222,6 +225,16 @@ class Engine:
         except node_exec.ExecError as exc:
             return Result("crit", f"{unit}: the command did not run ({exc.code})")
         return grade_service(unit, result.output)
+
+    async def _fritzbox(self, check: Check) -> Result:
+        """One item of the FRITZ!Box reading, polled over TR-064 from the server (no agent)."""
+        try:
+            async with self.db.connect() as conn:
+                target = await fritz.load_target(conn, self.vault, check.node_id)
+            data = await fritz.poll(target)
+        except fritz.FritzError as exc:
+            return fritz.error_result(exc.code)
+        return fritz.grade(FritzParams.model_validate(check.params).item, data)
 
     async def _snmp(self, check: Check) -> Result:
         """One SNMP GET from the server; the credentials are read from the vault here."""

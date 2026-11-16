@@ -32,6 +32,7 @@ KINDS = (
     "sudo_password",
     "proxmox_token",
     "proxmox_password",
+    "fritzbox_password",
     "docker_registry",
     "snmp_v3",
     "notification_secret",

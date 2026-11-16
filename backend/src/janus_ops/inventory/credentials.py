@@ -27,6 +27,7 @@ Kind = Literal[
     "sudo_password",
     "proxmox_token",
     "proxmox_password",
+    "fritzbox_password",
     "docker_registry",
     "snmp_v3",
     "notification_secret",
@@ -76,6 +77,8 @@ USERNAME_RULES: dict[str, tuple[re.Pattern[str], str]] = {
     # SNMPv3 user names are at most 32 octets (RFC 3414); no spaces
     "snmp_v3": (re.compile(r"^[A-Za-z0-9._@-]{1,32}$"), "SNMPv3 user name, up to 32 characters"),
     "proxmox_password": (re.compile(rf"^{_PVE_USER}$"), "user@realm, e.g. root@pam"),
+    # the box's TR-064 user (System → FRITZ!Box-Benutzer): a plain name
+    "fritzbox_password": (re.compile(r"^[^\s]{1,64}$"), "the FRITZ!Box user name, no spaces"),
     "proxmox_token": (
         re.compile(rf"^{_PVE_USER}![A-Za-z][A-Za-z0-9._-]*$"),
         "user@realm!token, e.g. root@pam!janus",

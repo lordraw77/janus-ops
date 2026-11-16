@@ -18,13 +18,14 @@ export const KIND_LABELS: Record<string, string> = {
   sudo_password: "sudo password",
   proxmox_token: "Proxmox API token",
   proxmox_password: "Proxmox user + password",
+  fritzbox_password: "FRITZ!Box user + password",
   docker_registry: "Docker registry",
   snmp_v3: "SNMPv3",
   notification_secret: "Notification secret",
   generic: "Generic secret",
 };
 
-export type CapabilityKind = "ssh" | "agent" | "proxmox" | "docker" | "snmp";
+export type CapabilityKind = "ssh" | "agent" | "proxmox" | "docker" | "snmp" | "fritzbox";
 
 export type Capability = {
   kind: CapabilityKind;
@@ -73,5 +74,6 @@ export const CAPABILITIES: Record<CapabilityKind, { label: string; credentials: 
   proxmox: { label: "Proxmox node", credentials: ["proxmox_token", "proxmox_password"], required: true },
   docker: { label: "Docker host", credentials: [], required: false },
   snmp: { label: "SNMP device", credentials: ["snmp_v3", "generic"], required: true },
+  fritzbox: { label: "FRITZ!Box (TR-064)", credentials: ["fritzbox_password"], required: true },
 };
 

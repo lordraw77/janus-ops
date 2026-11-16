@@ -29,7 +29,7 @@ from janus_ops.directory import LldapAdmin
 from janus_ops.gitops.router import router as gitops
 from janus_ops.inventory import credentials, environments, groups, nodes
 from janus_ops.monitoring import engine as check_engine
-from janus_ops.monitoring import notify, snmp_oids, snmp_templates
+from janus_ops.monitoring import fritz_router, notify, snmp_oids, snmp_templates
 from janus_ops.monitoring import router as monitoring
 from janus_ops.proxmox import router as proxmox
 from janus_ops.proxmox.access import ProxmoxAccess
@@ -179,6 +179,7 @@ def create_app(
         telemetry.router,
         monitoring.router,
         snmp_oids.router,
+        fritz_router.router,
         snmp_templates.router,
         workflows,
         containers.router,

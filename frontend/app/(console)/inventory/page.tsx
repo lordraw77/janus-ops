@@ -46,6 +46,7 @@ const DEFAULT_CONFIG: Record<CapabilityKind, Record<string, string | boolean>> =
   proxmox: { port: "8006", verify_tls: true, node_name: "" },
   docker: { via: "agent" },
   snmp: { version: "v2c", port: "161", security_level: "authPriv", auth_protocol: "SHA256", priv_protocol: "AES128" },
+  fritzbox: { port: "49000" },
 };
 
 function initialCaps(node: InventoryNode | null): Record<CapabilityKind, CapState> {

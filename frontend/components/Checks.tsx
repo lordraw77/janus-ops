@@ -63,6 +63,7 @@ export function CheckEditor({
       params = { metric: str(f.get("metric")), labels, window_s: num(f.get("window_s")) ?? 0 };
     } else if (kind === "systemd") params = { unit: str(f.get("unit")) };
     else if (kind === "service") params = { unit: str(f.get("unit")) };
+    else if (kind === "fritzbox") params = { item: str(f.get("item")) };
     else if (kind === "port") params = { port: num(f.get("port")), proto: f.get("proto") };
     else if (kind === "tcp") params = { port: num(f.get("port")), host: str(f.get("host")) };
     else if (kind === "backup") params = { max_age_h: num(f.get("max_age_h")) ?? undefined };
@@ -132,6 +133,16 @@ export function CheckEditor({
               <TextInput name="window_s" type="number" min={0} max={3600} defaultValue={String(p.window_s ?? 0)} />
             </Field>
           </>
+        )}
+        {kind === "fritzbox" && (
+          <Field label="Item" hint="one part of the FRITZ!Box reading, polled over TR-064 from the server">
+            <select name="item" required defaultValue={String(p.item ?? "wan_link")} className="w-full rounded border border-line bg-canvas px-2 py-1.5 text-xs">
+              <option value="wan_link">WAN link</option>
+              <option value="wan_connection">WAN connection</option>
+              <option value="uptime">Uptime</option>
+              <option value="traffic">Traffic</option>
+            </select>
+          </Field>
         )}
         {kind === "service" && (
           <Field label="Unit" hint="systemd unit checked with systemctl is-active, e.g. ser2net.service">

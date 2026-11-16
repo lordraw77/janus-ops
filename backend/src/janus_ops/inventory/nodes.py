@@ -30,7 +30,7 @@ Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 Manager = Annotated[Session, Depends(require_permission("inventory.manage"))]
 
 Environment = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")]  # a row of `environment`
-CapabilityKind = Literal["ssh", "agent", "proxmox", "docker", "snmp"]
+CapabilityKind = Literal["ssh", "agent", "proxmox", "docker", "snmp", "fritzbox"]
 
 NODE_NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$"
 _HOST_LABEL = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
@@ -73,6 +73,11 @@ class SnmpConfig(_Config):
     priv_protocol: Literal["AES128", "AES256"] = "AES128"
 
 
+class FritzConfig(_Config):
+    # TR-064 over HTTP (the box's default is 49000); the user and password are in the credential
+    port: int = Field(default=49000, ge=1, le=65535)
+
+
 # kind -> (config model, credential kinds accepted, credential required)
 RULES: dict[str, tuple[type[_Config], frozenset[str], bool]] = {
     "ssh": (SshConfig, frozenset({"ssh_key", "ssh_password"}), True),
@@ -80,6 +85,7 @@ RULES: dict[str, tuple[type[_Config], frozenset[str], bool]] = {
     "proxmox": (ProxmoxConfig, frozenset({"proxmox_token", "proxmox_password"}), True),
     "docker": (DockerConfig, frozenset(), False),
     "snmp": (SnmpConfig, frozenset({"snmp_v3", "generic"}), True),
+    "fritzbox": (FritzConfig, frozenset({"fritzbox_password"}), True),
 }
 
 
