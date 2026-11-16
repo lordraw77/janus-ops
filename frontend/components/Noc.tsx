@@ -4,7 +4,7 @@ import { FolderOpen, Server, Terminal } from "lucide-react";
 import Link from "next/link";
 
 import { StateBadge } from "@/components/ui";
-import { type Attention, type Dashboard, type NodeCardData, ago, formatDuration } from "@/lib/agents";
+import { type Attention, type Dashboard, type NodeCardData, ago, formatDuration, formatValue } from "@/lib/agents";
 import { useAuth } from "@/lib/auth";
 import { EnvBadge } from "@/components/EnvBadge";
 
@@ -14,6 +14,15 @@ const STATE_COLOR = {
   unreachable: "var(--color-warn)",
   unmonitored: "var(--color-offline)",
 } as const;
+
+/** The colour of one SNMP check's state. */
+const CHECK_COLOR: Record<string, string> = {
+  ok: "var(--color-ok)",
+  warn: "var(--color-warn)",
+  crit: "var(--color-crit)",
+  unknown: "var(--color-offline)",
+};
+
 
 /** Host health: outer ring = share up, inner hexagon = worst state. */
 export function HexagonHealth({ hosts, services }: { hosts: Dashboard["hosts"]; services: Dashboard["services"] }) {
@@ -105,9 +114,16 @@ function Meter({ label, value, detail }: { label: string; value: number | null; 
 
 const STATE_LABEL = { up: "Up", down: "Down", unreachable: "Unreachable", unmonitored: "No agent" };
 
+/** The volume sizes from the NAS RAID MIB: only these are shown under the meters. */
+const VOLUME_LABEL: Record<string, string> = {
+  "1.3.6.1.4.1.6574.3.1.1.4.0": "Volume free",
+  "1.3.6.1.4.1.6574.3.1.1.5.0": "Volume total",
+};
+
 export function NodeCard({ node }: { node: NodeCardData }) {
   const { can } = useAuth();
   const l = node.latest;
+  const volumes = node.snmp.filter((r) => r.oid in VOLUME_LABEL);
   return (
     <article className="space-y-2.5 rounded-lg border border-line bg-surface p-3">
       <header className="flex items-start justify-between gap-2">
@@ -145,6 +161,17 @@ export function NodeCard({ node }: { node: NodeCardData }) {
             {(l.failed_units ?? 0) > 0 && <span className="text-warn">{l.failed_units} failed units</span>}
           </div>
         </>
+      )}
+      {volumes.length > 0 && (
+        <div className="space-y-1 border-t border-line pt-2">
+          {volumes.map((r) => (
+            <div key={r.oid} className="flex items-center gap-2 text-[11px]">
+              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: CHECK_COLOR[r.state] ?? "var(--color-offline)" }} aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-fg-muted">{VOLUME_LABEL[r.oid] ?? r.name}</span>
+              <span className="font-mono">{r.value !== null ? formatValue(r.value, "B") : (r.text ?? "–")}</span>
+            </div>
+          ))}
+        </div>
       )}
       <footer className="flex gap-1">
         {can("ssh.connect") && (

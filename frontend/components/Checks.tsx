@@ -4,6 +4,7 @@ import { CalendarClock, Lightbulb, Pencil, Play, Plus, Trash2 } from "lucide-rea
 import { type FormEvent, useState } from "react";
 
 import { Alert, Button, Card, Field, Modal, Select, StateBadge, TextInput } from "@/components/ui";
+import { type OidEntry, SnmpOidCatalog, useOidCatalog } from "@/components/SnmpOids";
 import { ago } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -41,7 +42,13 @@ export function CheckEditor({
   const [kind, setKind] = useState<CheckKind>(check?.kind ?? "metric");
   const [error, setError] = useState<string | null>(null);
   const p = (check?.params ?? {}) as Record<string, unknown>;
-  const thresholds = kind === "metric" || kind === "tcp" || kind === "http";
+  const thresholds = kind === "metric" || kind === "tcp" || kind === "http" || kind === "snmp";
+  // SNMP: the OID comes from the catalog (with an instance for table columns) or is typed
+  const catalog = useOidCatalog();
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [picked, setPicked] = useState<OidEntry | null>(null);
+  const [oidText, setOidText] = useState(String(p.oid ?? ""));
+  const [instance, setInstance] = useState("1");
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -58,6 +65,12 @@ export function CheckEditor({
     else if (kind === "port") params = { port: num(f.get("port")), proto: f.get("proto") };
     else if (kind === "tcp") params = { port: num(f.get("port")), host: str(f.get("host")) };
     else if (kind === "backup") params = { max_age_h: num(f.get("max_age_h")) ?? undefined };
+    else if (kind === "snmp")
+      params = {
+        oid: picked?.indexed ? `${picked.oid}.${instance.trim() || "1"}` : oidText.trim(),
+        scale: num(f.get("scale")) ?? 1,
+        timeout_s: num(f.get("timeout_s")) ?? 5,
+      };
     else if (kind === "http")
       params = {
         url: str(f.get("url")),
@@ -143,6 +156,59 @@ export function CheckEditor({
             )}
           </div>
         )}
+        {kind === "snmp" && (
+          <>
+            <Field label="OID" hint="Pick a name from the catalog, or type a numeric OID">
+              <div className="flex gap-2">
+                <Select
+                  className="flex-1"
+                  value={picked?.id ?? ""}
+                  onChange={(e) => {
+                    const entry = catalog.data?.find((o) => o.id === e.target.value) ?? null;
+                    setPicked(entry);
+                    if (entry) setOidText(entry.oid);
+                  }}
+                >
+                  <option value="">Type an OID</option>
+                  {(catalog.data ?? []).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                      {o.verified ? "" : " (not verified)"}
+                    </option>
+                  ))}
+                </Select>
+                <Button type="button" onClick={() => setCatalogOpen(true)}>
+                  Catalog
+                </Button>
+              </div>
+            </Field>
+            {picked?.indexed ? (
+              <Field label={`Instance: ${picked.oid}.<n>`} hint="Disk, pool or volume number, from 1">
+                <TextInput inputMode="numeric" value={instance} onChange={(e) => setInstance(e.target.value)} placeholder="1" />
+              </Field>
+            ) : (
+              <Field label="Numeric OID" hint="e.g. 1.3.6.1.2.1.1.7.0">
+                <TextInput
+                  required
+                  value={oidText}
+                  onChange={(e) => {
+                    setOidText(e.target.value);
+                    setPicked(null);
+                  }}
+                  placeholder="1.3.6.1.2.1.1.7.0"
+                />
+              </Field>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+            <Field label="Scale" hint="Multiplies the value before the thresholds">
+              <TextInput name="scale" type="number" step="any" min={0} defaultValue={String(p.scale ?? 1)} />
+            </Field>
+            <Field label="Timeout (s)">
+              <TextInput name="timeout_s" type="number" min={1} max={30} defaultValue={String(p.timeout_s ?? 5)} />
+            </Field>
+            </div>
+          </>
+        )}
         {kind === "backup" && (
           <Field label="Max backup age (hours, empty = per job schedule)">
             <TextInput name="max_age_h" type="number" min={1} max={2160} defaultValue={String(p.max_age_h ?? "")} />
@@ -200,6 +266,7 @@ export function CheckEditor({
           </Button>
         </div>
       </form>
+      {catalogOpen && <SnmpOidCatalog onClose={() => setCatalogOpen(false)} onChanged={catalog.reload} />}
     </Modal>
   );
 }

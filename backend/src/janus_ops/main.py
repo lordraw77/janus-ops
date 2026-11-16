@@ -26,9 +26,10 @@ from janus_ops.containers import router as containers
 from janus_ops.containers.access import DockerAccess
 from janus_ops.db import create_engine, schema_head
 from janus_ops.directory import LldapAdmin
+from janus_ops.gitops.router import router as gitops
 from janus_ops.inventory import credentials, environments, groups, nodes
 from janus_ops.monitoring import engine as check_engine
-from janus_ops.monitoring import notify
+from janus_ops.monitoring import notify, snmp_oids, snmp_templates
 from janus_ops.monitoring import router as monitoring
 from janus_ops.proxmox import router as proxmox
 from janus_ops.proxmox.access import ProxmoxAccess
@@ -89,9 +90,12 @@ def create_app(
         app.state.sftp = sftp.SftpPool(engine, app.state.vault, settings)
         app.state.agents = AgentHub()
         app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
+        app.state.gitops_jobs = set()  # GitOps deploys running in the background
         app.state.docker = DockerAccess(engine, app.state.vault, settings, app.state.agents)
         app.state.proxmox = ProxmoxAccess(engine, app.state.vault)
-        app.state.check_engine = check_engine.Engine(engine, app.state.agents, app.state.proxmox)
+        app.state.check_engine = check_engine.Engine(
+            engine, app.state.agents, app.state.proxmox, app.state.vault
+        )
         app.state.dispatcher = notify.Dispatcher(engine, app.state.vault)
         tasks = [asyncio.create_task(sftp.reaper(app.state.sftp, engine))]
         if settings.monitoring_enabled:
@@ -107,6 +111,11 @@ def create_app(
             for task in tasks:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            # a deploy cancelled here records its run as failed (see gitops.deploy.execute)
+            for job in list(app.state.gitops_jobs):
+                job.cancel()
+            if app.state.gitops_jobs:
+                await asyncio.gather(*app.state.gitops_jobs, return_exceptions=True)
             app.state.sftp.close_all()
             app.state.docker.close_all()
             await app.state.proxmox.close_all()
@@ -155,10 +164,13 @@ def create_app(
         agents.router,
         telemetry.router,
         monitoring.router,
+        snmp_oids.router,
+        snmp_templates.router,
         containers.router,
         proxmox.router,
         ansible,
         ai_copilot,
+        gitops,
     ):
         app.include_router(module_router, prefix=API_PREFIX)
     for router in extra_routers:

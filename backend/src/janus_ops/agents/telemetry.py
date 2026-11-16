@@ -119,6 +119,25 @@ class Latest(BaseModel):
     failed_units: int | None = None
 
 
+class SnmpReading(BaseModel):
+    """The latest result of one SNMP check of a node (FR-82)."""
+
+    name: str
+    oid: str
+    state: str  # the check's hard state
+    value: float | None  # the number read, when the check has one
+    text: str | None  # what the check last reported
+
+
+# Synology NAS utilization OIDs (enterprise 6574, system group): they feed the CPU and RAM meters
+# of a node that has no agent
+SNMP_CPU_OID = "1.3.6.1.4.1.6574.1.7.1.0"
+SNMP_MEM_OID = "1.3.6.1.4.1.6574.1.7.2.0"
+# RAID MIB, volume 0: available and total size in bytes; they feed the Disk meter
+SNMP_VOL_AVAIL_OID = "1.3.6.1.4.1.6574.3.1.1.4.0"
+SNMP_VOL_TOTAL_OID = "1.3.6.1.4.1.6574.3.1.1.5.0"
+
+
 class NodeCard(BaseModel):
     node_id: uuid.UUID
     name: str
@@ -131,6 +150,7 @@ class NodeCard(BaseModel):
     last_seen_at: datetime | None
     latest: Latest
     cpu_spark: list[float | None]
+    snmp: list[SnmpReading] = []
 
 
 class Attention(BaseModel):
@@ -153,6 +173,29 @@ class Dashboard(BaseModel):
     handled: int  # open problems acknowledged, in downtime or unreachable
     nodes: list[NodeCard]
     attention: list[Attention]
+
+
+def snmp_latest(readings: list[SnmpReading]) -> Latest:
+    """CPU, RAM and disk meters for a node without an agent, from its SNMP readings."""
+    latest = Latest()
+    by_oid = {r.oid: r.value for r in readings if r.value is not None}
+    if SNMP_CPU_OID in by_oid:
+        latest.cpu_pct = by_oid[SNMP_CPU_OID]
+    if SNMP_MEM_OID in by_oid:
+        latest.mem_pct = by_oid[SNMP_MEM_OID]
+    total = by_oid.get(SNMP_VOL_TOTAL_OID)
+    avail = by_oid.get(SNMP_VOL_AVAIL_OID)
+    if total and avail is not None and 0 <= avail <= total:
+        latest.disk_pct = round(100 * (total - avail) / total, 1)
+        latest.disk_mount = "SNMP volume"
+    return latest
+
+
+def snmp_state(readings: list[SnmpReading]) -> str | None:
+    """Up when one SNMP check answers ok, down when none does; None without SNMP checks."""
+    if not readings:
+        return None
+    return "up" if any(r.state == "ok" for r in readings) else "down"
 
 
 def _latest(values: dict[str, list[tuple[dict[str, str], float]]]) -> Latest:
@@ -242,6 +285,31 @@ async def dashboard(request: Request, session: Reader) -> Dashboard:
                 )
             )
         }
+        snmp_by_node: dict[str, list[SnmpReading]] = {}
+        for r in await conn.execute(
+            text(
+                "SELECT c.node_id, c.name, c.params->>'oid' AS oid, s.hard_state,"
+                " s.last_output, last.perf"
+                " FROM service_check c JOIN check_state s ON s.check_id = c.id"
+                " LEFT JOIN LATERAL (SELECT r.perf FROM check_result r"
+                "  WHERE r.check_id = c.id ORDER BY r.time DESC LIMIT 1) last ON true"
+                " WHERE c.enabled AND c.kind = 'snmp'"
+                " AND c.node_id = ANY(CAST(:visible AS uuid[]))"
+                " ORDER BY lower(c.name)"
+            ),
+            {"visible": visible},
+        ):
+            perf = r.perf or {}
+            value = perf.get("value")
+            snmp_by_node.setdefault(str(r.node_id), []).append(
+                SnmpReading(
+                    name=r.name,
+                    oid=r.oid or "",
+                    state=r.hard_state or "pending",
+                    value=float(value) if value is not None else None,
+                    text=(r.last_output or "")[:200] or None,
+                )
+            )
         services = {"ok": 0, "warn": 0, "crit": 0, "unknown": 0, "pending": 0}
         for r in await conn.execute(
             text(
@@ -286,10 +354,13 @@ async def dashboard(request: Request, session: Reader) -> Dashboard:
             if host.hard_state == "ok":
                 return "up"
             return "unreachable" if host.unreachable else "down"
-        # no evaluated connectivity check (yet): fall back to the agent connection
+        # no evaluated connectivity check (yet): fall back to the agent connection, then to
+        # the SNMP checks of a node without an agent
         state = {"online": "up", "offline": "down"}.get(
             agent_status.get(node_id, ""), "unmonitored"
         )
+        if state == "unmonitored" and (snmp_state(snmp_by_node.get(node_id, [])) is not None):
+            state = snmp_state(snmp_by_node[node_id]) or "unmonitored"
         parent = parents.get(node_id)
         if state == "down" and parent and state_of(parent) == "down":
             state = "unreachable"
@@ -300,7 +371,8 @@ async def dashboard(request: Request, session: Reader) -> Dashboard:
         nid = str(r.id)
         state = state_of(nid)
         online = agent_status[nid] == "online"
-        latest = _latest(values.get(nid, {})) if online else Latest()
+        snmp = snmp_by_node.get(nid, [])
+        latest = _latest(values.get(nid, {})) if online else snmp_latest(snmp)
         cards.append(
             NodeCard(
                 node_id=r.id,
@@ -314,6 +386,7 @@ async def dashboard(request: Request, session: Reader) -> Dashboard:
                 last_seen_at=r.last_seen_at,
                 latest=latest,
                 cpu_spark=sparks.get(nid, []) if online else [],
+                snmp=snmp,
             )
         )
     attention: list[Attention] = []

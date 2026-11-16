@@ -45,7 +45,7 @@ const DEFAULT_CONFIG: Record<CapabilityKind, Record<string, string | boolean>> =
   agent: {},
   proxmox: { port: "8006", verify_tls: true, node_name: "" },
   docker: { via: "agent" },
-  snmp: { version: "v2c", port: "161" },
+  snmp: { version: "v2c", port: "161", security_level: "authPriv", auth_protocol: "SHA256", priv_protocol: "AES128" },
 };
 
 function initialCaps(node: InventoryNode | null): Record<CapabilityKind, CapState> {
@@ -282,6 +282,29 @@ function NodeDialog({
                         <Field label="Port">
                           <TextInput inputMode="numeric" value={String(c.config.port)} onChange={(e) => setConfig(kind, "port", e.target.value)} />
                         </Field>
+                        {c.config.version === "v3" && (
+                          <>
+                            <Field label="Security level">
+                              <select value={String(c.config.security_level)} onChange={(e) => setConfig(kind, "security_level", e.target.value)} className={SELECT}>
+                                <option value="authPriv">authPriv (recommended)</option>
+                                <option value="authNoPriv">authNoPriv (no encryption)</option>
+                                <option value="noAuthNoPriv">noAuthNoPriv (no security)</option>
+                              </select>
+                            </Field>
+                            <Field label="Authentication">
+                              <select value={String(c.config.auth_protocol)} onChange={(e) => setConfig(kind, "auth_protocol", e.target.value)} className={SELECT}>
+                                <option value="SHA256">SHA-256</option>
+                                <option value="SHA">SHA-1</option>
+                              </select>
+                            </Field>
+                            <Field label="Privacy">
+                              <select value={String(c.config.priv_protocol)} onChange={(e) => setConfig(kind, "priv_protocol", e.target.value)} className={SELECT}>
+                                <option value="AES128">AES-128</option>
+                                <option value="AES256">AES-256</option>
+                              </select>
+                            </Field>
+                          </>
+                        )}
                       </>
                     )}
                     {kind === "agent" && (

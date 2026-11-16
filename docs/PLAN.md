@@ -91,6 +91,31 @@
 > tool read-only (inventory, metriche, storico check, audit del nodo), diagnosi asincrona su un
 > problem aperto, action plan approvabile o modificabile (`ai.use`, `ai.approve`). Migrazione `0014`.
 > Avanzamento in §5.10.
+>
+> **v0.20** — **fase F8 avviata** (§5.11): exec via agent con policy locale `allow_exec` e esecuzione delle
+> azioni approvate del Copilot (`actions.execute`), audit di ogni tentativo. Allineati stato, README e
+> STATE alle fasi F0–F7 già completate.
+>
+> **v0.21** — **F8, GitOps compose** (FR-81, backend): stack da repository https, deploy via agent, webhook firmato, storico dei run, permessi `gitops.manage` e `gitops.deploy`. Migrazione `0015`. Interfaccia web e workflow ancora da fare. Dettagli in §5.11.
+>
+> **v0.22** — **F8, SNMP v2c/v3** (FR-82): check `snmp` (una lettura GET di un OID numerico dal server,
+> soglie e stati come gli altri check), capability `snmp` con versione, porta, livello di sicurezza e
+> algoritmi v3; credenziali `generic` (community) e `snmp_v3` (utente e passphrase nel vault). Dipendenza
+> `pysnmp` (ADR-012). Nessuna migrazione per SNMP.
+>
+> **v0.23** — **catalogo degli OID SNMP** (migrazione `0016`): tabella `snmp_oid` con le voci della guida
+> Synology DiskStation MIB (sistema, dischi, RAID, UPS). Nel form dei check si sceglie un nome dal catalogo;
+> per le colonne di tabella (dischi, pool) si indica il numero dell'istanza. Le voci si aggiungono e si
+> segnano come verificate dalla UI. Lettura con `inventory.read`, modifica con `monitoring.manage`, audit
+> di ogni modifica. Dettagli in §5.11.
+>
+> **v0.24** — **SNMP: discovery, tipi di dispositivo, template di check** (migrazioni `0017`, `0018`).
+> Discovery di un nodo SNMP in sola lettura (GETNEXT sotto le radici scelte, al massimo tre, solo
+> sotto `1.3.6.1`, 500 risposte e 60 secondi per radice): i candidati si selezionano e solo allora
+> entrano nel catalogo. Ogni voce del catalogo ha un tipo di dispositivo (nas, ups, switch, router,
+> server, generic). Template di check preconfigurati (`snmp_template`): un NAS Synology di base e un
+> UPS di base; applicarne uno crea i check sul nodo, un check per istanza per le voci di tabella
+> (dischi, pool), e salta i check già presenti.
 
 **Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
 (SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
@@ -371,6 +396,13 @@ janus-ops/
 - *Migrazione*: comando `janus-ops secrets migrate --to <backend>` che sposta o ricifra tutte le credenziali esistenti, idempotente e registrato nell'audit; ritorno indietro con lo stesso comando.
 - *Conseguenze*: il secret manager diventa una dipendenza di runtime: se non risponde, SSH e tutto ciò che usa credenziali falliscono con `vault_unavailable` (il login no, se il TOTP non è attivo). Nessuna cache del testo in chiaro; eventuale cache in memoria delle DEK decifrate per pochi minuti `OPEN`. Un OpenBao in produzione richiede gestione dell'unseal e backup propri: documentarlo; la modalità "dev" non è ammessa. `[VERIFY: client Python (hvac o HTTP diretto) e parità dell'API Transit/KV tra OpenBao e Vault]`
 
+**ADR-012 — Client SNMP (F8, FR-82)**
+- *Contesto*: NAS, switch e UPS si leggono via SNMP. Serve un client che parli v2c e v3 con autenticazione e cifratura.
+- *Opzioni*: (a) **pysnmp** (lextudio, BSD): puro Python, asyncio, USM v3 completo; l'unica dipendenza transitiva è `pyasn1`, già nel lockfile; (b) `net-snmp` (`snmpget`) come binario nell'immagine: funziona, ma è un processo per lettura, parsing testuale dell'output e gestione delle chiavi v3 sulla riga di comando (la passphrase finirebbe negli argomenti del processo); (c) implementazione propria di BER e USM: nessuna dipendenza, ma crittografia e parsing scritti a mano su un protocollo che parse male è un rischio inaccettabile.
+- *Decisione*: **(a)**, `pysnmp>=7.1.33` (una riga di giustificazione in `backend/pyproject.toml`). Dipendenza da tenere: senza, FR-82 non è realizzabile senza (b) o (c).
+- *Scelte di sicurezza*: solo GET di OID numerici (niente SET, walk, trap, MIB da caricare); v3 con SHA/SHA-256 e AES-128/256; MD5 e DES non offerti; v2c offerto perché molti dispositivi lo usano, ma la community viaggia in chiaro (rischio residuo documentato); `noAuthNoPriv` e `authNoPriv` esistono solo come scelta esplicita dell'operatore, il default è `authPriv`. Ogni lettura usa un `SnmpEngine` nuovo: pysnmp lega un engine al loop che lo usa per primo.
+- *Conseguenze*: pysnmp non ha stub di tipo: nel `pyproject.toml` il modulo è escluso da mypy (`ignore_missing_imports`), i valori restano `Any` al confine.
+
 **ADR-007 — Integrazione AI**
 - *Decisione*: client OpenAI-compatible verso endpoint **self-hosted esterni** (A6), con tool **read-only** esposti dal backend (get_logs, get_metrics, get_audit, get_inventory). LiteLLM solo se serve il routing tra più endpoint/modelli; altrimenti SDK diretto `[VERIFY in F7]`. Le azioni sono prodotte come *Action Plan* strutturato e passano dal normale flusso RBAC + approvazione.
 - *Conseguenze*: nessuna redazione dei dati operativi (consentiti da A6); i segreti del vault non sono mai raggiungibili dai tool; ogni prompt/risposta registrato nell'audit; più endpoint configurabili (es. modello piccolo per triage, grande per RCA).
@@ -430,7 +462,8 @@ agent (batch ogni N s, buffer bbolt) → gateway (validazione, insert batch) →
 | `audit_event` | id, ts, actor, action, target, payload, prev_hash, hash | Append-only, hash chain |
 | `terminal_session` | id, user, node, started, ended, recording_path | |
 | `playbook`, `job_run`, `job_event` | | ansible-runner events |
-| `workflow`, `workflow_run`, `workflow_step_run` | | F8 |
+| `gitops_stack`, `gitops_run` | | F8 (GitOps, migrazione `0015`): segreto webhook sigillato nel vault; al più un run `running` per stack |
+| `workflow`, `workflow_run`, `workflow_step_run` | | F8 (da fare) |
 | `ai_conversation`, `action_plan` | status (draft/approved/rejected/executed) | |
 
 Consistenza: transazionale (PG) per inventory/vault/audit; eventual (≤ ciclo check) per gli stati di monitoring.
@@ -668,10 +701,25 @@ Regole comuni:
 | Dati operativi incapsulati come dati, non istruzioni; output mai eseguito, solo parsato (C10) | ✅ parziale | Test unitari: un log non può chiudere il blocco dati; l'efficacia contro il modello reale non è misurata |
 | Action plan: approva, rifiuta, modifica finché `proposed`; decisione una sola volta; audit | ✅ | Test d'integrazione e unitari |
 | Audit di ogni richiesta e risposta (hash SHA-256 del prompt e della risposta) | ✅ | Test d'integrazione: l'evento `ai.diagnosis.finished` e `ai.action.decided` |
-| Esecuzione delle azioni approvate | ⏳ | Non implementata: serve un executor (exec via agent, F8). Le azioni approvate restano registrate |
+| Esecuzione delle azioni approvate | ✅ parziale | Implementata in F8 (§5.11): exec via agent con policy locale `allow_exec`. Test unitari e d'integrazione; run su un nodo reale non ancora provato |
 | Generatore IaC contestuale (FR-72, SHOULD) | ⏳ | Non iniziato |
 | Interfaccia Copilot (problemi aperti, diagnosi, decisioni) | ✅ | `tsc`, ESLint; prova manuale nel browser non fatta |
 | Valutazione qualità delle diagnosi con modelli locali | ⏳ | Non misurata: serve un set di casi con esito atteso |
+
+### 5.11 Avanzamento F8
+
+Ambito di F8 (dallo STATE sotto): exec via agent, workflow, GitOps, SNMP. PTY via agent (FR-83), auto-update
+firmato (FR-84), AD/LDAP esterno (FR-07), OIDC, NTLM e secret manager esterno (FR-86) restano in F8+.
+
+| Elemento | Stato | Verifica |
+|---|---|---|
+| Exec via agent: runner lato server, esecuzione lato agent senza shell, stream con limiti, policy `allow_exec` nel bootstrap | ✅ parziale | `tests/test_exec_unit.py`, `agent/internal/tunnel/exec_test.go`. Nodo reale non provato |
+| Esecuzione delle azioni approvate del Copilot (`actions.execute`): comando diviso senza shell, sintassi di shell rifiutata, ritorno ad `approved` se il run non parte, audit di ogni tentativo | ✅ parziale | Test unitari e d'integrazione in `test_ai_integration.py`. Nodo reale non provato |
+| Workflow visuali (FR-80) | ⏳ | Non iniziato: prossimo blocco dopo GitOps (ADR-003: stati `pending`/`running`/`waiting_approval`/`failed`/`done`, step idempotenti) |
+| GitOps compose con webhook (FR-81) | ✅ parziale | Migrazione `0015` (`gitops_stack`, `gitops_run`; permessi `gitops.manage` solo admin, `gitops.deploy` operator). Repository solo `https://` senza credenziali nell'URL; checkout in `/var/lib/janus-ops/gitops/<id>`: `git fetch` e `reset` a ogni deploy, poi `docker compose -p <nome> -f <file> up -d --remove-orphans`, tutto via agent con `allow_exec`. Webhook firmato HMAC-SHA256 (`X-Hub-Signature-256`, GitHub/Gitea/Forgejo), solo push sul branch, segreto nel vault mostrato una volta. Un deploy per stack alla volta (indice unico parziale). Test unitari e d'integrazione (`test_gitops_*`). **Non ancora:** interfaccia web, repository privati (deploy key), deploy via SSH senza agent, `compose down` alla rimozione dello stack, prova su un nodo reale |
+| SNMP v2c/v3 (FR-82) | ✅ parziale | Check `snmp` (`monitoring/snmp_poll.py`, `checks.py`), capability `snmp` con sicurezza v3 configurabile, credenziali `snmp_v3` (utente, passphrase di autenticazione e privacy, minimo 8 caratteri). Catalogo: `snmp_oids_integration` (seed, permessi, duplicati, verifica, audit). Test: `test_snmp_unit.py` (parametri, classificazione, soglie, autenticazione), `test_snmp_live.py` (agente SNMP locale su loopback: v2c, v3 authPriv SHA-256/AES-128, passphrase errata, community errata, OID inesistente, timeout), `test_snmp_integration.py` (API, vault e un tick reale del motore). Interfaccia aggiornata, non provata a mano nel browser. **Non ancora:** SNMP su host reale (NAS/UPS), MIB con nomi, trap, v1, creazione di template dalla UI (solo API), sorgente `template` per i check (la tabella accetta solo `manual` e `discovery`: la provenienza è nell'audit) |
+| PTY via agent (FR-83) | ⏳ | Non iniziato |
+| Auto-update agent firmato (FR-84) | ⏳ | Non iniziato |
 
 ## 6. Security — Threat model iniziale (STRIDE)
 
@@ -697,6 +745,9 @@ Trust boundary: Browser ⇄ Server · Agent ⇄ Server · Server ⇄ target (SSH
 | E — Errore umano in broadcast | Comando distruttivo inviato a più nodi | Broadcast esplicito per terminale, bordi evidenziati, avviso con il numero di terminali; snippet condivisi solo con `snippets.manage`; audit con testo | Medio |
 | I — Esfiltrazione file via SFTP | Utente con `sftp.transfer` scarica dati sensibili | Permesso dedicato, audit di ogni download con percorso e dimensione, permessi dell'account remoto | Medio (intrinseco alla funzione) |
 | E — Prompt injection via log | Log contenenti istruzioni per l'AI | Tool read-only, nessuna esecuzione senza umano, action plan mostrato per intero | Medio |
+| I — Community SNMP v2c intercettata | Traffico SNMP in chiaro sulla rete | v3 (`authPriv`) come default e consigliato; community nel vault, mai restituita; nessun SET | Medio (intrinseco a v2c, scelta dell'operatore) |
+| S — Dispositivo SNMP falsificato | Risposta contraffatta su UDP | v3 autenticato con SHA-256; il check lavora solo su OID numerici configurati | Basso (v3), Medio (v2c) |
+| I — Passphrase v3 in log o errori | Eccezioni pysnmp con parametri | Errori ridotti a codici stabili; le passphrase non entrano mai in messaggi, log o risposte | Basso |
 | E — Escalation RBAC | Endpoint senza check | Deny-by-default, dipendenza FastAPI obbligatoria per ruolo, test per endpoint | Basso |
 
 Requisiti di sicurezza per l'Engineer: versioni dipendenze pinnate (lockfile), SBOM in CI, container non-root,
@@ -795,5 +846,5 @@ STATE
                AC-04 su Rocky e arm64; E2E dietro squid (NFR-02); test di carico (NFR-05);
                continuous aggregates; installazione manuale dell'agent senza SSH;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        F8 — workflow, exec via agent (esecuzione delle azioni approvate), GitOps, SNMP
+  Next:        F8 in corso (§5.11): exec via agent, azioni approvate, GitOps (API) e SNMP v2c/v3 fatti; poi interfaccia GitOps, workflow, PTY, auto-update
 ```

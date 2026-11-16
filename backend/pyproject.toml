@@ -17,6 +17,7 @@ dependencies = [
     "ldap3>=2.9.1",
     "pydantic>=2.14.3",
     "pydantic-settings>=2.16.3",
+    "pysnmp>=7.1.33",  # FR-82: SNMP v2c/v3 client; stdlib has no SNMP, and hand-rolled BER + USM crypto is not acceptable
     "segno>=1.6.6",
     "sqlalchemy[asyncio]>=2.1.8",
     "uvicorn[standard]>=0.54.0",
@@ -77,3 +78,8 @@ strict = true
 mypy_path = "src"
 packages = ["janus_ops"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# pysnmp ships no type stubs (FR-82): its objects are typed as Any at the boundary
+module = ["pysnmp", "pysnmp.*"]
+ignore_missing_imports = true

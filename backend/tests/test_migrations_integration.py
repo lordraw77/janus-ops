@@ -29,6 +29,10 @@ pytestmark = [
 
 EXPECTED_TABLES = {
     "ai_diagnosis",
+    "gitops_stack",
+    "gitops_run",
+    "snmp_oid",
+    "snmp_template",
     "ansible_file",
     "ansible_file_version",
     "ansible_source",
@@ -138,6 +142,7 @@ def test_builtin_roles_seeded(migrated: None) -> None:
         ("operator", "ansible.run"),
         ("operator", "containers.exec"),
         ("operator", "containers.manage"),
+        ("operator", "gitops.deploy"),
         ("operator", "inventory.manage"),
         ("operator", "inventory.read"),
         ("operator", "monitoring.manage"),

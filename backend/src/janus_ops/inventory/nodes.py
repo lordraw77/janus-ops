@@ -63,8 +63,14 @@ class DockerConfig(_Config):
 
 
 class SnmpConfig(_Config):
+    # v2c: credential `generic` (the community). v3: credential `snmp_v3` (user and passphrases).
     version: Literal["v2c", "v3"] = "v2c"
     port: int = Field(default=161, ge=1, le=65535)
+    # v3 only: noAuthNoPriv and authNoPriv exist for devices without encryption; the default
+    # is authPriv. MD5 and DES are not offered.
+    security_level: Literal["noAuthNoPriv", "authNoPriv", "authPriv"] = "authPriv"
+    auth_protocol: Literal["SHA", "SHA256"] = "SHA256"
+    priv_protocol: Literal["AES128", "AES256"] = "AES128"
 
 
 # kind -> (config model, credential kinds accepted, credential required)
@@ -330,6 +336,11 @@ async def _validated_capabilities(
                 raise HTTPException(422, "unknown_credential")
             if kind not in cred_kinds:
                 raise HTTPException(422, f"credential_kind_mismatch:{cap.kind}")
+            if cap.kind == "snmp":
+                # v2c reads a community, v3 reads a user: the two are not interchangeable
+                wanted = "generic" if config["version"] == "v2c" else "snmp_v3"
+                if kind != wanted:
+                    raise HTTPException(422, "credential_kind_mismatch:snmp")
         if cap.kind == "docker" and config["via"] == "ssh" and "ssh" not in kinds:
             raise HTTPException(422, "docker_via_ssh_needs_ssh")
         if cap.kind == "ssh" and config.get("jump_host_id"):

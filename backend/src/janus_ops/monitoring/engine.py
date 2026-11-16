@@ -27,8 +27,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from janus_ops.agents.hub import AgentHub
-from janus_ops.monitoring.checks import Check, Result, clip, evaluate
+from janus_ops.monitoring import snmp_poll
+from janus_ops.monitoring.checks import Check, Result, SnmpParams, clip, evaluate, evaluate_snmp
 from janus_ops.proxmox.access import ProxmoxAccess
+from janus_ops.vault import Vault
 
 log = logging.getLogger(__name__)
 
@@ -124,11 +126,16 @@ WHERE c.kind = 'host' AND c.enabled AND s.hard_state = 'crit'
 
 class Engine:
     def __init__(
-        self, engine: AsyncEngine, hub: AgentHub, proxmox: ProxmoxAccess | None = None
+        self,
+        engine: AsyncEngine,
+        hub: AgentHub,
+        proxmox: ProxmoxAccess | None = None,
+        vault: Vault | None = None,
     ) -> None:
         self.db = engine
         self.hub = hub
         self.proxmox = proxmox  # for the `backup` kind
+        self.vault = vault  # for the `snmp` kind: the community or the SNMPv3 keys
         self.wake = asyncio.Event()
 
     async def run(self) -> None:
@@ -174,6 +181,8 @@ class Engine:
         if check.kind in ("metric", "systemd", "port") and not online:
             # no fresh data while the agent is away: the host check reports it
             result = Result("unknown", "Agent not connected")
+        elif check.kind == "snmp":
+            result = await self._snmp(check)
         else:
             async with self.db.connect() as conn:
                 result = await evaluate(conn, check, online, row.last_seen_at, self.proxmox)
@@ -184,6 +193,17 @@ class Engine:
             else None
         )
         await record(self.db, check.id, row.check_cycles, prev, result, unreachable)
+
+    async def _snmp(self, check: Check) -> Result:
+        """One SNMP GET from the server; the credentials are read from the vault here."""
+        try:
+            async with self.db.connect() as conn:
+                target = await snmp_poll.load_target(conn, self.vault, check.node_id)
+        except snmp_poll.SnmpError as exc:
+            return evaluate_snmp(check, snmp_poll.Reading("", None, error=exc.code))
+        p = SnmpParams.model_validate(check.params)
+        reading = await snmp_poll.get(target, p.oid, p.timeout_s)
+        return evaluate_snmp(check, reading)
 
 
 async def record(

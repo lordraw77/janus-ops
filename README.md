@@ -373,7 +373,10 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 > pinning, session recording, SFTP browser, command broadcast and snippets (phase F1),
 > **Go agent with SSH bootstrap, telemetry and NOC dashboard** (phase F2), **alerting with checks,
 > problems, downtimes and notifications** (phase F3), **Docker containers and Compose stacks via the
-> agent or SSH** (phase F4), the Compose stack and CI. Next: F5, Proxmox VE.
+> agent or SSH** (phase F4), **Proxmox VE** (F5), **Ansible** (F6), **AI Copilot** (F7). Phase F8 is in
+> progress: **commands executed through the agent**, including approved Copilot actions, **GitOps**
+> for Compose stacks from Git (API; web UI to come) and **SNMP v2c/v3 checks** for NAS, switches and
+> UPS. Next: visual workflows.
 
 | Phase | Scope |
 |---|---|
@@ -385,7 +388,8 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 | **F5** Proxmox | Cluster overview, VM/LXC lifecycle, snapshots, backup audit, console |
 | **F6** Ansible | Dynamic inventory, playbook catalog, live runs |
 | **F7** AI Copilot | RCA on alerts, action plans with human approval |
-| **F8+** | Visual workflows, GitOps, SNMP, agent PTY & auto-update, Windows agent, external secret manager (OpenBao / HashiCorp Vault) |
+| **F8** In progress | Commands via agent and approved actions, GitOps with signed webhooks, SNMP v2c/v3 checks (done); web UI for GitOps, visual workflows (next) |
+| **F8+** | Agent PTY & auto-update, Windows agent, external secret manager (OpenBao / HashiCorp Vault) |
 
 Details, acceptance criteria and open decisions: [docs/PLAN.md](docs/PLAN.md).
 

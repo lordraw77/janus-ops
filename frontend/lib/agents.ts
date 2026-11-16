@@ -44,6 +44,15 @@ export type AgentDetail = Agent & {
 
 export type HostState = "up" | "down" | "unreachable" | "unmonitored";
 
+/** The latest result of one SNMP check of a node. */
+export type SnmpReading = {
+  name: string;
+  oid: string;
+  state: string;
+  value: number | null;
+  text: string | null;
+};
+
 export type NodeCardData = {
   node_id: string;
   name: string;
@@ -66,6 +75,7 @@ export type NodeCardData = {
     failed_units: number | null;
   };
   cpu_spark: (number | null)[];
+  snmp: SnmpReading[];
 };
 
 export type Attention = {

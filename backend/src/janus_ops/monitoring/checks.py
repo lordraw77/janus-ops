@@ -9,6 +9,8 @@ Kinds:
 - http:    the server gets an expected HTTP status (no agent needed); latency thresholds
 - backup:  the Proxmox cluster behind the node has no guest without a recent backup (FR-53):
            failed or missing = CRIT, stale or not in any job = WARN. Needs the PVE access.
+- snmp:    one numeric OID read by SNMP GET from the server (FR-82, no agent needed); the
+           value times `scale` is compared with the thresholds. Needs the node's SNMP capability.
 """
 
 import asyncio
@@ -28,12 +30,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops.agents.ingest import LABEL_KEY, NAME
+from janus_ops.monitoring.snmp_poll import Reading
 from janus_ops.proxmox.access import ProxmoxAccess
 from janus_ops.proxmox.backup_audit import collect as collect_backups
 from janus_ops.proxmox.client import PveError
 
 State = Literal["ok", "warn", "crit", "unknown"]
-Kind = Literal["host", "metric", "systemd", "port", "tcp", "http", "backup"]
+Kind = Literal["host", "metric", "systemd", "port", "tcp", "http", "backup", "snmp"]
 FACTS_STALE = timedelta(minutes=3)
 METRIC_STALE = timedelta(minutes=5)
 MAX_OUTPUT = 1000
@@ -85,6 +88,14 @@ class HttpParams(_Params):
     timeout_s: float = Field(default=10, gt=0, le=60)
 
 
+class SnmpParams(_Params):
+    # numeric OID only: no MIB files are loaded, so the check cannot depend on them
+    oid: str = Field(pattern=r"^[0-2](\.\d{1,10}){1,63}$", max_length=256)
+    # multiplies the raw value before the thresholds, e.g. 0.1 for tenths of a degree
+    scale: float = Field(default=1.0, gt=0, le=1_000_000)
+    timeout_s: float = Field(default=5, gt=0, le=30)
+
+
 class BackupParams(_Params):
     # longer than the schedule of the jobs when set; default: each guest's own job period
     max_age_h: int | None = Field(default=None, ge=1, le=24 * 90)
@@ -98,9 +109,10 @@ PARAMS: dict[str, type[_Params]] = {
     "tcp": TcpParams,
     "http": HttpParams,
     "backup": BackupParams,
+    "snmp": SnmpParams,
 }
 # kinds whose value can be compared with thresholds
-THRESHOLDS = {"metric", "tcp", "http"}
+THRESHOLDS = {"metric", "tcp", "http", "snmp"}
 # kinds that need the agent
 NEEDS_AGENT = {"host", "metric", "systemd", "port"}
 
@@ -309,6 +321,40 @@ async def _backup(c: Check, proxmox: ProxmoxAccess | None) -> Result:
         shown += f" (+{len(rows) - 8})"
     head = f"{bad} failed or missing, {attention} stale or unscheduled"
     return Result("crit" if bad else "warn", f"{head}: {shown}", {"attention": bad + attention})
+
+
+# SNMP read error code -> the state and the text shown for it
+SNMP_ERRORS: dict[str, tuple[State, str]] = {
+    "no_snmp_capability": ("unknown", "the node has no enabled SNMP capability"),
+    "no_credential": ("unknown", "the SNMP capability has no credential"),
+    "credential_kind_mismatch": ("unknown", "the credential does not match the SNMP version"),
+    "vault_unavailable": ("unknown", "the vault is not available"),
+    "no_such_object": ("unknown", "the OID does not exist on the device"),
+    "timeout": ("crit", "no answer from the device (timeout)"),
+    "authentication_failed": ("crit", "SNMPv3 authentication failed"),
+    "engine_unknown": ("crit", "SNMPv3 engine not known to the device"),
+    "pdu_error": ("crit", "the device answered with an SNMP error"),
+    "request_failed": ("crit", "the SNMP request failed"),
+}
+
+
+def evaluate_snmp(c: Check, reading: Reading) -> Result:
+    """Grades one SNMP reading. `reading` comes from snmp_poll.get (or a fake in tests)."""
+    p = SnmpParams.model_validate(c.params)
+    if reading.error:
+        state, why = SNMP_ERRORS.get(reading.error, ("crit", "SNMP error"))
+        return Result(state, f"{p.oid}: {why}")
+    if c.comparison is None:
+        perf = {"value": reading.number} if reading.number is not None else {}
+        return Result("ok", f"{p.oid} = {reading.text}", perf)
+    if reading.number is None:
+        return Result("unknown", f"{p.oid} is not numeric: {reading.text}")
+    value = reading.number * p.scale
+    state = grade(value, c.comparison, c.warn, c.crit)
+    op = ">" if c.comparison == "gt" else "<"
+    limits = f" (warn {op} {_fmt(c.warn) if c.warn is not None else '-'},"
+    limits += f" crit {op} {_fmt(c.crit) if c.crit is not None else '-'})"
+    return Result(state, f"{p.oid} = {_fmt(value)}{limits}", {"value": value})
 
 
 async def evaluate(

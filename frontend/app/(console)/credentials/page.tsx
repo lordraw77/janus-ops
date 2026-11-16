@@ -22,6 +22,7 @@ const SECRET_LABEL: Record<string, string> = {
   proxmox_token: "Token secret",
   proxmox_password: "Password",
   generic: "Secret (e.g. SNMP v2c community)",
+  snmp_v3: "Authentication passphrase (8+ characters)",
 };
 
 type Dialog = { kind: "create" } | { kind: "secret"; cred: Credential } | { kind: "edit"; cred: Credential } | null;
@@ -61,6 +62,11 @@ function SecretFields({
           <TextInput type="password" autoComplete="off" value={passphrase} onChange={(e) => onPassphrase(e.target.value)} />
         </Field>
       )}
+      {kind === "snmp_v3" && (
+        <Field label="Privacy passphrase" hint="8+ characters; encrypts the SNMP traffic">
+          <TextInput type="password" autoComplete="new-password" required value={passphrase} onChange={(e) => onPassphrase(e.target.value)} />
+        </Field>
+      )}
     </>
   );
 }
@@ -87,7 +93,7 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
         username: username.trim() || null,
         description: description.trim() || null,
         secret,
-        passphrase: kind === "ssh_key" && passphrase ? passphrase : null,
+        passphrase: (kind === "ssh_key" || kind === "snmp_v3") && passphrase ? passphrase : null,
       },
     });
     setBusy(false);
@@ -141,7 +147,7 @@ function ReplaceSecretDialog({ cred, onClose, onDone }: { cred: Credential; onCl
     e.preventDefault();
     const r = await api(`/credentials/${cred.id}/secret`, {
       method: "PUT",
-      body: { secret, passphrase: cred.kind === "ssh_key" && passphrase ? passphrase : null },
+      body: { secret, passphrase: (cred.kind === "ssh_key" || cred.kind === "snmp_v3") && passphrase ? passphrase : null },
     });
     if (!r.ok) return setError(message(r.code));
     onDone();

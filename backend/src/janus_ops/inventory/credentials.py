@@ -73,6 +73,8 @@ class CredentialUpdate(BaseModel):
 # Proxmox user ids carry their realm: root@pam, admin@pve; API tokens add "!<token id>"
 _PVE_USER = r"[^\s@:!]+@[A-Za-z0-9][A-Za-z0-9._-]*"
 USERNAME_RULES: dict[str, tuple[re.Pattern[str], str]] = {
+    # SNMPv3 user names are at most 32 octets (RFC 3414); no spaces
+    "snmp_v3": (re.compile(r"^[A-Za-z0-9._@-]{1,32}$"), "SNMPv3 user name, up to 32 characters"),
     "proxmox_password": (re.compile(rf"^{_PVE_USER}$"), "user@realm, e.g. root@pam"),
     "proxmox_token": (
         re.compile(rf"^{_PVE_USER}![A-Za-z][A-Za-z0-9._-]*$"),
@@ -103,8 +105,18 @@ def _prepare(kind: str, body: SecretIn) -> tuple[dict[str, Any], dict[str, Any]]
             raise HTTPException(422, f"invalid_secret:{exc}") from None
         if body.passphrase:
             payload["passphrase"] = body.passphrase
+    elif kind == "snmp_v3":
+        # secret: the authentication passphrase; passphrase: the privacy passphrase (RFC 3414
+        # requires at least 8 characters for both)
+        if not body.passphrase:
+            raise HTTPException(422, "invalid_secret:SNMPv3 needs a privacy passphrase")
+        if min(len(body.secret), len(body.passphrase)) < 8:
+            raise HTTPException(422, "invalid_secret:SNMPv3 passphrases need 8 characters or more")
+        payload["passphrase"] = body.passphrase
     elif body.passphrase:
-        raise HTTPException(422, "invalid_secret:a passphrase is only used with SSH keys")
+        raise HTTPException(
+            422, "invalid_secret:a passphrase is only used with SSH keys and SNMPv3"
+        )
     return payload, public
 
 
