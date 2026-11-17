@@ -156,6 +156,8 @@ const MESSAGES: Record<string, string> = {
   update_checksum: "The binary was corrupted in transit; the agent kept its current version.",
   update_timeout: "The agent did not confirm the update in time.",
   update_failed: "The update did not complete; the agent kept its current version.",
+  not_a_webhook_workflow: "This workflow has no webhook trigger.",
+  too_many_requests: "Too many requests: wait a few seconds.",
   bootstrap_running: "An installation is already running on this node.",
   needs_root: "The SSH account must be root or have passwordless sudo.",
   unsupported_arch: "Unsupported CPU architecture: the agent runs on amd64 and arm64.",

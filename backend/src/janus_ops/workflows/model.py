@@ -1,7 +1,10 @@
 """Workflow definitions: triggers, steps and what each action needs (FR-80).
 
 A definition is JSON: a trigger and an ordered list of steps. Each step has an id, an action
-(exec, notify or approval) and its parameters. The rules that matter for safety live here:
+(exec, notify or approval) and its parameters. A step may carry a `when` condition on an earlier
+step (its outcome and, optionally, a text its output contains): when it is not met the step is
+skipped. A step with `on_failure: continue` does not fail the run, so later steps can branch on
+its failure. The rules that matter for safety live here:
 - an `exec` step runs a command on a node through its agent, without a shell. It is destructive
   unless `read_only` is true, and a destructive step waits for an approval before it runs;
 - an `approval` step always waits for a person;
@@ -51,9 +54,19 @@ PARAMS: dict[str, type[BaseModel]] = {
 }
 
 
+class WhenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step: str  # an earlier step of the same definition
+    outcome: Literal["ok", "failed", "skipped"] = "ok"
+    contains: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 class StepIn(BaseModel):
     id: str = Field(min_length=1, max_length=32)
     action: Action
+    when: WhenIn | None = None
+    on_failure: Literal["fail", "continue"] = "fail"
     params: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("id")
@@ -74,7 +87,7 @@ class StepIn(BaseModel):
 
 
 class TriggerIn(BaseModel):
-    type: Literal["manual", "interval", "alert"]
+    type: Literal["manual", "interval", "alert", "webhook"]
     interval_s: int | None = Field(default=None, ge=60, le=86400)
     check_id: uuid.UUID | None = None  # alert: only this check; empty = any check
 
@@ -98,12 +111,15 @@ class DefinitionIn(BaseModel):
         ids = [s.id for s in self.steps]
         if len(set(ids)) != len(ids):
             raise ValueError("step ids must be unique")
+        for position, step in enumerate(self.steps):
+            if step.when is not None and step.when.step not in ids[:position]:
+                raise ValueError("a condition must refer to an earlier step")
         return self
 
     def normal(self) -> dict[str, Any]:
         return {
             "trigger": self.trigger.model_dump(mode="json"),
-            "steps": [s.model_dump(mode="json") for s in self.steps],
+            "steps": [s.model_dump(mode="json", exclude_none=True) for s in self.steps],
         }
 
 
@@ -117,3 +133,20 @@ def needs_approval(step: dict[str, Any]) -> bool:
 def exec_nodes(definition: dict[str, Any]) -> set[str]:
     """The nodes a definition runs commands on (checked against the caller's scope)."""
     return {str(s["params"]["node_id"]) for s in definition["steps"] if s["action"] == "exec"}
+
+
+OUTCOME_OF = {"done": "ok", "failed": "failed", "skipped": "skipped"}
+
+
+def condition_met(when: dict[str, Any] | None, results: dict[str, tuple[str, str]]) -> bool:
+    """Whether a step runs: `results` maps a finished step id to (status, output)."""
+    if not when:
+        return True
+    found = results.get(when["step"])
+    if found is None:
+        return False
+    status, output = found
+    if OUTCOME_OF.get(status) != when.get("outcome", "ok"):
+        return False
+    contains = when.get("contains")
+    return contains is None or contains in output

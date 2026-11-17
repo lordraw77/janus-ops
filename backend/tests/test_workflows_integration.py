@@ -4,6 +4,9 @@ The agent is not running, so an exec step is refused as exec_not_allowed, which 
 the test: the approval gate comes first."""
 
 import asyncio
+import hashlib
+import hmac
+import json
 import time
 import uuid
 from collections.abc import Iterator
@@ -19,7 +22,7 @@ from janus_ops.db import alembic_config
 from janus_ops.monitoring import notify
 from janus_ops.workflows import engine as wf_engine
 
-from ._it import CONFIGURED, DB_URL, run_sql, signed_in
+from ._it import CONFIGURED, DB_URL, make_client, run_sql, signed_in
 
 pytestmark = [
     pytest.mark.integration,
@@ -373,3 +376,128 @@ def test_a_notify_step_without_a_channel_fails_with_a_reason(channel: str) -> No
         run = _wait_until(admin, _run(admin, wf["id"]), {"done", "failed"})
     assert run["status"] == "failed"
     assert run["error"] == "old: channel_not_set"
+
+
+def test_a_tolerated_failure_lets_later_steps_branch_on_it(channel: str) -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)
+        look = {**_exec("look", node, "uptime", read_only=True), "on_failure": "continue"}
+        happy = {**_notify("happy", channel), "when": {"step": "look", "outcome": "ok"}}
+        sad = {
+            **_notify("sad", channel, "it failed"),
+            "when": {"step": "look", "outcome": "failed"},
+        }
+        wf = _workflow(admin, [look, happy, sad])
+        run_id = _run(admin, wf["id"])
+        run = _wait_until(admin, run_id, {"done", "failed"})
+    assert run["status"] == "done", run
+    assert {s["step_id"]: s["status"] for s in run["steps"]} == {
+        "look": "failed",
+        "happy": "skipped",
+        "sad": "done",
+    }
+    assert _notify_count(run_id) == 1
+
+
+def test_a_failure_that_is_not_tolerated_still_fails_the_run(channel: str) -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)
+        wf = _workflow(
+            admin,
+            [
+                _exec("look", node, "uptime", read_only=True),
+                {**_notify("sad", channel), "when": {"step": "look", "outcome": "failed"}},
+            ],
+        )
+        run = _wait_until(admin, _run(admin, wf["id"]), {"done", "failed"})
+    assert run["status"] == "failed" and run["error"] == "look: exec_not_allowed"
+
+
+def test_a_condition_on_a_later_step_is_refused(channel: str) -> None:
+    with signed_in("alice") as admin:
+        r = admin.post(
+            "/api/v1/workflows",
+            json={
+                "name": _name("wf"),
+                "definition": {
+                    "trigger": {"type": "manual"},
+                    "steps": [
+                        {**_notify("a", channel), "when": {"step": "b"}},
+                        _notify("b", channel),
+                    ],
+                },
+            },
+        )
+    assert r.status_code == 422
+
+
+def _signed(secret: str, body: bytes) -> dict[str, str]:
+    return {
+        "X-Janus-Signature": "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    }
+
+
+def test_a_webhook_workflow_starts_on_a_signed_post_and_only_then(channel: str) -> None:
+    body = json.dumps({"ref": "release", "n": 1}).encode()
+    with signed_in("alice") as admin:
+        wf = _workflow(admin, [_notify("hi", channel)], trigger={"type": "webhook"})
+        secret = wf["webhook_secret"]
+        assert len(secret) >= 40 and wf["has_webhook"] is True
+        fetched = admin.get(f"/api/v1/workflows/{wf['id']}")
+        assert "webhook_secret" not in fetched.text
+        url = f"/api/v1/workflows/{wf['id']}/webhook"
+        with make_client() as anonymous:
+            assert anonymous.post(url, content=body).status_code == 403  # no signature
+            bad = anonymous.post(url, content=body, headers=_signed("wrong", body))
+            assert bad.status_code == 403
+            ok = anonymous.post(url, content=body, headers=_signed(secret, body))
+            assert ok.status_code == 202, ok.text
+            run_id = ok.json()["run_id"]
+            # a second one right away is held back
+            again = anonymous.post(url, content=body, headers=_signed(secret, body))
+            assert again.status_code == 429
+            # the run lives in this app's background task: wait for it in here
+            run = _wait_until(admin, run_id, {"done", "failed"})
+        assert run["status"] == "done" and run["trigger"] == "webhook"
+        assert run["context"]["webhook"] == {"ref": "release", "n": 1}
+        # rotating makes the old secret useless
+        new = admin.post(f"/api/v1/workflows/{wf['id']}/rotate-secret").json()["webhook_secret"]
+        assert new != secret
+        with make_client() as anonymous:
+            stale = anonymous.post(url, content=body, headers=_signed(secret, body))
+            assert stale.status_code == 403
+        # a disabled workflow does not exist for the outside
+        admin.patch(f"/api/v1/workflows/{wf['id']}", json={"enabled": False})
+        with make_client() as anonymous:
+            gone = anonymous.post(url, content=body, headers=_signed(new, body))
+            assert gone.status_code == 404
+    rejected = run_sql(
+        "SELECT count(*) FROM audit_event WHERE action = 'workflow.webhook.rejected'"
+        " AND target_id = :n",
+        {"n": wf["name"]},
+    )
+    assert int(rejected[0][0]) >= 2
+
+
+def test_rotating_the_secret_of_a_manual_workflow_is_refused(channel: str) -> None:
+    with signed_in("alice") as admin:
+        wf = _workflow(admin, [_notify("hi", channel)])
+        assert "webhook_secret" not in wf
+        r = admin.post(f"/api/v1/workflows/{wf['id']}/rotate-secret")
+    assert r.status_code == 409
+
+
+def test_changing_the_trigger_adds_and_removes_the_secret(channel: str) -> None:
+    with signed_in("alice") as admin:
+        wf = _workflow(admin, [_notify("hi", channel)])
+        steps = wf["definition"]["steps"]
+        added = admin.patch(
+            f"/api/v1/workflows/{wf['id']}",
+            json={"definition": {"trigger": {"type": "webhook"}, "steps": steps}},
+        ).json()
+        assert added["has_webhook"] is True and len(added["webhook_secret"]) >= 40
+        removed = admin.patch(
+            f"/api/v1/workflows/{wf['id']}",
+            json={"definition": {"trigger": {"type": "manual"}, "steps": steps}},
+        ).json()
+        assert removed["has_webhook"] is False and "webhook_secret" not in removed

@@ -12,6 +12,7 @@ type WorkflowRow = {
   description: string;
   definition: Record<string, unknown>;
   enabled: boolean;
+  has_webhook?: boolean;
   last_fired_at: string | null;
 };
 
@@ -30,14 +31,40 @@ type RunDetail = RunRow & {
   approvals: { step_id: string; reason: string; status: string; decided_by: string | null }[];
 };
 
+// "trigger": manual | interval (interval_s) | alert (check_id) | webhook.
+// A step may have "when": { step, outcome: ok | failed | skipped, contains } on an earlier step,
+// and "on_failure": "continue" so that a failure does not stop the run.
 const TEMPLATE = {
   trigger: { type: "manual" },
   steps: [
-    { id: "hello", action: "notify", params: { message: "Starting the check" } },
-    { id: "look", action: "exec", params: { node_id: "<node id>", command: "uptime", read_only: true } },
-    { id: "gate", action: "approval", params: { reason: "Continue?" } },
+    { id: "hello", action: "notify", params: { channel_id: "<channel id>", message: "Starting the check" } },
+    { id: "look", action: "exec", on_failure: "continue", params: { node_id: "<node id>", command: "uptime", read_only: true } },
+    { id: "alarm", action: "notify", when: { step: "look", outcome: "failed" }, params: { channel_id: "<channel id>", message: "uptime failed" } },
+    { id: "gate", action: "approval", when: { step: "look", outcome: "ok" }, params: { reason: "Continue?" } },
   ],
 };
+
+/** The webhook secret is shown once: after the workflow gets a webhook trigger or the secret is rotated. */
+function SecretDialog({ id, secret, onClose }: { id: string; secret: string; onClose: () => void }) {
+  const url = `${typeof window === "undefined" ? "" : window.location.origin}/api/v1/workflows/${id}/webhook`;
+  return (
+    <Modal title="Webhook secret" onClose={onClose}>
+      <div className="space-y-3 text-xs">
+        <p className="text-fg-muted">
+          POST a JSON object to the URL below, signed with HMAC-SHA256 over the body with this secret, as the header{" "}
+          <code className="font-mono">X-Janus-Signature: sha256=&lt;hex&gt;</code>. The body is kept in the run. The secret is shown only now.
+        </p>
+        <pre className="overflow-x-auto rounded border border-line bg-canvas p-2 font-mono text-[11px]">{url}</pre>
+        <pre className="overflow-x-auto rounded border border-line bg-canvas p-2 font-mono text-[11px]">{secret}</pre>
+        <div className="flex justify-end">
+          <Button type="button" variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 const STATUS_COLOR: Record<string, string> = {
   done: "text-ok",
@@ -46,6 +73,7 @@ const STATUS_COLOR: Record<string, string> = {
   waiting_approval: "text-warn",
   running: "text-primary",
   pending: "text-fg-muted",
+  skipped: "text-fg-muted",
 };
 
 /** Reads a path every few seconds while `active`; null path = nothing to read. */
@@ -73,7 +101,7 @@ function useWatch<T>(path: string | null, active: boolean, everyMs: number) {
   return { ...(path ? state : { data: null, error: null }), reload: () => setTick((t) => t + 1) };
 }
 
-function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (created: { id: string; secret?: string }) => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [json, setJson] = useState(JSON.stringify(TEMPLATE, null, 2));
@@ -90,10 +118,10 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
       return setError("The definition is not valid JSON.");
     }
     setBusy(true);
-    const r = await api("/workflows", { method: "POST", body: { name: name.trim(), description, definition } });
+    const r = await api<{ id: string; webhook_secret?: string }>("/workflows", { method: "POST", body: { name: name.trim(), description, definition } });
     setBusy(false);
     if (!r.ok) return setError(message(r.code) || "The definition was refused: check the trigger and each step's parameters.");
-    onDone();
+    onDone({ id: r.data.id, secret: r.data.webhook_secret });
   }
 
   return (
@@ -225,6 +253,7 @@ export function WorkflowsView() {
   const list = useResource<WorkflowRow[]>("/workflows");
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [secret, setSecret] = useState<{ id: string; value: string } | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const current = (list.data ?? []).find((w) => w.id === selected) ?? null;
@@ -236,6 +265,14 @@ export function WorkflowsView() {
     if (!r.ok) return setError(message(r.code));
     setRunId(r.data.run_id);
     runs.reload();
+  }
+
+  async function rotate(w: WorkflowRow) {
+    if (!window.confirm("Rotate the webhook secret? Senders using the old one stop working.")) return;
+    setError(null);
+    const r = await api<{ webhook_secret: string }>(`/workflows/${w.id}/rotate-secret`, { method: "POST" });
+    if (!r.ok) return setError(message(r.code));
+    setSecret({ id: w.id, value: r.data.webhook_secret });
   }
 
   async function remove(w: WorkflowRow) {
@@ -295,6 +332,11 @@ export function WorkflowsView() {
                     Run now
                   </Button>
                 )}
+                {can("workflow.manage") && current.has_webhook && (
+                  <Button type="button" onClick={() => void rotate(current)}>
+                    Rotate webhook secret
+                  </Button>
+                )}
                 {can("workflow.manage") && (
                   <button type="button" onClick={() => void remove(current)} className="text-xs text-crit hover:underline">
                     delete
@@ -335,12 +377,14 @@ export function WorkflowsView() {
       {creating && (
         <CreateDialog
           onClose={() => setCreating(false)}
-          onDone={() => {
+          onDone={(created) => {
             setCreating(false);
+            if (created.secret) setSecret({ id: created.id, value: created.secret });
             list.reload();
           }}
         />
       )}
+      {secret && <SecretDialog id={secret.id} secret={secret.value} onClose={() => setSecret(null)} />}
     </div>
   );
 }

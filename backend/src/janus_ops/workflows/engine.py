@@ -5,8 +5,13 @@ whose row is `done` is never executed again, which makes a resume safe. A run is
 background task at a time: the transition into `running` is a conditional update, so two
 approvals or a scheduler tick cannot start the same run twice.
 
-Triggers: manual (the API), interval (the scheduler, every SCHEDULER_TICK_S) and alert (the
-scheduler looks for problems opened since its last pass, so an alert starts a run within one tick).
+Steps may be conditional (`when`, on an earlier step's outcome) and may be allowed to fail
+(`on_failure: continue`): a skipped step is recorded as `skipped`, a tolerated failure as `failed`
+while the run goes on.
+
+Triggers: manual (the API), webhook (a signed POST, see the router), interval (the scheduler,
+every SCHEDULER_TICK_S) and alert (the scheduler looks for problems opened since its last pass,
+so an alert starts a run within one tick).
 """
 
 import asyncio
@@ -23,12 +28,13 @@ from janus_ops.agents import exec as node_exec
 from janus_ops.agents.hub import AgentHub
 from janus_ops.monitoring import notify
 from janus_ops.vault import Vault
-from janus_ops.workflows.model import needs_approval
+from janus_ops.workflows.model import condition_met, needs_approval
 
 log = logging.getLogger(__name__)
 
 SCHEDULER_TICK_S = 30
 OUTPUT_KEEP = 64 * 1024
+FINAL = ("done", "failed", "skipped")  # step statuses that are never run again
 
 
 async def _set_run(engine: AsyncEngine, run_id: str, status: str, error: str | None = None) -> None:
@@ -99,21 +105,25 @@ async def advance(
                 return
             steps: list[dict[str, Any]] = run.definition["steps"]
             async with engine.begin() as conn:
-                finished = {
-                    r.step_id: r.status
+                results = {
+                    r.step_id: (r.status, r.output)
                     for r in await conn.execute(
                         text(
-                            "SELECT step_id, status FROM workflow_step_run"
+                            "SELECT step_id, status, output FROM workflow_step_run"
                             " WHERE run_id = CAST(:r AS uuid)"
                         ),
                         {"r": run_id},
                     )
                 }
-            step = next((s for s in steps if finished.get(s["id"]) != "done"), None)
+            # a failed step is final too: it is only left in a running run when it was tolerated
+            step = next((s for s in steps if results.get(s["id"], ("", ""))[0] not in FINAL), None)
             if step is None:
                 await _set_run(engine, run_id, "done")
                 return
             await _ensure_step(engine, run_id, step, steps.index(step))
+            if not condition_met(step.get("when"), results):
+                await _step_skipped(engine, run_id, step["id"])
+                continue
             if needs_approval(step):
                 state = await _approval_state(engine, run_id, step["id"])
                 if state is None:
@@ -128,7 +138,11 @@ async def advance(
                     return
             outcome = await _execute(engine, hub, run, step, vault)
             await _step_finished(engine, run_id, step["id"], outcome)
-            if not outcome["ok"]:
+            if not outcome["ok"] and step.get("on_failure") == "continue":
+                await _audit_run(
+                    engine, run, "workflow.step.failed_continued", {"step": step["id"]}
+                )
+            elif not outcome["ok"]:
                 await _set_run(engine, run_id, "failed", f"{step['id']}: {outcome['error']}")
                 await _audit_run(engine, run, "workflow.run.failed", {"step": step["id"]})
                 return
@@ -348,6 +362,17 @@ async def _step_finished(
                 "r": run_id,
                 "s": step_id,
             },
+        )
+
+
+async def _step_skipped(engine: AsyncEngine, run_id: str, step_id: str) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE workflow_step_run SET status = 'skipped', finished_at = now()"
+                " WHERE run_id = CAST(:r AS uuid) AND step_id = :s"
+            ),
+            {"r": run_id, "s": step_id},
         )
 
 

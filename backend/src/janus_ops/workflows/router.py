@@ -7,9 +7,18 @@
   approver's scope: an approval is a decision about that node.
 A definition that runs commands needs its nodes in the caller's scope, when it is saved and when
 it is started.
+
+Webhook trigger: `POST /workflows/{id}/webhook`, the one route without a session. The body is
+signed with HMAC-SHA256 (`X-Janus-Signature: sha256=<hex>`) using the workflow's secret, which is
+shown once, when the workflow gets a webhook trigger or the secret is rotated. The JSON body (an
+object, at most 64 KiB) is kept in the run's context. Destructive steps still wait for a person.
 """
 
+import hashlib
+import hmac
 import json
+import secrets
+import time
 import uuid
 from typing import Annotated, Any
 
@@ -22,10 +31,15 @@ from janus_ops import audit
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.scope import require_node
+from janus_ops.vault import VaultUnavailable
 from janus_ops.workflows import engine as wf
 from janus_ops.workflows.model import DefinitionIn, exec_nodes
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
+
+SIGNATURE_HEADER = "X-Janus-Signature"
+WEBHOOK_MAX_BYTES = 64 * 1024
+WEBHOOK_MIN_GAP_S = 5  # a webhook cannot start a run of the same workflow more often than this
 
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 Manager = Annotated[Session, Depends(require_permission("workflow.manage"))]
@@ -63,6 +77,7 @@ def _out(row: Any) -> dict[str, Any]:
         "description": row.description,
         "definition": row.definition,
         "enabled": row.enabled,
+        "has_webhook": row.secret_ciphertext is not None,
         "last_fired_at": row.last_fired_at,
         "created_by": row.created_by,
         "created_at": row.created_at,
@@ -72,7 +87,7 @@ def _out(row: Any) -> dict[str, Any]:
 
 _SELECT = (
     "SELECT id, name, description, definition, enabled, last_fired_at, created_by, created_at,"
-    " updated_at FROM workflow"
+    " updated_at, secret_ciphertext, secret_nonce, secret_dek FROM workflow"
 )
 
 
@@ -104,7 +119,8 @@ async def create_workflow(body: WorkflowIn, request: Request, session: Manager) 
                         "INSERT INTO workflow (name, description, definition, enabled, created_by)"
                         " VALUES (:name, :desc, CAST(:d AS jsonb), :en, :by)"
                         " RETURNING id, name, description, definition, enabled, last_fired_at,"
-                        " created_by, created_at, updated_at"
+                        " created_by, created_at, updated_at, secret_ciphertext, secret_nonce,"
+                        " secret_dek"
                     ),
                     {
                         "name": body.name.strip(),
@@ -129,7 +145,35 @@ async def create_workflow(body: WorkflowIn, request: Request, session: Manager) 
             )
     except IntegrityError:
         raise HTTPException(409, "name_taken") from None
-    return _out(row)
+    out = _out(row)
+    if definition["trigger"]["type"] == "webhook":
+        out["webhook_secret"] = await _new_secret(request, str(row.id))
+        out["has_webhook"] = True
+    return out
+
+
+async def _new_secret(request: Request, workflow_id: str) -> str:
+    """A new webhook secret, sealed in the vault; returned once, never readable again."""
+    value = secrets.token_urlsafe(32)
+    try:
+        sealed = request.app.state.vault.seal(workflow_id, {"secret": value})
+    except VaultUnavailable:
+        raise HTTPException(503, "vault_unavailable") from None
+    async with request.app.state.engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE workflow SET secret_ciphertext = :ct, secret_nonce = :n, secret_dek = :d,"
+                " secret_kek_version = :k WHERE id = CAST(:id AS uuid)"
+            ),
+            {
+                "ct": sealed.ciphertext,
+                "n": sealed.nonce,
+                "d": sealed.dek_wrapped,
+                "k": sealed.kek_version,
+                "id": workflow_id,
+            },
+        )
+    return value
 
 
 def _json(value: Any) -> str:
@@ -184,7 +228,125 @@ async def update_workflow(
             )
     except IntegrityError:
         raise HTTPException(409, "name_taken") from None
-    return _out(await _workflow(request, workflow_id))
+    updated = await _workflow(request, workflow_id)
+    out = _out(updated)
+    if "definition" in changes:
+        is_webhook = updated.definition["trigger"]["type"] == "webhook"
+        if is_webhook and updated.secret_ciphertext is None:
+            out["webhook_secret"] = await _new_secret(request, str(workflow_id))
+            out["has_webhook"] = True
+        elif not is_webhook and updated.secret_ciphertext is not None:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "UPDATE workflow SET secret_ciphertext = NULL, secret_nonce = NULL,"
+                        " secret_dek = NULL, secret_kek_version = NULL WHERE id = :id"
+                    ),
+                    {"id": workflow_id},
+                )
+            out["has_webhook"] = False
+    return out
+
+
+@router.post("/{workflow_id}/rotate-secret", responses={404: {}, 409: {}, 503: {}})
+async def rotate_secret(
+    workflow_id: uuid.UUID, request: Request, session: Manager
+) -> dict[str, str]:
+    current = await _workflow(request, workflow_id)
+    if current.definition["trigger"]["type"] != "webhook":
+        raise HTTPException(409, "not_a_webhook_workflow")
+    value = await _new_secret(request, str(workflow_id))
+    async with request.app.state.engine.begin() as conn:
+        await audit.append(
+            conn,
+            action="workflow.secret_rotated",
+            actor_name=session.username,
+            actor_id=session.user_id,
+            target_type="workflow",
+            target_id=current.name,
+        )
+    return {"webhook_secret": value}
+
+
+def verify_signature(secret: str, body: bytes, header: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(header.encode(), expected.encode())
+
+
+@router.post(
+    "/{workflow_id}/webhook",
+    status_code=202,
+    responses={400: {}, 403: {}, 404: {}, 413: {}, 429: {}},
+)
+async def webhook(workflow_id: uuid.UUID, request: Request) -> dict[str, str]:
+    """Starts a run. No session: the HMAC signature of the body is the authentication."""
+    body = await request.body()
+    if len(body) > WEBHOOK_MAX_BYTES:
+        raise HTTPException(413, "payload_too_large")
+    try:
+        current = await _workflow(request, workflow_id)
+    except HTTPException:
+        raise HTTPException(404, "not_found") from None
+    if (
+        not current.enabled
+        or current.definition["trigger"]["type"] != "webhook"
+        or current.secret_ciphertext is None
+    ):
+        raise HTTPException(404, "not_found")
+    try:
+        secret = str(
+            request.app.state.vault.reveal(
+                str(workflow_id),
+                current.secret_ciphertext,
+                current.secret_nonce,
+                current.secret_dek,
+            )["secret"]
+        )
+    except VaultUnavailable:
+        raise HTTPException(503, "vault_unavailable") from None
+    if not verify_signature(secret, body, request.headers.get(SIGNATURE_HEADER, "")):
+        async with request.app.state.engine.begin() as conn:
+            await audit.append(
+                conn,
+                action="workflow.webhook.rejected",
+                actor_name="webhook",
+                target_type="workflow",
+                target_id=current.name,
+                payload={"reason": "bad_signature"},
+            )
+        raise HTTPException(403, "bad_signature")
+    try:
+        payload = json.loads(body) if body else {}
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(400, "invalid_payload") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "invalid_payload")
+    # at most one start per WEBHOOK_MIN_GAP_S: the claim is a conditional update
+    async with request.app.state.engine.begin() as conn:
+        claimed = (
+            await conn.execute(
+                text(
+                    "UPDATE workflow SET last_fired_at = now() WHERE id = :id AND"
+                    " (last_fired_at IS NULL OR last_fired_at <= now() - make_interval(secs => :g))"
+                    " RETURNING id"
+                ),
+                {"id": workflow_id, "g": WEBHOOK_MIN_GAP_S},
+            )
+        ).first()
+    if claimed is None:
+        raise HTTPException(429, "too_many_requests")
+    run_id = await wf.start_run(
+        request.app.state.engine,
+        request.app.state.agents,
+        request.app.state.workflow_jobs,
+        str(workflow_id),
+        current.name,
+        "webhook",
+        "webhook",
+        {"webhook": payload, "received_at": time.time()},
+        request.app.state.vault,
+    )
+    return {"status": "started", "run_id": run_id}
 
 
 @router.delete("/{workflow_id}", status_code=204, responses={404: {}})
