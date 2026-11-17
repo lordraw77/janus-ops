@@ -136,6 +136,19 @@ class Settings(BaseSettings):
     session_idle_s: int = Field(default=3600, ge=60, le=86400)
     cookie_secure: bool = Field(default=True, description="Send the session cookie over HTTPS only")
 
+    # --- Master key in an external secret manager (FR-86, ADR-011). local = JANUS_SECRET_KEY.
+    secret_backend: Literal["local", "openbao-transit"] = "local"  # noqa: S105
+    bao_addr: str | None = Field(default=None, description="https:// URL of OpenBao / Vault")
+    bao_role_id: str | None = None
+    bao_secret_id: SecretStr | None = None
+    bao_transit_mount: str = Field(default="transit", pattern=r"^[A-Za-z0-9_/-]{1,64}$")
+    bao_transit_key: str = Field(default="janus-kek", pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    bao_ca_file: Path | None = Field(default=None, description="CA bundle for the secret manager")
+    bao_timeout_s: int = Field(default=5, ge=1, le=60)
+    bao_dek_cache_s: int = Field(
+        default=300, ge=0, le=3600, description="How long unwrapped data keys stay in memory"
+    )
+
     # --- Break-glass local account (FR-06)
     breakglass_username: str = Field(default="breakglass", pattern=r"^[a-z0-9._-]{3,64}$")
 
@@ -158,6 +171,25 @@ class Settings(BaseSettings):
             raise ValueError(f"LDAP enabled but missing: {', '.join(missing)}")
         if "{username}" not in self.ldap_user_filter:
             raise ValueError("JANUS_LDAP_USER_FILTER must contain {username}")
+        if self.ldap_start_tls and self.ldap_url.startswith("ldaps://"):
+            raise ValueError("JANUS_LDAP_START_TLS is for ldap:// URLs, ldaps:// is already TLS")
+        return self
+
+    @model_validator(mode="after")
+    def _secret_backend_complete(self) -> "Settings":
+        if self.secret_backend != "openbao-transit":  # noqa: S105
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("JANUS_BAO_ADDR", self.bao_addr),
+                ("JANUS_BAO_ROLE_ID", self.bao_role_id),
+                ("JANUS_BAO_SECRET_ID", self.bao_secret_id),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(f"secret backend openbao-transit but missing: {', '.join(missing)}")
         return self
 
     @model_validator(mode="after")
@@ -175,6 +207,8 @@ class Settings(BaseSettings):
     @field_validator("secret_key")
     @classmethod
     def _secret_key_format(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value():
+            return None  # compose passes an empty value for a key that is not set
         if value is not None:
             raw = value.get_secret_value()
             try:
@@ -232,7 +266,13 @@ class Settings(BaseSettings):
         return value.rstrip("/")
 
     @field_validator(
-        "static_dir", "recordings_dir", "ldap_ca_file", "agent_dir", "agent_ca_file", mode="before"
+        "static_dir",
+        "recordings_dir",
+        "ldap_ca_file",
+        "agent_dir",
+        "agent_ca_file",
+        "bao_ca_file",
+        mode="before",
     )
     @classmethod
     def _empty_path_is_unset(cls, value: object) -> object:

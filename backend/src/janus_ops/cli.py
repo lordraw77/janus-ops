@@ -3,6 +3,7 @@
 import argparse
 import logging
 import sys
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -21,6 +22,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="migrate, then create the initial administrator from JANUS_ADMIN_* if missing",
     )
     sub.add_parser("version", help="print the version and exit")
+    sc = sub.add_parser(
+        "secrets", help="where the master key lives: status, or move it between backends (FR-86)"
+    )
+    sc_sub = sc.add_subparsers(dest="secrets_command", required=True)
+    sc_sub.add_parser("status", help="how many secrets are wrapped by each backend")
+    mv = sc_sub.add_parser("migrate", help="re-wrap the data keys with another backend")
+    mv.add_argument("--to", required=True, choices=["local", "openbao-transit"])
     kg = sub.add_parser(
         "agent-keygen",
         help="generate the agent release key pair (run it OFF the server; keep the private key)",
@@ -120,6 +128,46 @@ def _release_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _secrets_command(args: argparse.Namespace, settings: Any) -> int:
+    import asyncio
+
+    from janus_ops import secrets_migrate
+    from janus_ops.crypto import DecryptionError
+    from janus_ops.db import create_engine
+    from janus_ops.transit import build_box
+    from janus_ops.vault import VaultUnavailable
+
+    async def run() -> int:
+        engine = create_engine(settings)
+        try:
+            if args.secrets_command == "status":
+                for table, counts in (await secrets_migrate.status(engine)).items():
+                    print(f"{table}: {counts or '-'}")
+                return 0
+            try:
+                box = build_box(settings, primary=args.to)
+            except ValueError as exc:
+                print(f"janus-ops: {exc}", file=sys.stderr)
+                return 2
+            if box is None:
+                print("janus-ops: no master key is configured", file=sys.stderr)
+                return 2
+            try:
+                report = await secrets_migrate.migrate(engine, box, args.to)
+            except (DecryptionError, VaultUnavailable) as exc:
+                print(
+                    f"janus-ops: nothing was changed: {type(exc).__name__}: {exc}", file=sys.stderr
+                )
+                return 1
+            moved, already = report.moved or "-", report.already or "-"
+            print(f"moved {report.total_moved}: {moved}; already there: {already}")
+            return 0
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "version":
@@ -171,6 +219,9 @@ def main(argv: list[str] | None = None) -> int:
             log.error("initial administrator not created", extra={"error": exc.code})
             return 1
         return 0
+
+    if args.command == "secrets":
+        return _secrets_command(args, settings)
 
     if args.command == "breakglass":
         import asyncio

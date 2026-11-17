@@ -44,7 +44,17 @@ services:
       <<: *janus-env
       # Only the proxy can reach this container (no published port)
       JANUS_FORWARDED_ALLOW_IPS: "*"
-      JANUS_SECRET_KEY: ${JANUS_SECRET_KEY:?run make env}
+      # Master key: local (JANUS_SECRET_KEY) or an external OpenBao / Vault Transit (FR-86). With
+      # Transit the local key may stay set while secrets are moved (janus-ops secrets migrate).
+      JANUS_SECRET_KEY: ${JANUS_SECRET_KEY:-}
+      JANUS_SECRET_BACKEND: ${JANUS_SECRET_BACKEND:-local}
+      JANUS_BAO_ADDR: ${JANUS_BAO_ADDR:-}
+      JANUS_BAO_ROLE_ID: ${JANUS_BAO_ROLE_ID:-}
+      JANUS_BAO_SECRET_ID: ${JANUS_BAO_SECRET_ID:-}
+      JANUS_BAO_TRANSIT_MOUNT: ${JANUS_BAO_TRANSIT_MOUNT:-transit}
+      JANUS_BAO_TRANSIT_KEY: ${JANUS_BAO_TRANSIT_KEY:-janus-kek}
+      JANUS_BAO_CA_FILE: ${JANUS_BAO_CA_FILE:-}
+      JANUS_BAO_DEK_CACHE_S: ${JANUS_BAO_DEK_CACHE_S:-300}
       JANUS_SESSION_TTL_S: ${JANUS_SESSION_TTL_S:-28800}
       JANUS_SESSION_IDLE_S: ${JANUS_SESSION_IDLE_S:-3600}
       JANUS_BREAKGLASS_USERNAME: ${JANUS_BREAKGLASS_USERNAME:-breakglass}

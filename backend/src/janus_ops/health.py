@@ -1,5 +1,6 @@
 """Liveness and readiness endpoints."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -46,6 +47,11 @@ async def ready(request: Request) -> JSONResponse:
         # Exception text may contain host details: log the type only, return a fixed code
         log.warning("readiness check failed", extra={"error_type": type(exc).__name__})
         checks["database"] = "unreachable"
+
+    # an external secret manager (FR-86): without it no credential can be read
+    check = getattr(request.app.state.auth.box, "check", None)
+    if check is not None:
+        checks["secret_manager"] = "ok" if await asyncio.to_thread(check) else "unreachable"
 
     healthy = all(v == "ok" for v in checks.values()) and checks.get("database") == "ok"
     return JSONResponse(

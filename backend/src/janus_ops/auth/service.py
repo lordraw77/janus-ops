@@ -14,8 +14,9 @@ from janus_ops.auth.ldap import DirectoryBackend, DirectoryUnavailable, InvalidC
 from janus_ops.auth.passwords import verify_password
 from janus_ops.auth.ratelimit import LoginRateLimiter
 from janus_ops.config import Settings
-from janus_ops.crypto import SecretBox
+from janus_ops.crypto import Box
 from janus_ops.rbac import ADMIN_ROLE, roles_for_groups
+from janus_ops.transit import build_box
 
 log = logging.getLogger(__name__)
 
@@ -53,8 +54,7 @@ class AuthService:
         self._directory = directory
         self._user_limiter = user_limiter or LoginRateLimiter(max_failures=5, window_s=900)
         self._ip_limiter = ip_limiter or LoginRateLimiter(max_failures=30, window_s=900)
-        key = settings.secret_key
-        self.box = SecretBox(key.get_secret_value()) if key else None
+        self.box: Box | None = build_box(settings)
 
     async def _fail(
         self, username: str, ip: str | None, reason: str, status: int, *, count: bool
@@ -220,7 +220,10 @@ class AuthService:
         """Second step: a TOTP or recovery code turns the pending session into a full one."""
         locked = False
         async with self._engine.begin() as conn:
-            factor = await mfa.verify_factor(conn, self.box, pending.user_id, code)
+            try:
+                factor = await mfa.verify_factor(conn, self.box, pending.user_id, code)
+            except mfa.TotpUnavailable:
+                raise LoginError("secret_manager_unavailable", 503) from None
             if factor is None:
                 failures = await sessions.record_mfa_failure(conn, pending.id)
                 locked = failures >= MAX_MFA_FAILURES

@@ -231,7 +231,7 @@ Punti delle specifiche che vanno corretti, chiariti o ridimensionati prima di sc
 | FR-83 | PTY e comandi remoti via tunnel agent | SHOULD | F8 |
 | FR-84 | Auto-update agent air-gapped firmato | SHOULD | F8 |
 | FR-85 | Agent Windows | WON'T (MVP) | F9+ |
-| FR-86 | Segreti e chiavi in un secret manager esterno (OpenBao, HashiCorp Vault o simili): chiave master (KEK) e/o contenuto dei segreti fuori da Janus-Ops. **AMEND Product Owner (v0.9)**: da WON'T a SHOULD, su richiesta dell'utente; disegno in ADR-011 | SHOULD | F8+ |
+| FR-86 | **Fatto (v0.28, opzione a di ADR-011)**: `JANUS_SECRET_BACKEND=openbao-transit`, la chiave master nel motore Transit di OpenBao/Vault (AppRole, policy minima encrypt/decrypt, rinnovo del token, cache delle DEK `JANUS_BAO_DEK_CACHE_S`), `janus-ops secrets status` e `secrets migrate --to ...` (solo re-wrap delle DEK, idempotente, reversibile, tutto o niente, audit), readiness che controlla il secret manager, TOTP inclusi. Provato contro un OpenBao 2.4.1 reale. **Non ancora:** opzione (b) KV con segreti esterni, rotazione della KEK Transit senza `rewrap`, uso con Vault HashiCorp reale. Segreti e chiavi in un secret manager esterno (OpenBao, HashiCorp Vault o simili): chiave master (KEK) e/o contenuto dei segreti fuori da Janus-Ops. **AMEND Product Owner (v0.9)**: da WON'T a SHOULD, su richiesta dell'utente; disegno in ADR-011 | SHOULD | F8+ |
 | FR-87 | Multi-tenancy, HA del server | WON'T (MVP) | — |
 
 ### 2.2 Requisiti non funzionali

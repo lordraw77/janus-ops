@@ -7,7 +7,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops.auth import totp
-from janus_ops.crypto import DecryptionError, SecretBox
+from janus_ops.crypto import Box, DecryptionError
+from janus_ops.vault import VaultUnavailable
 
 
 class TotpUnavailable(Exception):
@@ -36,10 +37,17 @@ def _aad(user_id: str) -> bytes:
     return f"totp:{user_id}".encode()
 
 
-def _box(box: SecretBox | None) -> SecretBox:
+def _box(box: Box | None) -> Box:
     if box is None:
         raise TotpUnavailable
     return box
+
+
+def _seal(sb: Box, secret: str, user_id: str) -> bytes:
+    try:
+        return sb.encrypt(secret.encode(), _aad(user_id))
+    except VaultUnavailable:
+        raise TotpUnavailable from None
 
 
 async def status(conn: AsyncConnection, user_id: str) -> tuple[bool, int]:
@@ -57,7 +65,7 @@ async def status(conn: AsyncConnection, user_id: str) -> tuple[bool, int]:
 
 
 async def start_enrollment(
-    conn: AsyncConnection, box: SecretBox | None, user_id: str, account: str
+    conn: AsyncConnection, box: Box | None, user_id: str, account: str
 ) -> Enrollment:
     sb = _box(box)
     enabled, _ = await status(conn, user_id)
@@ -69,15 +77,13 @@ async def start_enrollment(
             "UPDATE app_user SET totp_secret_enc = :enc, totp_last_step = NULL"
             " WHERE id = CAST(:id AS uuid)"
         ),
-        {"enc": sb.encrypt(secret.encode(), _aad(user_id)), "id": user_id},
+        {"enc": _seal(sb, secret, user_id), "id": user_id},
     )
     uri = totp.provisioning_uri(secret, account)
     return Enrollment(secret=secret, uri=uri, qr_svg=totp.qr_svg(uri))
 
 
-async def _secret(
-    conn: AsyncConnection, sb: SecretBox, user_id: str
-) -> tuple[str, int | None, bool]:
+async def _secret(conn: AsyncConnection, sb: Box, user_id: str) -> tuple[str, int | None, bool]:
     row = (
         await conn.execute(
             text(
@@ -91,6 +97,8 @@ async def _secret(
         raise TotpStateError("totp_not_started")
     try:
         secret = sb.decrypt(bytes(row.totp_secret_enc), _aad(user_id)).decode()
+    except VaultUnavailable:
+        raise TotpUnavailable from None  # the secret manager does not answer
     except DecryptionError as exc:
         # Wrong/rotated JANUS_SECRET_KEY: the user must be reset by an admin
         raise TotpStateError("totp_secret_unreadable") from exc
@@ -113,7 +121,7 @@ async def _store_recovery_codes(conn: AsyncConnection, user_id: str) -> list[str
 
 
 async def confirm_enrollment(
-    conn: AsyncConnection, box: SecretBox | None, user_id: str, code: str
+    conn: AsyncConnection, box: Box | None, user_id: str, code: str
 ) -> list[str]:
     """Activate TOTP once the user proves the app works. Returns the recovery codes."""
     secret, last_step, enabled = await _secret(conn, _box(box), user_id)
@@ -133,7 +141,7 @@ async def confirm_enrollment(
 
 
 async def verify_factor(
-    conn: AsyncConnection, box: SecretBox | None, user_id: str, code: str
+    conn: AsyncConnection, box: Box | None, user_id: str, code: str
 ) -> Factor | None:
     """Check a TOTP code or an unused recovery code for an enrolled user."""
     candidate = code.strip()
@@ -162,7 +170,7 @@ async def verify_factor(
 
 
 async def regenerate_recovery_codes(
-    conn: AsyncConnection, box: SecretBox | None, user_id: str, code: str
+    conn: AsyncConnection, box: Box | None, user_id: str, code: str
 ) -> list[str]:
     if await verify_factor(conn, box, user_id, code) is None:
         raise TotpStateError("invalid_code")

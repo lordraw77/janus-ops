@@ -278,10 +278,15 @@ def test_secretbox_round_trip_bound_to_owner() -> None:
         box.decrypt(blob[:-1] + bytes([blob[-1] ^ 1]), b"user-1")  # tampered
 
 
-@pytest.mark.parametrize("key", ["", "zz" * 32, "11" * 16, "11" * 33])
+@pytest.mark.parametrize("key", ["zz" * 32, "11" * 16, "11" * 33])
 def test_secret_key_setting_validated(key: str) -> None:
     with pytest.raises(ValidationError, match="64 hexadecimal"):
         make_settings(secret_key=key)
+
+
+def test_an_empty_secret_key_means_not_set() -> None:
+    # compose passes an empty value for a key that is not set (an external secret manager is used)
+    assert make_settings(secret_key="").secret_key is None
 
 
 def test_manager_settings_require_ldap() -> None:

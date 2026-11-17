@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from janus_ops.crypto import DecryptionError, SecretBox
+from janus_ops.crypto import Box, DecryptionError
 
 KEK_VERSION = 1
 
@@ -41,7 +41,7 @@ KINDS = (
 
 
 class VaultUnavailable(Exception):
-    """JANUS_SECRET_KEY is not configured."""
+    """No master key is configured (JANUS_SECRET_KEY), or the secret manager does not answer."""
 
 
 class InvalidSecret(ValueError):
@@ -61,14 +61,14 @@ def _aad(credential_id: str, part: str) -> bytes:
 
 
 class Vault:
-    def __init__(self, box: SecretBox | None) -> None:
+    def __init__(self, box: Box | None) -> None:
         self._box = box
 
     @property
     def available(self) -> bool:
         return self._box is not None
 
-    def _kek(self) -> SecretBox:
+    def _kek(self) -> Box:
         if self._box is None:
             raise VaultUnavailable
         return self._box
@@ -84,7 +84,7 @@ class Vault:
             ciphertext=ciphertext,
             nonce=nonce,
             dek_wrapped=kek.encrypt(dek, _aad(credential_id, "dek")),
-            kek_version=KEK_VERSION,
+            kek_version=kek.kek_version,
         )
 
     def reveal(
