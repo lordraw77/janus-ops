@@ -12,7 +12,7 @@ import struct
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-OPEN, DATA, CLOSE, OPEN_OK, OPEN_FAIL = 1, 2, 3, 4, 5
+OPEN, DATA, CLOSE, OPEN_OK, OPEN_FAIL, RESIZE = 1, 2, 3, 4, 5, 6
 CHUNK = 32 * 1024
 MAX_BUFFERED = 64 * 1024 * 1024  # per stream: a reader that stops reading must not eat memory
 

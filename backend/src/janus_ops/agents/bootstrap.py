@@ -118,6 +118,8 @@ class Plan:
     proxy: str | None = None
     allow_docker: bool = False
     allow_exec: bool = False
+    allow_pty: bool = False
+    update_public_key: str | None = None
     steps: list[str] = field(default_factory=list)
     arch: str = ""
 
@@ -135,13 +137,15 @@ def render_config(plan: Plan) -> str:
         lines.append('ca_file: "/etc/janus-agent/ca.pem"')
     if plan.proxy:
         lines.append(f"proxy: {json.dumps(plan.proxy)}")
+    if plan.update_public_key:
+        lines.append(f"update_public_key: {json.dumps(plan.update_public_key)}")
     lines += [
         "# Local policy (C9): the server cannot change it. allow_docker relays the Docker",
         "# Engine API socket (container management, F4); allow_exec runs the commands of",
-        "# approved action plans without a shell (F8); PTY stays refused.",
+        "# approved action plans without a shell (F8); allow_pty opens interactive shells (F8).",
         "policy:",
         f"  allow_exec: {'true' if plan.allow_exec else 'false'}",
-        "  allow_pty: false",
+        f"  allow_pty: {'true' if plan.allow_pty else 'false'}",
         f"  allow_docker: {'true' if plan.allow_docker else 'false'}",
         "",
     ]

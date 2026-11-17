@@ -13,7 +13,7 @@ from sqlalchemy import text
 from janus_ops import __version__
 from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
-from janus_ops.agents import bootstrap
+from janus_ops.agents import bootstrap, update
 from janus_ops.agents.hub import AgentHub
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
@@ -162,6 +162,8 @@ class BootstrapIn(BaseModel):
     allow_docker: bool = False
     # writes allow_exec in the node's local policy: commands of approved action plans (F8)
     allow_exec: bool = False
+    # writes allow_pty in the node's local policy: interactive shell in the web terminal (F8)
+    allow_pty: bool = False
 
     @field_validator("proxy")
     @classmethod
@@ -238,6 +240,8 @@ async def bootstrap_agent(
             proxy=body.proxy,
             allow_docker=body.allow_docker,
             allow_exec=body.allow_exec,
+            allow_pty=body.allow_pty,
+            update_public_key=settings.agent_release_public_key,
         )
         actor = (session.user_id, session.username)
         try:
@@ -265,6 +269,7 @@ async def bootstrap_agent(
                 "proxy": plan.proxy,
                 "allow_docker": plan.allow_docker,
                 "allow_exec": plan.allow_exec,
+                "allow_pty": plan.allow_pty,
                 "steps": plan.steps,
                 "online": online,
             },
@@ -284,6 +289,54 @@ async def _failed(request: Request, session: Session, node: str, code: str, deta
     await record(
         request, session, "agent.bootstrap_failed", "node", node, {"reason": code, "detail": detail}
     )
+
+
+class UpdateOut(BaseModel):
+    from_version: str | None
+    to_version: str
+
+
+@router.post("/{node_id}/update", response_model=UpdateOut)
+async def update_agent(request: Request, node_id: uuid.UUID, session: Manager) -> UpdateOut:
+    """Push the signed agent binary; the agent verifies it and restarts (FR-84)."""
+    app = request.app
+    settings = app.state.settings
+    row = await _row(request, session, node_id)
+    if settings.agent_dir is None:
+        raise HTTPException(409, "agent_binary_missing")
+    if row.arch is None:
+        raise HTTPException(409, "agent_offline")
+    key = str(node_id)
+    if key in _busy(request):
+        raise HTTPException(409, "bootstrap_running")
+    _busy(request).add(key)
+    try:
+        try:
+            release = update.load_release(
+                settings.agent_dir, row.arch, settings.agent_release_public_key
+            )
+            installed = await update.push(app.state.agents, key, release)
+        except update.UpdateError as exc:
+            await record(
+                request,
+                session,
+                "agent.update_failed",
+                "node",
+                row.name,
+                {"reason": exc.code, "from": row.version},
+            )
+            raise HTTPException(502 if exc.code.startswith("update_") else 409, exc.code) from None
+        await record(
+            request,
+            session,
+            "agent.update",
+            "node",
+            row.name,
+            {"from": row.version, "to": installed, "sha256": release.sha256},
+        )
+        return UpdateOut(from_version=row.version, to_version=installed)
+    finally:
+        _busy(request).discard(key)
 
 
 @router.post("/{node_id}/revoke", status_code=204)

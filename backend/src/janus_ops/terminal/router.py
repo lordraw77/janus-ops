@@ -15,7 +15,7 @@ import logging
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import asyncssh
@@ -28,10 +28,11 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 from janus_ops import audit
 from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
+from janus_ops.agents import pty as agent_pty
 from janus_ops.auth import sessions
 from janus_ops.auth.deps import current_session, require_permission
 from janus_ops.auth.sessions import Session
-from janus_ops.terminal.connector import ConnectError, Opened, open_connection
+from janus_ops.terminal.connector import ConnectError, Opened, Target, open_connection
 from janus_ops.terminal.recorder import Recorder, recording_path
 from janus_ops.terminal.snippets import keystrokes, visible
 
@@ -78,6 +79,7 @@ async def terminal_ws(
     node_id: uuid.UUID,
     cols: Annotated[int, Query(ge=10, le=500)] = 80,
     rows: Annotated[int, Query(ge=5, le=200)] = 24,
+    transport: Literal["ssh", "agent"] = "ssh",
 ) -> None:
     await ws.accept()
     app = ws.app
@@ -104,6 +106,8 @@ async def terminal_ws(
     actor = (session.user_id, session.username)
     opened: Opened | None = None
     try:
+        if transport == "agent":
+            return await _agent_session(ws, session, node_id, cols, rows, ip)
         try:
             opened = await open_connection(
                 app.state.engine, app.state.vault, settings, str(node_id), actor
@@ -122,23 +126,81 @@ async def terminal_ws(
                 )
             log.info("ssh connection refused", extra={"reason": exc.code})
             return await _fail(ws, exc.code, 4502)
-        await _run_session(ws, session, opened, cols, rows, ip)
+        process = await opened.conn.create_process(
+            term_type="xterm-256color", term_size=(cols, rows), encoding=None
+        )
+        await _run_session(ws, session, opened.target, process, "ssh", cols, rows, ip)
     finally:
         if opened is not None:
             opened.close()
         counter.release(session.user_id)
 
 
+async def _agent_session(
+    ws: WebSocket, session: Session, node_id: uuid.UUID, cols: int, rows: int, ip: str | None
+) -> None:
+    """Interactive shell through the agent: no SSH credential, the node's local policy decides."""
+    app = ws.app
+    async with app.state.engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text("SELECT name, address FROM node WHERE id = :id"), {"id": node_id}
+            )
+        ).first()
+        allowed = row is not None and await agent_pty.policy_allows_pty(conn, str(node_id))
+    code = ""
+    process: agent_pty.AgentProcess | None = None
+    if row is None:
+        code = "not_found"
+    elif not allowed:
+        code = "pty_not_allowed"
+    else:
+        try:
+            process = await agent_pty.open_pty(app.state.agents, str(node_id), cols, rows)
+        except agent_pty.PtyError as exc:
+            code = exc.code
+    if process is None or row is None:
+        async with app.state.engine.begin() as conn:
+            await audit.append(
+                conn,
+                action="ssh.connect_failed",
+                actor_id=session.user_id,
+                actor_name=session.username,
+                source_ip=ip,
+                target_type="node",
+                target_id=str(node_id),
+                payload={"reason": code, "transport": "agent"},
+            )
+        return await _fail(ws, code, 4502)
+    target = Target(
+        node_id=str(node_id),
+        node_name=row.name,
+        host=str(row.address),
+        port=0,
+        username="agent",
+        credential_id="",
+        credential_kind="",
+        jump_host_id=None,
+    )
+    try:
+        await _run_session(ws, session, target, process, "agent", cols, rows, ip)
+    finally:
+        process.close()
+
+
 async def _run_session(
-    ws: WebSocket, session: Session, opened: Opened, cols: int, rows: int, ip: str | None
+    ws: WebSocket,
+    session: Session,
+    target: Target,
+    process: Any,
+    transport: str,
+    cols: int,
+    rows: int,
+    ip: str | None,
 ) -> None:
     app = ws.app
     settings = app.state.settings
-    target = opened.target
     session_id = str(uuid.uuid4())
-    process = await opened.conn.create_process(
-        term_type="xterm-256color", term_size=(cols, rows), encoding=None
-    )
     recorder = (
         Recorder(
             settings.recordings_dir,
@@ -156,16 +218,17 @@ async def _run_session(
             text(
                 "INSERT INTO terminal_session (id, user_id, node_id, credential_id, transport,"
                 " node_name, target, remote_user, recording_path) VALUES (:id,"
-                " CAST(:u AS uuid), CAST(:n AS uuid), CAST(:c AS uuid), 'ssh', :name, :target,"
+                " CAST(:u AS uuid), CAST(:n AS uuid), CAST(:c AS uuid), :tr, :name, :target,"
                 " :ru, :rec)"
             ),
             {
                 "id": session_id,
                 "u": session.user_id,
                 "n": target.node_id,
-                "c": target.credential_id,
+                "c": target.credential_id or None,
+                "tr": transport,
                 "name": target.node_name,
-                "target": f"{target.host}:{target.port}",
+                "target": f"{target.host}:{target.port}" if transport == "ssh" else "agent",
                 "ru": target.username,
                 "rec": recorder.path.name if recorder else None,
             },
@@ -181,7 +244,8 @@ async def _run_session(
             payload={
                 "session_id": session_id,
                 "remote_user": target.username,
-                "target": f"{target.host}:{target.port}",
+                "target": f"{target.host}:{target.port}" if transport == "ssh" else "agent",
+                "transport": transport,
                 "via": target.jump_host_id,
                 "recorded": recorder is not None,
             },

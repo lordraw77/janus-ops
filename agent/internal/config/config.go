@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -27,6 +28,9 @@ type Config struct {
 	IntervalS   int          `yaml:"interval_s"`
 	StateDir    string       `yaml:"state_dir"`
 	Policy      proto.Policy `yaml:"policy"`
+	// ed25519 release public key (base64): the only key whose signature makes the agent replace
+	// itself (C8). Empty = self-update refused.
+	UpdatePublicKey string `yaml:"update_public_key"`
 	// Docker Engine API socket, relayed only when policy.allow_docker is true
 	DockerSocket string `yaml:"docker_socket"`
 	// Root of procfs and sysfs: changed only by tests and containerised agents.
@@ -68,6 +72,12 @@ func (c *Config) validate() error {
 		p, err := url.Parse(c.Proxy)
 		if err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" {
 			return errors.New("proxy must be an http:// or https:// URL")
+		}
+	}
+	if c.UpdatePublicKey != "" {
+		k, err := base64.StdEncoding.DecodeString(c.UpdatePublicKey)
+		if err != nil || len(k) != 32 {
+			return errors.New("update_public_key must be a base64 ed25519 public key")
 		}
 	}
 	if c.IntervalS == 0 {

@@ -20,7 +20,8 @@ import { api, message, type Resource, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { InventoryNode } from "@/lib/inventory";
 
-type Tab = { key: string; nodeId: string; status: TerminalStatus };
+type Via = "ssh" | "agent";
+type Tab = { key: string; nodeId: string; via: Via; status: TerminalStatus };
 
 type SessionRow = {
   id: string;
@@ -61,6 +62,8 @@ const CONNECT_ERRORS: Record<string, string> = {
   forbidden: "You do not have the ssh.connect permission.",
   not_authenticated: "Your session has expired. Sign in again.",
   cross_origin: "Connection refused (origin check).",
+  pty_not_allowed: "This node's agent does not allow shells. Reinstall it with 'Allow shell' enabled.",
+  pty_unavailable: "The agent could not start a shell on this node.",
 };
 
 function connectError(code: string): string {
@@ -78,10 +81,13 @@ function statusDot(s: TerminalStatus): string {
 // ---------------------------------------------------------------- live terminals
 function Terminals({
   nodes,
+  agentNodes,
   snippets,
   onFiles,
 }: {
   nodes: InventoryNode[];
+  /** nodes with an agent: a shell through it needs no SSH capability */
+  agentNodes: InventoryNode[];
   snippets: Snippet[];
   onFiles?: (nodeId: string) => void;
 }) {
@@ -89,11 +95,15 @@ function Terminals({
   const initial = params.get("view") === "files" ? null : params.get("node");
   const counter = useRef(1);
   const [tabs, setTabs] = useState<Tab[]>(() =>
-    initial ? [{ key: "t0", nodeId: initial, status: { state: "connecting" } }] : [],
+    initial ? [{ key: "t0", nodeId: initial, via: "ssh", status: { state: "connecting" } }] : [],
   );
   const [active, setActive] = useState<string | null>(initial ? "t0" : null);
   const [pick, setPick] = useState("");
-  const names = useMemo(() => new Map(nodes.map((n) => [n.id, n.name])), [nodes]);
+  const [pickAgent, setPickAgent] = useState("");
+  const names = useMemo(
+    () => new Map([...nodes, ...agentNodes].map((n) => [n.id, n.name])),
+    [nodes, agentNodes],
+  );
   const handles = useRef(new Map<string, TerminalHandle>());
   // Broadcast: keystrokes typed in a member terminal go to every member terminal
   const [broadcast, setBroadcast] = useState(false);
@@ -131,9 +141,9 @@ function Terminals({
     else handles.current.delete(key);
   }, []);
 
-  function open(nodeId: string) {
+  function open(nodeId: string, via: Via = "ssh") {
     const key = `t${counter.current++}`;
-    setTabs((prev) => [...prev, { key, nodeId, status: { state: "connecting" } }]);
+    setTabs((prev) => [...prev, { key, nodeId, via, status: { state: "connecting" } }]);
     setActive(key);
   }
 
@@ -150,7 +160,7 @@ function Terminals({
 
   function reconnect(tab: Tab) {
     close(tab.key);
-    open(tab.nodeId);
+    open(tab.nodeId, tab.via);
   }
 
   const setStatus = useCallback((key: string, status: TerminalStatus) => {
@@ -233,6 +243,22 @@ function Terminals({
           <Button variant="primary" disabled={!pick} onClick={() => pick && open(pick)}>
             <SquareTerminal className="h-3.5 w-3.5" aria-hidden /> Open
           </Button>
+          <select
+            value={pickAgent}
+            onChange={(e) => setPickAgent(e.target.value)}
+            aria-label="Node with an agent"
+            className="rounded border border-line bg-canvas px-2 py-1 text-xs outline-none focus:border-primary"
+          >
+            <option value="">Shell via agent…</option>
+            {agentNodes.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name} ({n.address})
+              </option>
+            ))}
+          </select>
+          <Button disabled={!pickAgent} onClick={() => pickAgent && open(pickAgent, "agent")} title="Interactive shell through the agent; the node's policy must allow it">
+            <SquareTerminal className="h-3.5 w-3.5" aria-hidden /> Open
+          </Button>
         </div>
       </div>
 
@@ -277,6 +303,7 @@ function Terminals({
           <div key={t.key} className={`absolute inset-0 ${t.key === active ? "" : "invisible"}`}>
             <TerminalView
               nodeId={t.nodeId}
+              extraParams={t.via === "agent" ? { transport: "agent" } : undefined}
               active={t.key === active}
               onStatus={(s) => setStatus(t.key, s)}
               onHandle={(h) => setHandle(t.key, h)}
@@ -517,6 +544,7 @@ function Bastion() {
   const [tab, setTab] = useState<View>(wanted && tabs.includes(wanted) ? wanted : tabs[0]);
   const [filesNode, setFilesNode] = useState<string | null>(wanted === "files" ? params.get("node") : null);
   const nodes = useResource<InventoryNode[]>("/nodes?capability=ssh");
+  const agentNodes = useResource<InventoryNode[]>("/nodes?capability=agent");
   const snippets: Resource<Snippet[]> = useResource<Snippet[]>("/snippets");
 
   return (
@@ -542,6 +570,7 @@ function Bastion() {
         <div className={tab === "terminals" ? "" : "hidden"}>
           <Terminals
             nodes={nodes.data ?? []}
+            agentNodes={agentNodes.data ?? []}
             snippets={snippets.data ?? []}
             onFiles={
               canFiles

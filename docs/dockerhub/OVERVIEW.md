@@ -208,6 +208,7 @@ Variables read by the `janus-ops` process:
 | `JANUS_AGENT_CA_FILE` | `/var/lib/janus-ops/pki/root.crt` (Compose) | CA certificate (PEM) written to nodes for the agent; the Compose proxy publishes Caddy's internal root there |
 | `JANUS_AGENT_INTERVAL_S` | `10` | Telemetry interval, 5–15 seconds |
 | `JANUS_AGENT_DIR` | `/app/agent` | Agent binaries copied to nodes (built into the image) |
+| `JANUS_AGENT_RELEASE_PUBLIC_KEY` | unset | Base64 ed25519 public key that signs agent releases (`janus-ops agent-keygen`, run off the server). Written to new agent installs; enables the signed self-update (“Update (signed)” on the node page). Sign binaries with `janus-ops agent-sign` |
 | `JANUS_LDAP_TIMEOUT_S` | `5` | LDAP timeout, whole seconds |
 | `JANUS_LDAP_CA_FILE` | system CAs | CA bundle to verify `ldaps://` servers |
 | `JANUS_SESSION_TTL_S` / `JANUS_SESSION_IDLE_S` | `28800` / `3600` | Session lifetime / inactivity timeout, seconds |

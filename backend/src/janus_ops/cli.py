@@ -21,6 +21,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="migrate, then create the initial administrator from JANUS_ADMIN_* if missing",
     )
     sub.add_parser("version", help="print the version and exit")
+    kg = sub.add_parser(
+        "agent-keygen",
+        help="generate the agent release key pair (run it OFF the server; keep the private key)",
+    )
+    kg.add_argument("--private-key", required=True, help="where to write the private key (0600)")
+    sg = sub.add_parser(
+        "agent-sign", help="sign the agent binaries in a directory with the release private key"
+    )
+    sg.add_argument("--private-key", required=True)
+    sg.add_argument("--dir", required=True, help="directory with janus-agent-linux-<arch>")
+    sg.add_argument("--agent-version", required=True, help="version of these binaries, e.g. 0.3.0")
     bg = sub.add_parser(
         "breakglass", help="create the break-glass admin account or rotate its password"
     )
@@ -50,11 +61,73 @@ def _read_password(from_stdin: bool) -> str | None:
     return password
 
 
+def _release_command(args: argparse.Namespace) -> int:
+    """Release key handling: needs no server configuration and no secrets of the server."""
+    import base64
+    import json
+    import os
+    from pathlib import Path
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from janus_ops.agents import update
+
+    key_path = Path(args.private_key)
+    if args.command == "agent-keygen":
+        if key_path.exists():
+            print(f"janus-ops: {key_path} already exists", file=sys.stderr)
+            return 2
+        key = Ed25519PrivateKey.generate()
+        pem = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(pem)
+        public = key.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        print("Public key (JANUS_AGENT_RELEASE_PUBLIC_KEY on the server):")
+        print(base64.b64encode(public).decode())
+        return 0
+
+    if not update.VERSION_RE.match(args.agent_version):
+        print("janus-ops: --agent-version must look like 0.3.0", file=sys.stderr)
+        return 2
+    try:
+        loaded = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+    except (OSError, ValueError):
+        print("janus-ops: cannot read the private key", file=sys.stderr)
+        return 2
+    if not isinstance(loaded, Ed25519PrivateKey):
+        print("janus-ops: the key is not an ed25519 key", file=sys.stderr)
+        return 2
+    signed = 0
+    for arch in update.ARCHES:
+        binary = Path(args.dir) / update.BINARY.format(arch=arch)
+        if not binary.is_file():
+            continue
+        meta = update.sign(loaded, args.agent_version, arch, binary.read_bytes())
+        binary.with_name(binary.name + ".sig").write_text(json.dumps(meta, indent=2) + "\n")
+        print(f"signed {binary.name} {args.agent_version} sha256={meta['sha256'][:16]}…")
+        signed += 1
+    if not signed:
+        print("janus-ops: no agent binaries found", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "version":
         print(__version__)
         return 0
+
+    if args.command in ("agent-keygen", "agent-sign"):
+        return _release_command(args)
 
     # Imported lazily so `version` works without any configuration
     from janus_ops.config import get_settings

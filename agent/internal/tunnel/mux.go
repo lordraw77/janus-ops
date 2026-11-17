@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -28,6 +29,7 @@ const (
 	frameClose    byte = 3
 	frameOpenOK   byte = 4
 	frameOpenFail byte = 5
+	frameResize   byte = 6 // server → agent, pty streams: cols and rows, 2 bytes big-endian each
 
 	chunkSize     = 32 * 1024
 	streamBacklog = 256 // queued writes per stream before it is dropped (protects the tunnel)
@@ -45,18 +47,40 @@ const (
 
 type openRequest struct {
 	Kind string `json:"kind"`
+	// update only
+	Version   string `json:"version,omitempty"`
+	Sha256    string `json:"sha256,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Size      int64  `json:"size,omitempty"`
+	// pty only
+	Cols uint16 `json:"cols,omitempty"`
+	Rows uint16 `json:"rows,omitempty"`
 	// exec only
 	Argv     []string `json:"argv,omitempty"`
 	TimeoutS int      `json:"timeout_s,omitempty"`
 }
 
 type stream struct {
-	conn net.Conn
+	conn net.Conn  // docker streams
+	w    io.Writer // where server data goes: the socket, or the PTY master
 	in   chan []byte
 	once sync.Once
+	// pty streams
+	resize func(cols, rows uint16)
+	stop   func()
 }
 
-func (s *stream) close() { s.once.Do(func() { close(s.in); s.conn.Close() }) }
+func (s *stream) close() {
+	s.once.Do(func() {
+		close(s.in)
+		if s.conn != nil {
+			s.conn.Close()
+		}
+		if s.stop != nil {
+			s.stop()
+		}
+	})
+}
 
 type mux struct {
 	ws     *websocket.Conn
@@ -69,6 +93,13 @@ type mux struct {
 	dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// execSlots bounds the commands running at once
 	execSlots chan struct{}
+	ptySlots  chan struct{}
+	// self-update (C8)
+	updateKey []byte // ed25519 release public key, nil = refused
+	version   string
+	exePath   string
+	exit      func(int)
+	updating  atomic.Bool
 }
 
 func newMux(ws *websocket.Conn, policy proto.Policy, dockerSocket string, log *slog.Logger) *mux {
@@ -76,6 +107,7 @@ func newMux(ws *websocket.Conn, policy proto.Policy, dockerSocket string, log *s
 	return &mux{
 		ws: ws, policy: policy, docker: dockerSocket, log: log, open: map[uint32]*stream{},
 		dial: d.DialContext, execSlots: make(chan struct{}, maxExecs),
+		ptySlots: make(chan struct{}, maxPTYs),
 	}
 }
 
@@ -120,6 +152,13 @@ func (m *mux) handle(ctx context.Context, data []byte) error {
 		}
 	case frameClose:
 		m.drop(ctx, id, "")
+	case frameResize:
+		m.mu.Lock()
+		s := m.open[id]
+		m.mu.Unlock()
+		if s != nil && s.resize != nil && len(payload) == 4 {
+			s.resize(binary.BigEndian.Uint16(payload[0:2]), binary.BigEndian.Uint16(payload[2:4]))
+		}
 	}
 	return nil
 }
@@ -135,6 +174,12 @@ func (m *mux) openStream(ctx context.Context, id uint32, payload []byte) error {
 	}
 	if req.Kind == "exec" {
 		return m.startExec(ctx, id, req)
+	}
+	if req.Kind == "update" {
+		return m.startUpdate(ctx, id, req)
+	}
+	if req.Kind == "pty" {
+		return m.startPTY(ctx, id, req)
 	}
 	if req.Kind != "docker" {
 		return m.refuse(ctx, id, "unknown_kind")
@@ -155,7 +200,7 @@ func (m *mux) openStream(ctx context.Context, id uint32, payload []byte) error {
 	if err != nil {
 		return m.refuse(ctx, id, "docker_unavailable")
 	}
-	s := &stream{conn: conn, in: make(chan []byte, streamBacklog)}
+	s := &stream{conn: conn, w: conn, in: make(chan []byte, streamBacklog)}
 	m.mu.Lock()
 	m.open[id] = s
 	m.mu.Unlock()
@@ -171,8 +216,14 @@ func (m *mux) openStream(ctx context.Context, id uint32, payload []byte) error {
 // writer copies server data to the local socket.
 func (m *mux) writer(s *stream) {
 	for chunk := range s.in {
-		if _, err := s.conn.Write(chunk); err != nil {
-			s.conn.Close()
+		if _, err := s.w.Write(chunk); err != nil {
+			// not s.close(): the channel is only closed under m.mu
+			if s.conn != nil {
+				s.conn.Close()
+			}
+			if s.stop != nil {
+				s.stop()
+			}
 			return
 		}
 	}

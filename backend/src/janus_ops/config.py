@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     agent_dir: Path | None = Field(
         default=None, description="Directory with janus-agent-linux-<arch> binaries for bootstrap"
     )
+    agent_release_public_key: str | None = Field(
+        default=None,
+        description="Base64 ed25519 public key that signs agent releases (janus-ops agent-keygen);"
+        " written to new agent installs, enables signed self-update (FR-84)",
+    )
     agent_server_url: str | None = Field(
         default=None,
         description="https:// URL agents connect to; unset = the URL the operator is using",

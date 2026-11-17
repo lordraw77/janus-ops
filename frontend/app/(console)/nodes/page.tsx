@@ -150,11 +150,12 @@ function InstallDialog({ agent, onClose, onDone }: { agent: AgentDetail; onClose
     const proxy = String(form.get("proxy") ?? "").trim();
     const allowDocker = form.get("allow_docker") === "on";
     const allowExec = form.get("allow_exec") === "on";
+    const allowPty = form.get("allow_pty") === "on";
     setBusy(true);
     setError(null);
     const r = await api(`/agents/${agent.node_id}/bootstrap`, {
       method: "POST",
-      body: { proxy: proxy || null, allow_docker: allowDocker, allow_exec: allowExec },
+      body: { proxy: proxy || null, allow_docker: allowDocker, allow_exec: allowExec, allow_pty: allowPty },
     });
     setBusy(false);
     if (!r.ok) return setError(message(r.code));
@@ -190,6 +191,13 @@ function InstallDialog({ agent, onClose, onDone }: { agent: AgentDetail; onClose
             shell, as root. Written in the node&apos;s local policy; the server cannot change it later.
           </span>
         </label>
+        <label className="flex items-start gap-2 text-xs text-fg-secondary">
+          <input type="checkbox" name="allow_pty" defaultChecked={agent.policy?.allow_pty ?? false} className="mt-0.5" />
+          <span>
+            Allow shell: an interactive shell (as the agent&apos;s user, root) in the web terminal through the
+            agent, without SSH. Written in the node&apos;s local policy; the server cannot change it later.
+          </span>
+        </label>
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" disabled={busy}>
@@ -207,6 +215,14 @@ function AgentCard({ agent, reload }: { agent: AgentDetail; reload: () => void }
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const status = AGENT_STATUS[agent.status];
   const manage = can("agents.manage");
+
+  async function updateAgent() {
+    if (!window.confirm(`Push the signed agent update to ${agent.node_name}? The agent verifies the signature, replaces itself and restarts.`)) return;
+    setNotice(null);
+    const r = await api<{ from_version: string | null; to_version: string }>(`/agents/${agent.node_id}/update`, { method: "POST" });
+    setNotice(r.ok ? { kind: "ok", text: `Updated to ${r.data.to_version}; the agent is restarting.` } : { kind: "error", text: message(r.code) });
+    if (r.ok) setTimeout(reload, 4000);
+  }
 
   async function act(action: "revoke" | "uninstall", confirmText: string) {
     if (!window.confirm(confirmText)) return;
@@ -267,6 +283,11 @@ function AgentCard({ agent, reload }: { agent: AgentDetail; reload: () => void }
                 </Button>
               ) : (
                 <span className="text-xs text-fg-muted">Add an SSH capability to install the agent from here.</span>
+              )}
+              {agent.status === "online" && (
+                <Button onClick={() => void updateAgent()} title="Signed self-update: no SSH needed, the agent must hold the release public key">
+                  <Download className="h-3 w-3" aria-hidden /> Update (signed)
+                </Button>
               )}
               {agent.enrolled_at && !agent.revoked_at && (
                 <Button

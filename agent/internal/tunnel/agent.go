@@ -284,6 +284,7 @@ func (a *Agent) session(ctx context.Context) error {
 
 func (a *Agent) readLoop(ctx context.Context, c *websocket.Conn, acks chan<- uint64) error {
 	m := newMux(c, a.Cfg.Policy, a.Cfg.DockerSocket, a.Log)
+	m.configureUpdate(a.Cfg.UpdatePublicKey, a.Version)
 	defer m.closeAll()
 	for {
 		kind, raw, err := c.Read(ctx)
