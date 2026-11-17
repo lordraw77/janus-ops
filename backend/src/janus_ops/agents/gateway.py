@@ -319,7 +319,13 @@ async def agent_ws(ws: WebSocket) -> None:
 
     # agents that predate streams would drop the connection on a binary frame
     mux = Mux(send_bytes) if "streams" in hello.features else None
-    link = Link(node_id=node_id, remote_ip=ip, close=close, mux=mux)
+    link = Link(
+        node_id=node_id,
+        remote_ip=ip,
+        close=close,
+        mux=mux,
+        features=frozenset(hello.features),
+    )
     old = hub.register(link)
     if old is not None:
         log.warning("agent connection replaced", extra={"node_id": node_id})

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"hash"
@@ -26,7 +27,10 @@ import (
 // (Restart=always) starts the new binary.
 const (
 	updateMaxSize = 64 << 20
-	updateContext = "janus-agent-update-v1"
+	// the agent confirms what it has written every updateAckEvery bytes (flow control: the server
+	// keeps only a small window in flight, so on a slow link a pong is never stuck behind megabytes)
+	updateAckEvery = 64 << 10
+	updateContext  = "janus-agent-update-v1"
 )
 
 var (
@@ -63,18 +67,19 @@ func versionNewer(candidate, current string) bool {
 }
 
 type updateSink struct {
-	m       *mux
-	ctx     context.Context
-	id      uint32
-	version string
-	sha     string
-	size    int64
-	tmp     string
-	dst     string
-	f       *os.File
-	h       hash.Hash
-	total   int64
-	done    atomic.Bool // set before the stream is dropped: the stop hook then does nothing
+	m        *mux
+	ctx      context.Context
+	id       uint32
+	version  string
+	sha      string
+	size     int64
+	tmp      string
+	dst      string
+	f        *os.File
+	h        hash.Hash
+	total    int64
+	done     atomic.Bool // set before the stream is dropped: the stop hook then does nothing
+	sinceAck int64
 }
 
 func (u *updateSink) Write(p []byte) (int, error) {
@@ -93,6 +98,13 @@ func (u *updateSink) Write(p []byte) (int, error) {
 	u.total += int64(len(p))
 	if u.total == u.size {
 		u.install()
+		return len(p), nil
+	}
+	if u.sinceAck += int64(len(p)); u.sinceAck >= updateAckEvery {
+		u.sinceAck = 0
+		var ack [8]byte
+		binary.BigEndian.PutUint64(ack[:], uint64(u.total))
+		_ = u.m.send(u.ctx, frameData, u.id, ack[:]) // a lost ack only slows the server down
 	}
 	return len(p), nil
 }

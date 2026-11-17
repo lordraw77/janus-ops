@@ -48,7 +48,9 @@ type Hello struct {
 }
 
 // Features of this agent version.
-var Features = []string{"streams"}
+// "update_ack": during an update stream the agent confirms the bytes it has written (see
+// proto/agent-protocol.md), so the server can keep the amount in flight small on a slow link.
+var Features = []string{"streams", "update_ack"}
 
 type Welcome struct {
 	T         string `json:"t"`

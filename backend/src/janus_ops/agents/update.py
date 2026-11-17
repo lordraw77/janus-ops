@@ -26,7 +26,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from janus_ops.agents.hub import AgentHub
-from janus_ops.agents.mux import StreamError
+from janus_ops.agents.mux import CHUNK, Stream, StreamError
 
 CONTEXT = "janus-agent-update-v1"
 BINARY = "janus-agent-linux-{arch}"
@@ -34,6 +34,11 @@ ARCHES = ("amd64", "arm64", "arm")
 VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+){0,3}$")
 MAX_SIZE = 64 * 1024 * 1024
 RESULT_WAIT_S = 60
+# Flow control (feature `update_ack`): the agent confirms what it has written; the server keeps at
+# most WINDOW bytes unconfirmed, so on a slow link the agent's pong is never stuck behind megabytes
+# of binary. No confirmation for STALL_S seconds means the link or the node is stuck.
+WINDOW = 256 * 1024
+STALL_S: float = 60
 
 
 class UpdateError(Exception):
@@ -125,19 +130,62 @@ async def push(hub: AgentHub, node_id: str, release: Release) -> str:
         raise UpdateError("agent_outdated" if exc.code == "unknown_kind" else exc.code) from None
     data = await asyncio.to_thread(release.path.read_bytes)
     try:
-        await stream.write(data)
-        await asyncio.wait_for(_drain(stream), RESULT_WAIT_S)
+        if "update_ack" in link.features:
+            await _send_windowed(stream, data)
+        else:  # an agent that predates flow control gets the binary in one go, as before
+            await stream.write(data)
+            await asyncio.wait_for(_drain(stream), RESULT_WAIT_S)
     except StreamError:
         raise UpdateError("update_failed") from None
     except TimeoutError:
         await stream.close()
         raise UpdateError("update_timeout") from None
+    except UpdateError:
+        await stream.close()  # the agent drops its partial file when the stream closes
+        raise
     reason = stream.close_reason or ""
     if reason.startswith("updated:"):
         return reason[len("updated:") :]
     if reason.startswith("failed:"):
         raise UpdateError("update_" + reason[len("failed:") :])
     raise UpdateError("update_failed")
+
+
+async def _send_windowed(stream: Stream, data: bytes) -> None:
+    """Send `data`, never more than WINDOW bytes ahead of the agent's last confirmation, then wait
+    for the agent's verdict (the close of the stream)."""
+    acked = 0
+    progress = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def listen() -> None:
+        nonlocal acked
+        while True:
+            chunk = await stream.read()
+            if not chunk:  # the agent closed the stream: its verdict is in stream.close_reason
+                finished.set()
+                progress.set()
+                return
+            if len(chunk) == 8:
+                acked = max(acked, int.from_bytes(chunk, "big"))
+                progress.set()
+
+    listener = asyncio.create_task(listen())
+    try:
+        sent = 0
+        while sent < len(data) and not finished.is_set():
+            while sent - acked >= WINDOW and not finished.is_set():
+                progress.clear()
+                try:
+                    await asyncio.wait_for(progress.wait(), STALL_S)
+                except TimeoutError:
+                    raise UpdateError("update_stalled") from None
+            block = data[sent : sent + CHUNK]
+            await stream.write(block)
+            sent += len(block)
+        await asyncio.wait_for(finished.wait(), RESULT_WAIT_S)
+    finally:
+        listener.cancel()
 
 
 async def _drain(stream: object) -> None:

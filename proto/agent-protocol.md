@@ -145,7 +145,11 @@ the release key, over `janus-agent-update-v1\n<version>\n<GOARCH>\n<sha256 hex>`
 (`bad_signature`), and `version` must be newer than the running one (`not_newer`: no downgrade). The
 server then sends exactly `size` bytes (at most 64 MiB) as `DATA`; the agent checks the SHA-256, installs
 the file over its own executable, answers `CLOSE` `updated:<version>` (or `failed:<size|write|checksum|install>`)
-and exits so that systemd restarts it. The previous binary is kept as `<exe>.old` with a marker in
+and exits so that systemd restarts it. **Flow control** (feature `update_ack`, announced in `hello.features`): after each
+64 KiB it has written the agent sends a `DATA` frame on the stream whose payload is the total number of bytes written so
+far (8 bytes, big-endian); the server keeps at most 256 KiB unconfirmed, so on a slow link the agent's pong is never
+stuck behind megabytes of binary, and gives up (`update_stalled`, stream closed, partial file removed) after 60 s
+without a confirmation. An agent without the feature gets the whole binary at once. The previous binary is kept as `<exe>.old` with a marker in
 `state_dir`; the new agent deletes both after its first successful connection. If it crashes at start
 three times, or does not connect within 3 minutes, it puts the old binary back and exits (rollback).
 The server cannot forge a signature: it only distributes.

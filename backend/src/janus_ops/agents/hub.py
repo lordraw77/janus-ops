@@ -17,6 +17,7 @@ class Link:
     remote_ip: str | None
     close: CloseFn
     mux: Mux | None = None
+    features: frozenset[str] = frozenset()  # what the agent announced in its hello
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     connected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 

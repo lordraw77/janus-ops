@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/lordraw77/janus-ops/agent/internal/proto"
 )
 
 func TestVersionNewer(t *testing.T) {
@@ -34,8 +37,12 @@ func TestVersionNewer(t *testing.T) {
 // runUpdate drives an update stream. mutate may alter the request or the payload.
 func runUpdate(t *testing.T, version, current string, mutate func(req *openRequest, payload []byte) []byte) (got []frameMsg, exe string, exited chan int) {
 	t.Helper()
+	return runUpdateWith(t, []byte("#!/bin/sh\necho new agent\n"), version, current, mutate)
+}
+
+func runUpdateWith(t *testing.T, payload []byte, version, current string, mutate func(req *openRequest, payload []byte) []byte) (got []frameMsg, exe string, exited chan int) {
+	t.Helper()
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	payload := []byte("#!/bin/sh\necho new agent\n")
 	sum := sha256.Sum256(payload)
 	sha := hex.EncodeToString(sum[:])
 	sig := ed25519.Sign(priv, UpdateMessage(version, runtime.GOARCH, sha))
@@ -69,7 +76,10 @@ func runUpdate(t *testing.T, version, current string, mutate func(req *openReque
 			frames = append(frames, m)
 			switch m.kind {
 			case frameOpenOK:
-				_ = c.Write(ctx, websocket.MessageBinary, frame(frameData, 4, payload))
+				for off := 0; off < len(payload); off += chunkSize { // frames of at most 32 KiB, like the server
+					end := min(off+chunkSize, len(payload))
+					_ = c.Write(ctx, websocket.MessageBinary, frame(frameData, 4, payload[off:end]))
+				}
 			case frameClose, frameOpenFail:
 				result <- frames
 				return
@@ -166,5 +176,45 @@ func TestUpdateMessageMatchesThePythonSigner(t *testing.T) {
 	sig, _ := base64.StdEncoding.DecodeString("pf5kQLYLk/WDUlLs2AQsAetfUvICZqeuK29Vvf9HDXlwD5yUT3NgxHopSFACl8405Q+Olo1Z381masly9BV6DQ==")
 	if !ed25519.Verify(pub, UpdateMessage("1.2.3", "arm64", "b0d51c58c8b9c1f458fadf16c7d375630ef51da4df81915893b05c0fa4ed8bc6"), sig) {
 		t.Fatal("signature from the server-side tooling does not verify")
+	}
+}
+
+// The agent confirms what it has written, every updateAckEvery bytes, with the total so far: that is
+// what lets the server keep a small window in flight on a slow link.
+func TestUpdateConfirmsWhatItHasWritten(t *testing.T) {
+	payload := make([]byte, 400<<10) // 400 KiB: several acks
+	for i := range payload {
+		payload[i] = byte(i * 7)
+	}
+	got, exe, _ := runUpdateWith(t, payload, "0.3.0", "0.2.0", nil)
+	if last := got[len(got)-1]; last.kind != frameClose || last.payload != "updated:0.3.0" {
+		t.Fatalf("last frame = %+v", last)
+	}
+	var acks []uint64
+	for _, f := range got {
+		if f.kind == frameData && len(f.payload) == 8 {
+			acks = append(acks, binary.BigEndian.Uint64([]byte(f.payload)))
+		}
+	}
+	if len(acks) < 4 {
+		t.Fatalf("expected at least 4 acks for 400 KiB, got %v", acks)
+	}
+	for i, a := range acks {
+		if a > uint64(len(payload)) || (i > 0 && a <= acks[i-1]) {
+			t.Fatalf("acks must grow and stay within the size: %v", acks)
+		}
+	}
+	if b, _ := os.ReadFile(exe); len(b) != len(payload) {
+		t.Fatalf("installed %d bytes, want %d", len(b), len(payload))
+	}
+}
+
+func TestAgentAnnouncesUpdateAck(t *testing.T) {
+	found := false
+	for _, f := range proto.Features {
+		found = found || f == "update_ack"
+	}
+	if !found {
+		t.Fatalf("features = %v", proto.Features)
 	}
 }

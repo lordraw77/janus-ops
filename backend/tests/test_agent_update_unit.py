@@ -82,10 +82,10 @@ class Wire:
             self.second.set()
 
 
-def _hub(mux: Mux) -> object:
+def _hub(mux: Mux, features: frozenset[str] = frozenset()) -> object:
     class Hub:
         def get(self, node_id: str) -> object:
-            return SimpleNamespace(mux=mux)
+            return SimpleNamespace(mux=mux, features=features)
 
     return Hub()
 
@@ -186,3 +186,81 @@ def test_cli_verify_accepts_good_signatures_and_refuses_the_rest(
     (tmp_path / "janus-agent-linux-arm").write_bytes(b"tampered")
     assert cli.main(verify) == 1  # the binary is not the signed one
     assert cli.main(["agent-verify", "--dir", str(tmp_path / "empty"), "--public-key", pub]) == 1
+
+
+# ------------------------------------------------------------------ flow control (update_ack)
+async def _windowed_run(
+    tmp_path: Path, size: int, ack: bool, stall_s: float | None = None
+) -> tuple[str | Exception, int, int]:
+    """A fake agent that confirms every 64 KiB (or never). Returns the outcome, the largest amount
+    the server ever had unconfirmed, and how many bytes it sent."""
+    key = Ed25519PrivateKey.generate()
+    (tmp_path / "janus-agent-linux-amd64").write_bytes(b"x" * size)
+    meta = update.sign(key, "0.3.0", "amd64", b"x" * size)
+    (tmp_path / "janus-agent-linux-amd64.sig").write_text(json.dumps(meta))
+    release = update.load_release(tmp_path, "amd64", _pub(key))
+    wire = Wire()
+    mux = Mux(wire.send)
+    stats = {"max_unconfirmed": 0, "received": 0, "acked": 0}
+
+    async def agent() -> None:
+        await wire.first.wait()
+        _, sid = struct.unpack(">BI", wire.sent[0][:5])
+        mux.dispatch(frame(OPEN_OK, sid))
+        seen = 1
+        since = 0
+        while stats["received"] < size:
+            await asyncio.sleep(0)
+            while seen < len(wire.sent):
+                payload = wire.sent[seen][5:]
+                seen += 1
+                stats["received"] += len(payload)
+                since += len(payload)
+                stats["max_unconfirmed"] = max(
+                    stats["max_unconfirmed"], stats["received"] - stats["acked"]
+                )
+                if ack and since >= 64 * 1024:
+                    since = 0
+                    stats["acked"] = stats["received"]
+                    mux.dispatch(frame(DATA, sid, stats["acked"].to_bytes(8, "big")))
+            if not ack and stats["received"] >= update.WINDOW + 64 * 1024:
+                return  # an agent that stopped confirming: the server must stall, not push on
+        mux.dispatch(frame(CLOSE, sid, b"updated:0.3.0"))
+
+    task = asyncio.create_task(agent())
+    old_stall = update.STALL_S
+    if stall_s is not None:
+        update.STALL_S = stall_s
+    try:
+        outcome: str | Exception = await update.push(
+            _hub(mux, frozenset({"streams", "update_ack"})),  # type: ignore[arg-type]
+            "n1",
+            release,
+        )
+    except update.UpdateError as exc:
+        outcome = exc
+    finally:
+        update.STALL_S = old_stall
+        task.cancel()
+    return outcome, stats["max_unconfirmed"], stats["received"]
+
+
+def test_windowed_update_never_runs_far_ahead_of_the_agent(tmp_path: Path) -> None:
+    size = 2 * 1024 * 1024
+    outcome, max_unconfirmed, received = asyncio.run(_windowed_run(tmp_path, size, ack=True))
+    assert outcome == "0.3.0" and received == size
+    # the window plus the one block in flight: far below the 2 MiB of the whole binary
+    assert max_unconfirmed <= update.WINDOW + 64 * 1024
+
+
+def test_an_agent_that_stops_confirming_stalls_the_update_not_the_link(tmp_path: Path) -> None:
+    outcome, _, received = asyncio.run(
+        _windowed_run(tmp_path, 2 * 1024 * 1024, ack=False, stall_s=0.2)
+    )
+    assert isinstance(outcome, update.UpdateError) and outcome.code == "update_stalled"
+    assert received <= update.WINDOW + 128 * 1024  # it did not keep pushing megabytes
+
+
+def test_an_agent_without_the_feature_still_gets_the_binary_in_one_go(tmp_path: Path) -> None:
+    result, _ = asyncio.run(_push(b"updated:0.3.0", None, tmp_path))
+    assert result == "0.3.0"  # the existing path, unchanged
