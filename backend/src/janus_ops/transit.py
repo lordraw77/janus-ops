@@ -14,6 +14,7 @@ response body.
 import base64
 import hashlib
 import json
+import re
 import secrets
 import ssl
 import threading
@@ -30,7 +31,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from janus_ops.config import Settings
 from janus_ops.crypto import Box, CompositeBox, DecryptionError, SecretBox
-from janus_ops.vault import VaultUnavailable
+from janus_ops.vault import SecretStore, VaultUnavailable
 
 TRANSIT_PREFIX = b"T"  # first byte of a blob sealed with Transit (local blobs start with 0x01)
 _FORMAT = 1
@@ -154,6 +155,51 @@ class TransitClient:
         except (KeyError, ValueError):
             raise SecretManagerUnavailable("bad_response") from None
 
+    # ------------------------------------------------------------------ KV v2
+    def _authorized(
+        self, method: str, path: str, body: dict[str, Any] | None = None
+    ) -> tuple[int, dict[str, Any]]:
+        status, out = self._request(method, path, body, self._token_now())
+        if status == 403:  # revoked or expired early: one fresh login, then give up
+            status, out = self._request(method, path, body, self._token_now(force=True))
+        if status in (403, 503) or status >= 500:
+            raise SecretManagerUnavailable(
+                {403: "denied", 503: "sealed"}.get(status, f"http_{status}")
+            )
+        return status, out
+
+    def kv_write(self, mount: str, path: str, data: dict[str, Any]) -> int:
+        """Stores a new version of the secret; returns its version number."""
+        status, out = self._authorized("POST", f"/v1/{mount}/data/{path}", {"data": data})
+        version = (out.get("data") or {}).get("version")
+        if status != 200 or not isinstance(version, int):
+            raise SecretManagerUnavailable("bad_response")
+        return version
+
+    def kv_read(self, mount: str, path: str, version: int) -> dict[str, Any]:
+        status, out = self._authorized("GET", f"/v1/{mount}/data/{path}?version={version}")
+        if status == 404:
+            raise DecryptionError("the secret is not in the secret manager")
+        inner = (out.get("data") or {}).get("data")
+        if status != 200 or not isinstance(inner, dict):
+            raise SecretManagerUnavailable("bad_response")
+        return inner
+
+    def kv_delete(self, mount: str, path: str) -> None:
+        """Removes the secret and all its versions."""
+        status, _ = self._authorized("DELETE", f"/v1/{mount}/metadata/{path}")
+        if status not in (200, 204, 404):
+            raise SecretManagerUnavailable(f"http_{status}")
+
+    def kv_list(self, mount: str, prefix: str) -> list[str]:
+        status, out = self._authorized("GET", f"/v1/{mount}/metadata/{prefix}?list=true")
+        if status == 404:
+            return []
+        keys = (out.get("data") or {}).get("keys")
+        if status != 200 or not isinstance(keys, list):
+            raise SecretManagerUnavailable("bad_response")
+        return [str(k) for k in keys]
+
     def health(self) -> bool:
         """Reachable, initialised and unsealed. Needs no token."""
         try:
@@ -236,6 +282,49 @@ class TransitBox:
             raise DecryptionError("authentication failed") from exc
 
 
+KV_REF = b"kv1:"  # a secret in KV starts with this: the database keeps only a reference
+_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+class KvStore(SecretStore):
+    """Secrets kept in the KV v2 engine of OpenBao / Vault (ADR-011 option b): the content never
+    reaches Postgres, which holds only a reference (mount, path, version). The path is made from
+    the owner's id, and a reference that points anywhere else is refused, so a row cannot be made
+    to read another row's secret."""
+
+    def __init__(self, client: TransitClient, mount: str, prefix: str) -> None:
+        self._client = client
+        self._mount = mount
+        self._prefix = prefix.strip("/")
+
+    def _path(self, entity_id: str) -> str:
+        if not _ID.fullmatch(entity_id):
+            raise DecryptionError("invalid id")
+        return f"{self._prefix}/{entity_id}"
+
+    def write(self, entity_id: str, payload: dict[str, Any]) -> bytes:
+        path = self._path(entity_id)
+        version = self._client.kv_write(self._mount, path, payload)
+        return KV_REF + json.dumps({"m": self._mount, "p": path, "v": version}).encode()
+
+    def read(self, entity_id: str, ref: bytes) -> dict[str, Any]:
+        try:
+            meta = json.loads(ref[len(KV_REF) :])
+            mount, path, version = str(meta["m"]), str(meta["p"]), int(meta["v"])
+        except (ValueError, KeyError, TypeError):
+            raise DecryptionError("unreadable reference") from None
+        if mount != self._mount or path != self._path(entity_id):
+            raise DecryptionError("the reference belongs to another record")
+        return self._client.kv_read(mount, path, version)
+
+    def delete(self, entity_id: str) -> None:
+        self._client.kv_delete(self._mount, self._path(entity_id))
+
+    def entities(self) -> set[str]:
+        """Ids that have a secret under the prefix."""
+        return {k.rstrip("/") for k in self._client.kv_list(self._mount, self._prefix)}
+
+
 def _transit_box(settings: Settings) -> TransitBox | None:
     if not (settings.bao_addr and settings.bao_role_id and settings.bao_secret_id):
         return None
@@ -252,6 +341,21 @@ def _transit_box(settings: Settings) -> TransitBox | None:
         )
     )
     return TransitBox(client, settings.bao_dek_cache_s)
+
+
+def _client(settings: Settings) -> TransitClient | None:
+    box = _transit_box(settings)
+    return box._client if box is not None else None
+
+
+def build_kv(settings: Settings, force: bool = False) -> KvStore | None:
+    """The KV store, when the backend is openbao-kv (or `force`, for moving secrets)."""
+    if settings.secret_backend != "openbao-kv" and not force:  # noqa: S105
+        return None
+    client = _client(settings)
+    if client is None:
+        raise ValueError("the secret manager is not configured")
+    return KvStore(client, settings.bao_kv_mount, settings.bao_kv_prefix)
 
 
 def build_box(settings: Settings, primary: str | None = None) -> Box | None:

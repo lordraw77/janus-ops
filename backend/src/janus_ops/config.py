@@ -137,12 +137,14 @@ class Settings(BaseSettings):
     cookie_secure: bool = Field(default=True, description="Send the session cookie over HTTPS only")
 
     # --- Master key in an external secret manager (FR-86, ADR-011). local = JANUS_SECRET_KEY.
-    secret_backend: Literal["local", "openbao-transit"] = "local"  # noqa: S105
+    secret_backend: Literal["local", "openbao-transit", "openbao-kv"] = "local"  # noqa: S105
     bao_addr: str | None = Field(default=None, description="https:// URL of OpenBao / Vault")
     bao_role_id: str | None = None
     bao_secret_id: SecretStr | None = None
     bao_transit_mount: str = Field(default="transit", pattern=r"^[A-Za-z0-9_/-]{1,64}$")
     bao_transit_key: str = Field(default="janus-kek", pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    bao_kv_mount: str = Field(default="secret", pattern=r"^[A-Za-z0-9_/-]{1,64}$")
+    bao_kv_prefix: str = Field(default="janus-ops", pattern=r"^[A-Za-z0-9_/-]{1,128}$")
     bao_ca_file: Path | None = Field(default=None, description="CA bundle for the secret manager")
     bao_timeout_s: int = Field(default=5, ge=1, le=60)
     bao_dek_cache_s: int = Field(
@@ -177,7 +179,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _secret_backend_complete(self) -> "Settings":
-        if self.secret_backend != "openbao-transit":  # noqa: S105
+        if self.secret_backend == "local":  # noqa: S105
             return self
         missing = [
             name
@@ -189,7 +191,9 @@ class Settings(BaseSettings):
             if not value
         ]
         if missing:
-            raise ValueError(f"secret backend openbao-transit but missing: {', '.join(missing)}")
+            raise ValueError(
+                f"secret backend {self.secret_backend} but missing: {', '.join(missing)}"
+            )
         return self
 
     @model_validator(mode="after")

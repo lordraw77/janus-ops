@@ -35,6 +35,7 @@ from janus_ops.proxmox import router as proxmox
 from janus_ops.proxmox.access import ProxmoxAccess
 from janus_ops.terminal import router as terminal
 from janus_ops.terminal import sftp, snippets
+from janus_ops.transit import build_kv
 from janus_ops.vault import Vault
 from janus_ops.workflows import engine as workflow_engine
 from janus_ops.workflows.router import router as workflows
@@ -87,7 +88,7 @@ def create_app(
         app.state.schema_head = schema_head()
         app.state.auth = AuthService(engine, settings, directory)
         app.state.directory_admin = LldapAdmin(settings) if settings.directory_managed else None
-        app.state.vault = Vault(app.state.auth.box)
+        app.state.vault = Vault(app.state.auth.box, build_kv(settings))
         app.state.terminals = terminal.TerminalCounter()
         app.state.sftp = sftp.SftpPool(engine, app.state.vault, settings)
         app.state.agents = AgentHub()

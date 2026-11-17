@@ -15,7 +15,7 @@ import hashlib
 import json
 import secrets
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from cryptography.exceptions import InvalidTag, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
@@ -60,13 +60,34 @@ def _aad(credential_id: str, part: str) -> bytes:
     return f"credential:{credential_id}:{part}".encode()
 
 
+class SecretStore(Protocol):
+    """Where secrets live when their content stays outside the database (KV engine)."""
+
+    def write(self, entity_id: str, payload: dict[str, Any]) -> bytes: ...
+
+    def read(self, entity_id: str, ref: bytes) -> dict[str, Any]: ...
+
+    def delete(self, entity_id: str) -> None: ...
+
+
+KV_REF = b"kv1:"  # what the ciphertext column holds for a secret kept in the KV engine
+KV_KEK_VERSION = 3  # 1 = local key, 2 = Transit, 3 = KV: only a reference in the database
+
+
 class Vault:
-    def __init__(self, box: Box | None) -> None:
+    def __init__(self, box: Box | None, store: SecretStore | None = None) -> None:
         self._box = box
+        self._store = store
 
     @property
     def available(self) -> bool:
-        return self._box is not None
+        return self._box is not None or self._store is not None
+
+    def discard(self, entity_id: str) -> None:
+        """Remove the content of a secret that is kept outside the database (best effort: a
+        failure leaves an orphan that `janus-ops secrets prune` finds)."""
+        if self._store is not None:
+            self._store.delete(entity_id)
 
     def _kek(self) -> Box:
         if self._box is None:
@@ -74,6 +95,9 @@ class Vault:
         return self._box
 
     def seal(self, credential_id: str, payload: dict[str, Any]) -> Sealed:
+        if self._store is not None:
+            ref = self._store.write(credential_id, payload)
+            return Sealed(ciphertext=ref, nonce=b"", dek_wrapped=b"", kek_version=KV_KEK_VERSION)
         kek = self._kek()
         dek = AESGCM.generate_key(bit_length=256)
         nonce = secrets.token_bytes(12)
@@ -90,6 +114,10 @@ class Vault:
     def reveal(
         self, credential_id: str, ciphertext: bytes, nonce: bytes, dek_wrapped: bytes
     ) -> dict[str, Any]:
+        if bytes(ciphertext).startswith(KV_REF):
+            if self._store is None:
+                raise VaultUnavailable
+            return self._store.read(credential_id, bytes(ciphertext))
         kek = self._kek()
         dek = kek.decrypt(bytes(dek_wrapped), _aad(credential_id, "dek"))
         try:

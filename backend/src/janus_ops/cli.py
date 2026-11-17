@@ -28,7 +28,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sc_sub = sc.add_subparsers(dest="secrets_command", required=True)
     sc_sub.add_parser("status", help="how many secrets are wrapped by each backend")
     mv = sc_sub.add_parser("migrate", help="re-wrap the data keys with another backend")
-    mv.add_argument("--to", required=True, choices=["local", "openbao-transit"])
+    mv.add_argument("--to", required=True, choices=["local", "openbao-transit", "openbao-kv"])
+    pr = sc_sub.add_parser("prune", help="list (or remove) secrets in KV that no record uses")
+    pr.add_argument("--apply", action="store_true", help="remove them; without it only list")
     kg = sub.add_parser(
         "agent-keygen",
         help="generate the agent release key pair (run it OFF the server; keep the private key)",
@@ -134,7 +136,7 @@ def _secrets_command(args: argparse.Namespace, settings: Any) -> int:
     from janus_ops import secrets_migrate
     from janus_ops.crypto import DecryptionError
     from janus_ops.db import create_engine
-    from janus_ops.transit import build_box
+    from janus_ops.transit import build_box, build_kv
     from janus_ops.vault import VaultUnavailable
 
     async def run() -> int:
@@ -145,15 +147,30 @@ def _secrets_command(args: argparse.Namespace, settings: Any) -> int:
                     print(f"{table}: {counts or '-'}")
                 return 0
             try:
-                box = build_box(settings, primary=args.to)
+                if args.secrets_command == "prune":
+                    kv = build_kv(settings, force=True)
+                    if kv is None:
+                        raise ValueError("the secret manager is not configured")
+                    found = sorted(await secrets_migrate.orphans(engine, kv))
+                    for entity_id in found:
+                        if args.apply:
+                            kv.delete(entity_id)
+                        print(("removed " if args.apply else "orphan ") + entity_id)
+                    print(f"{len(found)} secret(s) in KV that no record uses")
+                    return 0
+                envelope = "openbao-transit" if args.to == "openbao-kv" else args.to
+                box = build_box(settings, primary=envelope)
+                if box is None:
+                    print("janus-ops: no master key is configured", file=sys.stderr)
+                    return 2
+                try:
+                    store = build_kv(settings, force=True)
+                except ValueError:
+                    store = None  # no secret manager: only a local key, nothing in KV to read
+                report = await secrets_migrate.migrate(engine, box, args.to, store)
             except ValueError as exc:
                 print(f"janus-ops: {exc}", file=sys.stderr)
                 return 2
-            if box is None:
-                print("janus-ops: no master key is configured", file=sys.stderr)
-                return 2
-            try:
-                report = await secrets_migrate.migrate(engine, box, args.to)
             except (DecryptionError, VaultUnavailable) as exc:
                 print(
                     f"janus-ops: nothing was changed: {type(exc).__name__}: {exc}", file=sys.stderr
@@ -161,6 +178,8 @@ def _secrets_command(args: argparse.Namespace, settings: Any) -> int:
                 return 1
             moved, already = report.moved or "-", report.already or "-"
             print(f"moved {report.total_moved}: {moved}; already there: {already}")
+            if report.left_in_kv:
+                print(f"copies left in KV: {len(report.left_in_kv)}: run `secrets prune --apply`")
             return 0
         finally:
             await engine.dispose()

@@ -1,6 +1,8 @@
 """/api/v1/credentials: vault entries. Secrets are write-only: no endpoint returns them."""
 
+import asyncio
 import json
+import logging
 import re
 import uuid
 from datetime import datetime
@@ -16,6 +18,7 @@ from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.vault import InvalidSecret, Sealed, Vault, VaultUnavailable, inspect_ssh_key
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/credentials", tags=["credentials"])
 
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
@@ -284,5 +287,9 @@ async def delete_credential(
             await conn.execute(text("DELETE FROM credential WHERE id = :id"), {"id": credential_id})
     except IntegrityError:
         raise HTTPException(409, "credential_in_use") from None
+    try:  # the content of a secret kept in KV goes with it; a failure leaves an orphan for prune
+        await asyncio.to_thread(request.app.state.vault.discard, str(credential_id))
+    except Exception:  # noqa: BLE001 - the credential is already gone; do not fail the request
+        log.warning("secret content could not be removed from the secret manager")
     await record(request, session, "credentials.deleted", "credential", str(credential_id))
     return Response(status_code=204)

@@ -11,6 +11,7 @@ from janus_ops.transit import (
     TransitClient,
     TransitConfig,
     build_box,
+    build_kv,
 )
 from janus_ops.vault import Vault, VaultUnavailable
 
@@ -176,3 +177,88 @@ def test_settings_need_the_secret_manager_details() -> None:
         )
     s = Settings(_env_file=None, database_url="postgresql+asyncpg://u:p@localhost/db")
     assert s.secret_backend == "local" and build_box(s) is None
+
+
+# ---------------------------------------------------------------- KV (ADR-011 option b)
+def _kv_vault(bao: FakeBao, **kw: object) -> Vault:
+    s = _settings(bao, secret_backend="openbao-kv", **kw)
+    return Vault(build_box(s), build_kv(s))
+
+
+def test_a_secret_in_kv_never_reaches_the_database_row() -> None:
+    with fake_bao() as bao:
+        vault = _kv_vault(bao)
+        sealed = vault.seal("11111111-2222", {"secret": "hunter2", "passphrase": "p"})
+        assert sealed.kek_version == 3 and sealed.dek_wrapped == b"" and sealed.nonce == b""
+        assert sealed.ciphertext.startswith(b"kv1:") and b"hunter2" not in sealed.ciphertext
+        assert bao.kv["janus-ops/11111111-2222"] == [{"secret": "hunter2", "passphrase": "p"}]
+        got = vault.reveal("11111111-2222", sealed.ciphertext, sealed.nonce, sealed.dek_wrapped)
+        assert got == {"secret": "hunter2", "passphrase": "p"}
+
+
+def test_an_update_makes_a_new_version_and_the_reference_pins_it() -> None:
+    with fake_bao() as bao:
+        vault = _kv_vault(bao)
+        first = vault.seal("abc", {"secret": "one"})
+        second = vault.seal("abc", {"secret": "two"})
+        assert len(bao.kv["janus-ops/abc"]) == 2
+        assert vault.reveal("abc", first.ciphertext, b"", b"") == {"secret": "one"}
+        assert vault.reveal("abc", second.ciphertext, b"", b"") == {"secret": "two"}
+
+
+def test_a_reference_cannot_be_used_for_another_record() -> None:
+    with fake_bao() as bao:
+        vault = _kv_vault(bao)
+        sealed = vault.seal("owner-1", {"secret": "mine"})
+        vault.seal("owner-2", {"secret": "theirs"})
+        with pytest.raises(DecryptionError, match="another record"):
+            vault.reveal("owner-2", sealed.ciphertext, b"", b"")
+        for bad in (b"kv1:", b"kv1:{}", b'kv1:{"m": "secret", "p": "x", "v": "z"}'):
+            with pytest.raises(DecryptionError):
+                vault.reveal("owner-1", bad, b"", b"")
+
+
+def test_a_missing_secret_and_an_unreachable_manager_are_different_errors() -> None:
+    with fake_bao() as bao:
+        vault = _kv_vault(bao)
+        sealed = vault.seal("gone", {"secret": "x"})
+        bao.kv.clear()
+        with pytest.raises(DecryptionError, match="not in the secret manager"):
+            vault.reveal("gone", sealed.ciphertext, b"", b"")
+        bao.sealed = True
+        with pytest.raises(VaultUnavailable):
+            vault.reveal("gone", sealed.ciphertext, b"", b"")
+        with pytest.raises(VaultUnavailable):
+            vault.seal("new", {"secret": "x"})
+
+
+def test_a_server_without_kv_cannot_read_a_kv_secret() -> None:
+    with fake_bao() as bao:
+        sealed = _kv_vault(bao).seal("abc", {"secret": "x"})
+        with pytest.raises(VaultUnavailable):
+            Vault(SecretBox(LOCAL_KEY)).reveal("abc", sealed.ciphertext, b"", b"")
+
+
+def test_discard_removes_the_content_and_entities_lists_ids() -> None:
+    with fake_bao() as bao:
+        s = _settings(bao, secret_backend="openbao-kv")
+        kv = build_kv(s)
+        assert kv is not None
+        vault = Vault(build_box(s), kv)
+        vault.seal("aaa", {"secret": "1"})
+        vault.seal("bbb", {"secret": "2"})
+        assert kv.entities() == {"aaa", "bbb"}
+        vault.discard("aaa")
+        assert kv.entities() == {"bbb"}
+        vault.discard("never-existed")  # not an error
+
+
+def test_kv_is_off_unless_the_backend_says_so() -> None:
+    with fake_bao() as bao:
+        assert build_kv(_settings(bao)) is None
+        assert build_kv(_settings(bao), force=True) is not None
+        kv = build_kv(_settings(bao), force=True)
+        assert kv is not None
+        for bad in ("../escape", "a/b", "", "x" * 65):
+            with pytest.raises(DecryptionError, match="invalid id"):
+                kv.write(bad, {"secret": "x"})  # an id cannot reach outside its own path
