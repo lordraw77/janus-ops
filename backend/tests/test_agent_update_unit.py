@@ -142,3 +142,10 @@ def test_push_failures_have_stable_codes(
     with pytest.raises(update.UpdateError) as exc:
         asyncio.run(_push(reason, refuse, tmp_path))
     assert exc.value.code == code
+
+
+def test_update_all_is_declared_before_the_node_routes() -> None:
+    from janus_ops.agents.router import router
+
+    paths = [r.path for r in router.routes]  # type: ignore[attr-defined]
+    assert "/agents/update-all" in paths

@@ -1,5 +1,6 @@
 """/api/v1/agents: agent status, SSH bootstrap, revoke, uninstall."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -296,17 +297,15 @@ class UpdateOut(BaseModel):
     to_version: str
 
 
-@router.post("/{node_id}/update", response_model=UpdateOut)
-async def update_agent(request: Request, node_id: uuid.UUID, session: Manager) -> UpdateOut:
-    """Push the signed agent binary; the agent verifies it and restarts (FR-84)."""
+async def _update_row(request: Request, session: Session, row: Any) -> UpdateOut:
+    """Push the signed binary to one connected agent; raises HTTPException with a stable code."""
     app = request.app
     settings = app.state.settings
-    row = await _row(request, session, node_id)
     if settings.agent_dir is None:
         raise HTTPException(409, "agent_binary_missing")
     if row.arch is None:
         raise HTTPException(409, "agent_offline")
-    key = str(node_id)
+    key = str(row.id)
     if key in _busy(request):
         raise HTTPException(409, "bootstrap_running")
     _busy(request).add(key)
@@ -337,6 +336,97 @@ async def update_agent(request: Request, node_id: uuid.UUID, session: Manager) -
         return UpdateOut(from_version=row.version, to_version=installed)
     finally:
         _busy(request).discard(key)
+
+
+@router.post("/{node_id}/update", response_model=UpdateOut)
+async def update_agent(request: Request, node_id: uuid.UUID, session: Manager) -> UpdateOut:
+    """Push the signed agent binary; the agent verifies it and restarts (FR-84)."""
+    return await _update_row(request, session, await _row(request, session, node_id))
+
+
+class UpdateAllIn(BaseModel):
+    # empty or missing = every connected agent in the user's scope that is not on the signed version
+    node_ids: list[uuid.UUID] | None = Field(default=None, max_length=200)
+
+
+Outcome = Literal["updated", "skipped", "failed"]
+
+
+class UpdateAllItem(BaseModel):
+    node_id: uuid.UUID
+    node_name: str
+    result: Outcome
+    detail: str | None = None
+
+
+UPDATE_ALL_PARALLEL = 3
+
+
+@router.post("/update-all", response_model=list[UpdateAllItem])
+async def update_all_agents(
+    request: Request, body: UpdateAllIn, session: Manager
+) -> list[UpdateAllItem]:
+    """Roll the signed update out to many agents, a few at a time. Agents already on the signed
+    version are skipped; each agent is verified and rolled back on its own (FR-84)."""
+    app = request.app
+    settings = app.state.settings
+    if settings.agent_dir is None:
+        raise HTTPException(409, "agent_binary_missing")
+    hub: AgentHub = app.state.agents
+    scope_sql, params = session.scope.sql("n")
+    async with app.state.engine.connect() as conn:
+        rows = list(
+            await conn.execute(
+                text(
+                    SELECT
+                    + f" WHERE a.node_id IS NOT NULL AND a.revoked_at IS NULL AND {scope_sql}"
+                    " ORDER BY n.name"
+                ),
+                params,
+            )
+        )
+    wanted = set(body.node_ids) if body.node_ids else None
+    rows = [r for r in rows if wanted is None or r.id in wanted]
+    versions: dict[str, str] = {}
+    for arch in {r.arch for r in rows if r.arch}:
+        try:
+            versions[arch] = update.load_release(
+                settings.agent_dir, arch, settings.agent_release_public_key
+            ).version
+        except update.UpdateError as exc:
+            if exc.code not in ("agent_binary_missing", "unsupported_arch"):
+                raise HTTPException(409, exc.code) from None
+    sem = asyncio.Semaphore(UPDATE_ALL_PARALLEL)
+
+    async def one(row: Any) -> UpdateAllItem:
+        def item(
+            result: Literal["updated", "skipped", "failed"], detail: str | None = None
+        ) -> UpdateAllItem:
+            return UpdateAllItem(node_id=row.id, node_name=row.name, result=result, detail=detail)
+
+        if hub.get(str(row.id)) is None:
+            return item("skipped", "agent_offline")
+        if row.arch not in versions:
+            return item("skipped", "agent_binary_missing")
+        if row.version == versions[row.arch]:
+            return item("skipped", "up_to_date")
+        async with sem:
+            try:
+                out = await _update_row(request, session, row)
+            except HTTPException as exc:
+                return item("failed", str(exc.detail))
+        return item("updated", out.to_version)
+
+    results = await asyncio.gather(*(one(r) for r in rows))
+    await record(
+        request,
+        session,
+        "agent.update_all",
+        "agent",
+        "fleet",
+        {r.result: sum(1 for x in results if x.result == r.result) for r in results},
+    )
+    return list(results)
 
 
 @router.post("/{node_id}/revoke", status_code=204)

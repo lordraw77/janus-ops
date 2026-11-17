@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderOpen, Pencil, Plus, Server, SquareTerminal, Trash2 } from "lucide-react";
+import { Download, FolderOpen, Pencil, Plus, Server, SquareTerminal, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, useMemo, useState } from "react";
 
@@ -358,6 +358,20 @@ function NodesTab({ groups }: { groups: Group[] }) {
     );
   }, [nodes, q, env, cap]);
 
+  const canUpdateAgents = can("agents.manage");
+  const [rollout, setRollout] = useState<string | null>(null);
+
+  async function updateFleet() {
+    if (!window.confirm("Push the signed agent update to every connected agent that is not on the signed version? Each agent verifies the signature and rolls back if the new version cannot connect.")) return;
+    setRollout("Updating…");
+    const r = await api<{ node_name: string; result: string; detail: string | null }[]>("/agents/update-all", { method: "POST", body: {} });
+    if (!r.ok) return setRollout(message(r.code));
+    const count = (k: string) => r.data.filter((x) => x.result === k).length;
+    const failed = r.data.filter((x) => x.result === "failed").map((x) => `${x.node_name}: ${message(x.detail ?? "update_failed")}`);
+    setRollout(`Updated ${count("updated")}, already current or offline ${count("skipped")}, failed ${count("failed")}.${failed.length ? ` ${failed.join(" · ")}` : ""}`);
+    reload();
+  }
+
   async function remove(n: InventoryNode) {
     if (!window.confirm(`Delete node "${n.name}"? Nodes depending on it keep existing, without parent.`)) return;
     const r = await api(`/nodes/${n.id}`, { method: "DELETE" });
@@ -369,13 +383,21 @@ function NodesTab({ groups }: { groups: Group[] }) {
     <Card
       title={`Nodes${nodes ? ` (${nodes.length})` : ""}`}
       actions={
-        manage ? (
-          <Button variant="primary" onClick={() => setEditing("new")}>
-            <Plus className="h-3.5 w-3.5" aria-hidden /> New node
-          </Button>
-        ) : null
+        <div className="flex gap-2">
+          {canUpdateAgents && (
+            <Button onClick={() => void updateFleet()} title="Signed self-update of all connected agents">
+              <Download className="h-3.5 w-3.5" aria-hidden /> Update agents
+            </Button>
+          )}
+          {manage && (
+            <Button variant="primary" onClick={() => setEditing("new")}>
+              <Plus className="h-3.5 w-3.5" aria-hidden /> New node
+            </Button>
+          )}
+        </div>
       }
     >
+      {rollout && <Alert kind="info">{rollout}</Alert>}
       <div className="mb-3 flex flex-wrap gap-2">
         <TextInput placeholder="Search name, address, tag" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
         <select value={env} onChange={(e) => setEnv(e.target.value)} className={`${SELECT} max-w-[9rem]`} aria-label="Environment">
