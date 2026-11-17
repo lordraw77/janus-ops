@@ -44,6 +44,7 @@ func TestNoPendingUpdateNoGuard(t *testing.T) {
 
 func TestConfirmedUpdateCleansUp(t *testing.T) {
 	a, exe, exited := pendingAgent(t, 0)
+	_ = os.WriteFile(filepath.Join(a.Cfg.StateDir, "update-starts"), []byte("2"), 0o600)
 	g := a.guardPendingUpdate()
 	if p, _ := readPending(a.Cfg.StateDir); p.Tries != 1 {
 		t.Fatalf("tries = %d", p.Tries)
@@ -54,6 +55,9 @@ func TestConfirmedUpdateCleansUp(t *testing.T) {
 	}
 	if _, err := os.Stat(exe + ".old"); err == nil {
 		t.Fatal(".old left")
+	}
+	if _, err := os.Stat(filepath.Join(a.Cfg.StateDir, "update-starts")); err == nil {
+		t.Fatal("start counter left")
 	}
 	if content(t, exe) != "new" {
 		t.Fatal("new binary touched")

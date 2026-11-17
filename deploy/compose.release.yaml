@@ -1,0 +1,8 @@
+# Signed agent binaries from the host instead of the ones built into the image (FR-84).
+# Use together with compose.yaml: the directory holds janus-agent-linux-<arch> and the
+# janus-agent-linux-<arch>.sig files made by `janus-ops agent-sign` with the (offline) release key.
+#   JANUS_AGENT_RELEASE_DIR=/path/to/signed docker compose -f compose.yaml -f compose.release.yaml up -d
+services:
+  janus-ops:
+    volumes:
+      - ${JANUS_AGENT_RELEASE_DIR:?set the directory with the signed agents}:/app/agent:ro

@@ -100,6 +100,7 @@ func (g *updateGuard) confirm() {
 	g.timer.Stop()
 	g.timer = nil
 	_ = os.Remove(pendingPath(g.a.Cfg.StateDir))
+	_ = os.Remove(filepath.Join(g.a.Cfg.StateDir, "update-starts")) // the unit's start counter
 	_ = os.Remove(g.a.exePath + ".old")
 	g.a.Log.Info("update confirmed", "version", g.a.Version)
 }

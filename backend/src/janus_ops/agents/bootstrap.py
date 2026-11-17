@@ -32,7 +32,21 @@ BINARY = "janus-agent-linux-{arch}"
 TMP_DIR = re.compile(r"^/tmp/janus-agent\.[A-Za-z0-9]{6,}$")
 COMMAND_TIMEOUT_S = 120
 
-UNIT = """\
+# A self-update (FR-84) leaves the previous binary as janus-agent.old and a marker in the state
+# directory; the new binary removes both once it has connected. This ExecStartPre does not depend
+# on the binary: if the marker is still there after four starts (the new binary crashes, or does not
+# even execute), the old binary is put back. `$$` is how systemd writes a literal `$`.
+ROLLBACK_GUARD = (
+    "ExecStartPre=-/bin/sh -c '"
+    "m=/var/lib/janus-agent/update-pending.json; c=/var/lib/janus-agent/update-starts; "
+    "e=/usr/local/bin/janus-agent; "
+    'if [ -f "$$m" ]; then '
+    'n=$$(( $$(cat "$$c" 2>/dev/null || echo 0) + 1 )); echo "$$n" > "$$c"; '
+    'if [ "$$n" -gt 4 ] && [ -f "$$e.old" ]; then mv -f "$$e.old" "$$e"; rm -f "$$m" "$$c"; fi; '
+    'else rm -f "$$c"; fi\''
+)
+
+UNIT_HEAD = f"""\
 [Unit]
 Description=Janus-Ops agent
 Documentation=https://github.com/lordraw77/janus-ops
@@ -40,16 +54,20 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+{ROLLBACK_GUARD}
 ExecStart=/usr/local/bin/janus-agent run --config /etc/janus-agent/config.yaml
 Restart=always
 RestartSec=5
 StateDirectory=janus-agent
 StateDirectoryMode=0700
+"""
+
 # root is needed to read every process's sockets (listening ports) and to query systemd;
-# everything else is locked down
+# everything else is locked down. /usr/local/bin is writable so that the agent can replace itself.
+UNIT_SANDBOX = """\
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/etc/janus-agent
+ReadWritePaths=/etc/janus-agent /usr/local/bin
 ProtectHome=read-only
 PrivateTmp=true
 PrivateDevices=true
@@ -66,10 +84,23 @@ RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
+"""
+
+# With allow_pty the agent hands out a root shell: that shell inherits the unit's restrictions
+# (read-only system, no privilege change, private /tmp), so a sandbox would only make it
+# useless. The node's administrator chose a shell, so the unit is not sandboxed.
+UNIT_RELAXED = "# allow_pty: the agent gives a root shell, so the unit is not sandboxed\n"
+
+UNIT_TAIL = """\
 
 [Install]
 WantedBy=multi-user.target
 """
+
+
+def render_unit(plan: "Plan") -> str:
+    return UNIT_HEAD + (UNIT_RELAXED if plan.allow_pty else UNIT_SANDBOX) + UNIT_TAIL
+
 
 INSTALL = """\
 set -eu
@@ -220,7 +251,7 @@ async def install(conn: asyncssh.SSHClientConnection, plan: Plan) -> None:
     if not TMP_DIR.match(tmp):
         raise BootstrapError("upload_failed", "unexpected temporary directory")
     try:
-        files = {"config.yaml": render_config(plan), "janus-agent.service": UNIT}
+        files = {"config.yaml": render_config(plan), "janus-agent.service": render_unit(plan)}
         if plan.ca_pem:
             files["ca.pem"] = plan.ca_pem
         try:

@@ -58,6 +58,8 @@ services:
       JANUS_AGENT_SERVER_URL: ${JANUS_AGENT_SERVER_URL:-}
       JANUS_AGENT_CA_FILE: ${JANUS_AGENT_CA_FILE-/var/lib/janus-ops/pki/root.crt}
       JANUS_AGENT_INTERVAL_S: ${JANUS_AGENT_INTERVAL_S:-10}
+      # Signed agent self-update (FR-84): public key of the release key (janus-ops agent-keygen)
+      JANUS_AGENT_RELEASE_PUBLIC_KEY: ${JANUS_AGENT_RELEASE_PUBLIC_KEY:-}
       # AI Copilot (F7): off unless the endpoint and the model are set
       JANUS_AI_BASE_URL: ${JANUS_AI_BASE_URL:-}
       JANUS_AI_MODEL: ${JANUS_AI_MODEL:-}
