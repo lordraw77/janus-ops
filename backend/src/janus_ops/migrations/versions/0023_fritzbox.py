@@ -41,6 +41,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("DELETE FROM service_check WHERE kind = 'fritzbox'")
     op.execute("DELETE FROM node_capability WHERE kind = 'fritzbox'")
     op.execute("UPDATE credential SET kind = 'generic' WHERE kind = 'fritzbox_password'")
     op.execute("ALTER TABLE node_capability DROP CONSTRAINT node_capability_kind_check")

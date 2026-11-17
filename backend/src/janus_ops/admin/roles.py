@@ -30,8 +30,8 @@ class ScopeRule(BaseModel):
     )
     tags: list[uuid.UUID] = Field(default_factory=list, max_length=200)
     groups: list[uuid.UUID] = Field(default_factory=list, max_length=200)
-    capabilities: list[Literal["ssh", "agent", "proxmox", "docker", "snmp"]] = Field(
-        default_factory=list, max_length=5
+    capabilities: list[Literal["ssh", "agent", "proxmox", "docker", "snmp", "fritzbox"]] = Field(
+        default_factory=list, max_length=6
     )
     nodes: list[uuid.UUID] = Field(default_factory=list, max_length=500)
 

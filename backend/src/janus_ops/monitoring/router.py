@@ -137,14 +137,14 @@ async def _node_name(conn: Any, node_id: uuid.UUID) -> str:
     return str(name)
 
 
-async def _require_snmp(conn: Any, node_id: uuid.UUID) -> None:
-    """An SNMP check needs the node's SNMP capability to be enabled (FR-82)."""
+async def _require_capability(conn: Any, node_id: uuid.UUID, kind: str) -> None:
+    """An SNMP (FR-82) or FRITZ!Box check needs the node's capability of that kind enabled."""
     found = await conn.scalar(
-        text("SELECT 1 FROM node_capability WHERE node_id = :n AND kind = 'snmp' AND enabled"),
-        {"n": node_id},
+        text("SELECT 1 FROM node_capability WHERE node_id = :n AND kind = :k AND enabled"),
+        {"n": node_id, "k": kind},
     )
     if not found:
-        raise HTTPException(422, "no_snmp_capability")
+        raise HTTPException(422, f"no_{kind}_capability")
 
 
 @router.post("/checks", status_code=201, response_model=CheckOut)
@@ -156,8 +156,8 @@ async def create_check(request: Request, body: CheckIn, session: Manager) -> Che
     try:
         async with request.app.state.engine.begin() as conn:
             node = await _node_name(conn, body.node_id)
-            if body.kind == "snmp":
-                await _require_snmp(conn, body.node_id)
+            if body.kind in ("snmp", "fritzbox"):
+                await _require_capability(conn, body.node_id, body.kind)
             await conn.execute(
                 text(
                     "INSERT INTO service_check (id, node_id, name, kind, params, comparison,"

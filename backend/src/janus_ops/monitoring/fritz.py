@@ -23,6 +23,10 @@ from janus_ops.vault import Vault, VaultUnavailable
 
 ITEMS = ("wan_link", "wan_connection", "uptime", "traffic")
 
+# UPnP errors for an action or service the box does not have (401 invalid action, 402 invalid
+# arguments, 404 invalid variable): the only ones that mean "this is not an IP connection"
+_NO_SERVICE = frozenset({"soap:401", "soap:402", "soap:404", "http_404"})
+
 # service -> (control URL, service type), from the box's tr64desc.xml
 SERVICES: dict[str, tuple[str, str]] = {
     "deviceinfo": ("/upnp/control/deviceinfo", "urn:dslforum-org:service:DeviceInfo:1"),
@@ -69,7 +73,10 @@ def _local(tag: str) -> str:
 
 def parse_response(xml_text: str, action: str) -> dict[str, str]:
     """The out-arguments of `<action>Response`, as {name: text}. A SOAP fault raises FritzError."""
-    # the box is ours, on the LAN; expat does not resolve external entities (see module notes)
+    # expat expands internal entities (billion laughs), and a SOAP reply never needs a DTD:
+    # refuse any document that declares one before parsing it
+    if "<!DOCTYPE" in xml_text.upper() or "<!ENTITY" in xml_text.upper():
+        raise FritzError("bad_response")
     root = ET.fromstring(xml_text)  # noqa: S314
     for el in root.iter():
         name = _local(el.tag)
@@ -121,7 +128,7 @@ async def poll(
             service = "wanip"
             data.update(await _call(client, base, service, "GetStatusInfo"))
         except FritzError as exc:
-            if not exc.code.startswith("soap:"):
+            if exc.code not in _NO_SERVICE:
                 raise
             service = "wanppp"
             data.update(await _call(client, base, service, "GetStatusInfo"))
@@ -167,7 +174,10 @@ def grade(item: str, data: dict[str, str]) -> Result:
             return Result("warn", out)
         return Result("crit", out)
     if item == "uptime":
-        seconds = int(data.get("NewUpTime", "0") or 0)
+        try:
+            seconds = int(data.get("NewUpTime", "0") or 0)
+        except ValueError:
+            seconds = 0
         return Result(
             "ok",
             f"up {seconds // 86400} d {seconds % 86400 // 3600} h "
@@ -226,6 +236,11 @@ async def load_target(conn: AsyncConnection, vault: Vault | None, node_id: str) 
 _ERRORS: dict[str, tuple[Literal["unknown"], str]] = {
     "unreachable": ("unknown", "the FRITZ!Box does not answer (TR-064 port)"),
     "auth_failed": (
+        "unknown",
+        "the FRITZ!Box refused the user: check the credential and TR-064 access",
+    ),
+    # UPnP 606 "action not authorized": the user exists but has no TR-064 rights
+    "soap:606": (
         "unknown",
         "the FRITZ!Box refused the user: check the credential and TR-064 access",
     ),
