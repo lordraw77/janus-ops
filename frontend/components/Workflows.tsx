@@ -1,9 +1,20 @@
 "use client";
 
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Alert, Button, Field, Modal, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
+import { WorkflowEditor } from "@/components/WorkflowEditor";
+import {
+  type ChannelOption,
+  type CheckOption,
+  type Definition,
+  type NodeOption,
+  EMPTY_DEFINITION,
+  normalize,
+  parseDefinition,
+  problems,
+} from "@/lib/workflows";
 import { useAuth } from "@/lib/auth";
 
 type WorkflowRow = {
@@ -29,19 +40,6 @@ type RunRow = {
 type RunDetail = RunRow & {
   steps: { step_id: string; position: number; action: string; status: string; output: string; exit_code: number | null }[];
   approvals: { step_id: string; reason: string; status: string; decided_by: string | null }[];
-};
-
-// "trigger": manual | interval (interval_s) | alert (check_id) | webhook.
-// A step may have "when": { step, outcome: ok | failed | skipped, contains } on an earlier step,
-// and "on_failure": "continue" so that a failure does not stop the run.
-const TEMPLATE = {
-  trigger: { type: "manual" },
-  steps: [
-    { id: "hello", action: "notify", params: { channel_id: "<channel id>", message: "Starting the check" } },
-    { id: "look", action: "exec", on_failure: "continue", params: { node_id: "<node id>", command: "uptime", read_only: true } },
-    { id: "alarm", action: "notify", when: { step: "look", outcome: "failed" }, params: { channel_id: "<channel id>", message: "uptime failed" } },
-    { id: "gate", action: "approval", when: { step: "look", outcome: "ok" }, params: { reason: "Continue?" } },
-  ],
 };
 
 /** The webhook secret is shown once: after the workflow gets a webhook trigger or the secret is rotated. */
@@ -101,57 +99,119 @@ function useWatch<T>(path: string | null, active: boolean, everyMs: number) {
   return { ...(path ? state : { data: null, error: null }), reload: () => setTick((t) => t + 1) };
 }
 
-function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (created: { id: string; secret?: string }) => void }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [json, setJson] = useState(JSON.stringify(TEMPLATE, null, 2));
+function WorkflowDialog({
+  initial,
+  onClose,
+  onDone,
+}: {
+  initial?: WorkflowRow;
+  onClose: () => void;
+  onDone: (saved: { id: string; secret?: string }) => void;
+}) {
+  const nodes = useResource<NodeOption[]>("/nodes");
+  const channels = useResource<ChannelOption[]>("/notifications/channels");
+  const checks = useResource<CheckOption[]>("/checks");
+  const start = useMemo(() => (initial ? (parseDefinition(JSON.stringify(initial.definition)) ?? EMPTY_DEFINITION) : EMPTY_DEFINITION), [initial]);
+  const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [def, setDef] = useState<Definition>(start);
+  const [mode, setMode] = useState<"visual" | "json">("visual");
+  const [json, setJson] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  function toJson() {
+    setJson(JSON.stringify(normalize(def), null, 2));
+    setError(null);
+    setMode("json");
+  }
+  function toVisual() {
+    const parsed = parseDefinition(json);
+    if (!parsed) return setError("The JSON is not a workflow definition (it needs a trigger and a list of steps).");
+    setDef(parsed);
+    setError(null);
+    setMode("visual");
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     let definition: unknown;
-    try {
-      definition = JSON.parse(json);
-    } catch {
-      return setError("The definition is not valid JSON.");
+    if (mode === "json") {
+      try {
+        definition = JSON.parse(json);
+      } catch {
+        return setError("The definition is not valid JSON.");
+      }
+    } else {
+      const found = problems(def);
+      if (found.length > 0) return setError(found[0]);
+      definition = normalize(def);
     }
     setBusy(true);
-    const r = await api<{ id: string; webhook_secret?: string }>("/workflows", { method: "POST", body: { name: name.trim(), description, definition } });
+    const body = { name: name.trim(), description, definition };
+    const r = initial
+      ? await api<{ id: string; webhook_secret?: string }>(`/workflows/${initial.id}`, { method: "PATCH", body })
+      : await api<{ id: string; webhook_secret?: string }>("/workflows", { method: "POST", body });
     setBusy(false);
     if (!r.ok) return setError(message(r.code) || "The definition was refused: check the trigger and each step's parameters.");
-    onDone({ id: r.data.id, secret: r.data.webhook_secret });
+    onDone({ id: r.data.id ?? initial?.id ?? "", secret: r.data.webhook_secret });
   }
 
   return (
-    <Modal title="New workflow" onClose={onClose} wide>
+    <Modal title={initial ? `Edit ${initial.name}` : "New workflow"} onClose={onClose} wide>
       <form onSubmit={(e) => void submit(e)} className="space-y-3">
         {error && <Alert>{error}</Alert>}
-        <Field label="Name">
-          <TextInput autoFocus required value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Description">
-          <TextInput value={description} onChange={(e) => setDescription(e.target.value)} />
-        </Field>
-        <Field label="Definition (JSON)" hint="A trigger and the steps. A destructive exec and every approval step wait for a person.">
-          <textarea
-            value={json}
-            onChange={(e) => setJson(e.target.value)}
-            rows={14}
-            spellCheck={false}
-            className="w-full rounded border border-line bg-canvas px-3 py-2 font-mono text-[11px] outline-none focus:border-primary"
-          />
-        </Field>
-        <div className="flex justify-end">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Field label="Name">
+            <TextInput autoFocus required value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="Description">
+            <TextInput value={description} onChange={(e) => setDescription(e.target.value)} />
+          </Field>
+        </div>
+        <div className="flex items-center gap-1 text-xs" role="tablist">
+          <button type="button" role="tab" aria-selected={mode === "visual"} onClick={() => (mode === "json" ? toVisual() : undefined)} className={`rounded px-2 py-1 ${mode === "visual" ? "bg-elevated font-semibold text-primary" : "text-fg-muted hover:text-fg"}`}>
+            Visual
+          </button>
+          <button type="button" role="tab" aria-selected={mode === "json"} onClick={() => (mode === "visual" ? toJson() : undefined)} className={`rounded px-2 py-1 ${mode === "json" ? "bg-elevated font-semibold text-primary" : "text-fg-muted hover:text-fg"}`}>
+            JSON
+          </button>
+          <span className="ml-2 text-[11px] text-fg-muted">A destructive command and every approval step wait for a person.</span>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto pr-1">
+          {mode === "visual" ? (
+            <WorkflowEditor
+              value={def}
+              onChange={setDef}
+              nodes={nodes.data ?? []}
+              channels={channels.data ?? []}
+              checks={checks.data ?? []}
+              channelsReadable={!channels.error}
+            />
+          ) : (
+            <Field label="Definition (JSON)" hint="A trigger and the steps; the Visual tab edits the same thing.">
+              <textarea
+                value={json}
+                onChange={(e) => setJson(e.target.value)}
+                rows={18}
+                spellCheck={false}
+                className="w-full rounded border border-line bg-canvas px-3 py-2 font-mono text-[11px] outline-none focus:border-primary"
+              />
+            </Field>
+          )}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
-            Create
+            {initial ? "Save" : "Create"}
           </Button>
         </div>
       </form>
     </Modal>
   );
 }
+
 
 function RunPanel({ runId, onChanged }: { runId: string; onChanged: () => void }) {
   const { can } = useAuth();
@@ -252,7 +312,7 @@ export function WorkflowsView() {
   const { can } = useAuth();
   const list = useResource<WorkflowRow[]>("/workflows");
   const [selected, setSelected] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<WorkflowRow | "new" | null>(null);
   const [secret, setSecret] = useState<{ id: string; value: string } | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -288,7 +348,7 @@ export function WorkflowsView() {
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Workflows</h1>
         {can("workflow.manage") && (
-          <Button type="button" variant="primary" onClick={() => setCreating(true)}>
+          <Button type="button" variant="primary" onClick={() => setEditing("new")}>
             New workflow
           </Button>
         )}
@@ -330,6 +390,11 @@ export function WorkflowsView() {
                 {can("workflow.run") && (
                   <Button type="button" variant="primary" disabled={!current.enabled} onClick={() => void start(current)}>
                     Run now
+                  </Button>
+                )}
+                {can("workflow.manage") && (
+                  <Button type="button" onClick={() => setEditing(current)}>
+                    Edit
                   </Button>
                 )}
                 {can("workflow.manage") && current.has_webhook && (
@@ -374,11 +439,13 @@ export function WorkflowsView() {
           )}
         </div>
       </div>
-      {creating && (
-        <CreateDialog
-          onClose={() => setCreating(false)}
+      {editing && (
+        <WorkflowDialog
+          key={editing === "new" ? "new" : editing.id}
+          initial={editing === "new" ? undefined : editing}
+          onClose={() => setEditing(null)}
           onDone={(created) => {
-            setCreating(false);
+            setEditing(null);
             if (created.secret) setSecret({ id: created.id, value: created.secret });
             list.reload();
           }}

@@ -13,7 +13,8 @@
     "prebuild": "node scripts/sync-assets.mjs",
     "build": "next build",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"lib/**/*.test.mjs\""
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
