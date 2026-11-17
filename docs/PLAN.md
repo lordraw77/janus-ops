@@ -193,7 +193,7 @@ Punti delle specifiche che vanno corretti, chiariti o ridimensionati prima di sc
 | FR-10b | Ruoli configurabili: gruppo LDAP + insieme di permessi; ruoli custom; chi legge l'audit log è un permesso (`audit.read`) | MUST | F0 |
 | FR-11b | TOTP funzionante senza accesso a internet (proxy aziendali, air-gapped) | MUST | F0 |
 | FR-06 | Account locale *break-glass*, usabile anche con LDAP non disponibile, ogni uso segnalato nell'audit | MUST | F0 |
-| FR-07 | Collegamento opzionale ad AD/LDAP aziendale esterno al posto del sidecar | SHOULD | F8 |
+| FR-07 | Collegamento opzionale ad AD/LDAP aziendale esterno al posto del sidecar. **Fatto (v0.28)**: attributo di login configurabile (`sAMAccountName`), filtro con UPN, StartTLS verificato, referral mai seguiti, gruppi annidati con la regola `LDAP_MATCHING_RULE_IN_CHAIN`, `deploy/compose.external-directory.yaml`. Test con server LDAP in memoria (`test_ldap_ad_unit.py`); **non provato su un AD reale** | SHOULD | F8 |
 | FR-04 | Audit log di ogni azione privilegiata, consultabile e filtrabile | MUST | F0 |
 | FR-05 | Command palette `Ctrl+K` per navigare su nodi e azioni | SHOULD | F0 |
 | FR-10 | Sessione SSH web 1-click su un nodo, con credenziali dal vault | MUST | F1 |

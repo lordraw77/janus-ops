@@ -1,0 +1,45 @@
+# Sign in with an external LDAP / Active Directory instead of the lldap sidecar (FR-07).
+# Use together with compose.yaml; the sidecar (ldap, ldap-init) is not started:
+#   docker compose -f compose.yaml -f compose.external-directory.yaml up -d
+#
+# Set in deploy/.env (see .env.example):
+#   EXT_LDAP_URL=ldaps://dc.corp.local         ldap:// + EXT_LDAP_START_TLS=true also works
+#   EXT_LDAP_BASE_DN=DC=corp,DC=local
+#   EXT_LDAP_BIND_DN=CN=svc-janus,CN=Users,DC=corp,DC=local   (read-only service account)
+#   EXT_LDAP_BIND_PASSWORD=...
+# Active Directory (sAMAccountName login, UPN too, groups of groups):
+#   EXT_LDAP_USERNAME_ATTR=sAMAccountName
+#   EXT_LDAP_USER_BASE_DN=CN=Users,DC=corp,DC=local
+#   EXT_LDAP_USER_FILTER=(&(objectClass=user)(|(sAMAccountName={username})(userPrincipalName={username})))
+#   EXT_LDAP_NESTED_GROUPS=true
+# Roles map a directory group (by its name) to a set of permissions: edit them in the UI
+# (Admin > Roles) to use your own group names. Users and groups are then managed in the
+# directory, not in Janus-Ops; the break-glass account keeps working if the directory is down.
+x-external-directory: &external
+  JANUS_LDAP_URL: ${EXT_LDAP_URL:?set EXT_LDAP_URL}
+  JANUS_LDAP_BASE_DN: ${EXT_LDAP_BASE_DN:?set EXT_LDAP_BASE_DN}
+  JANUS_LDAP_BIND_DN: ${EXT_LDAP_BIND_DN:?set EXT_LDAP_BIND_DN}
+  JANUS_LDAP_BIND_PASSWORD: ${EXT_LDAP_BIND_PASSWORD:?set EXT_LDAP_BIND_PASSWORD}
+  JANUS_LDAP_USERNAME_ATTR: ${EXT_LDAP_USERNAME_ATTR:-uid}
+  JANUS_LDAP_USER_BASE_DN: ${EXT_LDAP_USER_BASE_DN:-}
+  JANUS_LDAP_USER_FILTER: ${EXT_LDAP_USER_FILTER:-(&(objectClass=person)(uid={username}))}
+  JANUS_LDAP_START_TLS: ${EXT_LDAP_START_TLS:-false}
+  JANUS_LDAP_NESTED_GROUPS: ${EXT_LDAP_NESTED_GROUPS:-false}
+  JANUS_LDAP_GROUP_BASE_DN: ${EXT_LDAP_GROUP_BASE_DN:-}
+  JANUS_LDAP_CA_FILE: ${EXT_LDAP_CA_FILE:-}
+  # no user administration from the UI: the directory is not ours
+  JANUS_LLDAP_HTTP_URL: !reset null
+  JANUS_LDAP_MANAGER_PASSWORD: !reset null
+
+services:
+  janus-ops:
+    environment: *external
+  setup:
+    environment: *external
+    depends_on: !override
+      db:
+        condition: service_healthy
+  ldap:
+    profiles: [sidecar]
+  ldap-init:
+    profiles: [sidecar]

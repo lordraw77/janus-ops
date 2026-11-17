@@ -41,6 +41,21 @@ class Settings(BaseSettings):
         default="(&(objectClass=person)(uid={username}))",
         description="{username} is replaced by the escaped login name",
     )
+    ldap_username_attr: str = Field(
+        default="uid",
+        pattern=r"^[A-Za-z][A-Za-z0-9-]{0,63}$",
+        description="Attribute with the login name: uid (lldap, OpenLDAP), sAMAccountName (AD)",
+    )
+    ldap_start_tls: bool = Field(
+        default=False, description="Upgrade an ldap:// connection with StartTLS (verified)"
+    )
+    ldap_nested_groups: bool = Field(
+        default=False,
+        description="Active Directory: also resolve groups of groups (matching rule in chain)",
+    )
+    ldap_group_base_dn: str | None = Field(
+        default=None, description="Where groups live for nested lookups; default the base DN"
+    )
     ldap_bind_dn: str | None = Field(default=None, description="Read-only service account")
     ldap_bind_password: SecretStr | None = None
     ldap_timeout_s: int = Field(default=5, ge=1, le=60)  # ldap3 needs whole seconds
