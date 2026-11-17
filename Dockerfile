@@ -26,9 +26,33 @@ RUN go mod download
 COPY agent/ ./
 ARG VERSION=dev
 RUN for arch in amd64 arm64 arm; do \
-      CGO_ENABLED=0 GOOS=linux GOARCH=$arch GOARM=7 go build -trimpath \
+      CGO_ENABLED=0 GOOS=linux GOARCH=$arch GOARM=7 go build -trimpath -buildvcs=false \
         -ldflags "-s -w -X main.version=${VERSION}" \
         -o /out/janus-agent-linux-$arch ./cmd/janus-agent; \
+    done
+
+# Signatures made offline with the release key (`make agent/sign`, committed in agent/release/) ship
+# next to the binaries, which is what lets the server push signed updates (FR-84). The build is
+# reproducible, so a signature made on the release machine matches these exact bytes; the build refuses
+# a signature for other bytes or another version. With REQUIRE_SIGNED=true (CI on release tags) it
+# also refuses to build without one. The private key never enters the build.
+ARG REQUIRE_SIGNED=false
+RUN set -eu; \
+    for arch in amd64 arm64 arm; do \
+      bin=/out/janus-agent-linux-$arch; sig=release/janus-agent-linux-$arch.sig; \
+      if [ ! -f "$sig" ]; then \
+        if [ "$REQUIRE_SIGNED" = "true" ]; then \
+          echo "no signature for $arch: run 'make agent/sign' and commit agent/release/" >&2; exit 1; \
+        fi; \
+        echo "no signature for $arch: this image will not be able to update agents"; continue; \
+      fi; \
+      want=$(grep -o '"sha256": *"[0-9a-f]*"' "$sig" | grep -o '[0-9a-f]\{64\}'); \
+      ver=$(grep -o '"version": *"[^"]*"' "$sig" | sed 's/.*: *"\(.*\)"/\1/'); \
+      have=$(sha256sum "$bin" | cut -d' ' -f1); \
+      if [ "$want" != "$have" ] || [ "$ver" != "${VERSION}" ]; then \
+        echo "the signature for $arch is for other bytes or another version ($ver, want ${VERSION}): run 'make agent/sign'" >&2; exit 1; \
+      fi; \
+      cp "$sig" "$bin.sig"; \
     done
 
 # ---------------------------------------------------------------- Python virtualenv

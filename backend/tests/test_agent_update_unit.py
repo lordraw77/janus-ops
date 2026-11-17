@@ -149,3 +149,40 @@ def test_update_all_is_declared_before_the_node_routes() -> None:
 
     paths = [r.path for r in router.routes]  # type: ignore[attr-defined]
     assert "/agents/update-all" in paths
+
+
+def test_cli_verify_accepts_good_signatures_and_refuses_the_rest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    key_file = tmp_path / "release.pem"
+    assert cli.main(["agent-keygen", "--private-key", str(key_file)]) == 0
+    pub = capsys.readouterr().out.strip().splitlines()[-1]
+    (tmp_path / "janus-agent-linux-amd64").write_bytes(b"amd64 build")
+    (tmp_path / "janus-agent-linux-arm").write_bytes(b"arm build")
+    sign = ["agent-sign", "--private-key", str(key_file), "--dir", str(tmp_path)]
+    assert cli.main([*sign, "--agent-version", "1.2.3"]) == 0
+    capsys.readouterr()
+    verify = ["agent-verify", "--dir", str(tmp_path), "--public-key", pub]
+    assert cli.main(verify) == 0
+    assert cli.main([*verify, "--agent-version", "1.2.3"]) == 0
+    assert cli.main([*verify, "--agent-version", "9.9.9"]) == 1  # signed as another version
+    other = (
+        Ed25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    )
+    assert (
+        cli.main(
+            [
+                "agent-verify",
+                "--dir",
+                str(tmp_path),
+                "--public-key",
+                base64.b64encode(other).decode(),
+            ]
+        )
+        == 1
+    )
+    (tmp_path / "janus-agent-linux-arm").write_bytes(b"tampered")
+    assert cli.main(verify) == 1  # the binary is not the signed one
+    assert cli.main(["agent-verify", "--dir", str(tmp_path / "empty"), "--public-key", pub]) == 1

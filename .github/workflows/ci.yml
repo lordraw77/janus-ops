@@ -102,7 +102,10 @@ jobs:
         with:
           context: .
           platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-          build-args: VERSION=${{ steps.version.outputs.version }}
+          # on a release tag the agent signatures (made offline, agent/release/) are mandatory
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            REQUIRE_SIGNED=${{ github.ref_type == 'tag' }}
           push: ${{ github.ref_type == 'tag' }}
           tags: |
             lordraw77/janus-ops:${{ steps.version.outputs.version }}

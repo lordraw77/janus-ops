@@ -42,6 +42,13 @@ def _build_parser() -> argparse.ArgumentParser:
     sg.add_argument("--private-key", required=True)
     sg.add_argument("--dir", required=True, help="directory with janus-agent-linux-<arch>")
     sg.add_argument("--agent-version", required=True, help="version of these binaries, e.g. 0.3.0")
+    vf = sub.add_parser(
+        "agent-verify",
+        help="check the signed agent binaries in a directory against the release public key",
+    )
+    vf.add_argument("--dir", required=True, help="directory with janus-agent-linux-<arch> + .sig")
+    vf.add_argument("--public-key", required=True, help="base64 ed25519 release public key")
+    vf.add_argument("--agent-version", help="also require exactly this version")
     bg = sub.add_parser(
         "breakglass", help="create the break-glass admin account or rotate its password"
     )
@@ -82,6 +89,28 @@ def _release_command(args: argparse.Namespace) -> int:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     from janus_ops.agents import update
+
+    if args.command == "agent-verify":
+        failed = checked = 0
+        for arch in update.ARCHES:
+            if not (Path(args.dir) / update.BINARY.format(arch=arch)).is_file():
+                continue
+            checked += 1
+            try:
+                release = update.load_release(Path(args.dir), arch, args.public_key)
+            except update.UpdateError as exc:
+                print(f"FAIL {arch}: {exc.code}")
+                failed += 1
+                continue
+            if args.agent_version and release.version != args.agent_version:
+                print(f"FAIL {arch}: signed as {release.version}, expected {args.agent_version}")
+                failed += 1
+                continue
+            print(f"ok   {arch} {release.version} sha256={release.sha256[:16]}…")
+        if not checked:
+            print("janus-ops: no agent binaries found", file=sys.stderr)
+            return 1
+        return 1 if failed else 0
 
     key_path = Path(args.private_key)
     if args.command == "agent-keygen":
@@ -193,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         print(__version__)
         return 0
 
-    if args.command in ("agent-keygen", "agent-sign"):
+    if args.command in ("agent-keygen", "agent-sign", "agent-verify"):
         return _release_command(args)
 
     # Imported lazily so `version` works without any configuration

@@ -44,7 +44,7 @@ agent/test: ## Agent: gofmt check, vet and tests
 .PHONY: agent/build
 agent/build: ## Agent: static binaries for amd64, arm64 and arm (32-bit Raspberry Pi) in agent/dist
 	for arch in amd64 arm64 arm; do \
-	  cd $(CURDIR)/agent && GOOS=linux GOARCH=$$arch GOARM=7 $(GO) build -trimpath \
+	  cd $(CURDIR)/agent && GOOS=linux GOARCH=$$arch GOARM=7 $(GO) build -trimpath -buildvcs=false \
 	    -ldflags "-s -w -X main.version=$(VERSION)" -o dist/janus-agent-linux-$$arch ./cmd/janus-agent; \
 	done
 
@@ -55,6 +55,8 @@ agent/sign: agent/build ## Build the agent and sign agent/dist with secrets/rele
 	@test -f secrets/release/release.pem || { echo "no release key: put it in secrets/release/release.pem" >&2; exit 1; }
 	cd backend && uv run janus-ops agent-sign --private-key ../secrets/release/release.pem \
 	  --dir ../agent/dist --agent-version $(VERSION)
+	mkdir -p agent/release && cp agent/dist/*.sig agent/release/
+	@echo "signatures copied to agent/release/: commit them (they are public) and release"
 
 .PHONY: test/integration
 test/integration: ## Integration tests against a throwaway TimescaleDB container

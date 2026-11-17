@@ -26,19 +26,31 @@ password manager or on an encrypted disk, and make a backup: **if the key is los
 reinstalled with a new one**; if it leaks, the same holds and the leaked key can run code as root on every
 node until then.
 
-## Every release: build, sign, publish
+## Every release
 
-    make agent/sign                                # build + sign with secrets/release/release.pem (version from __init__.py)
-    # or by hand, from any machine with Docker:
-    make agent/build VERSION=0.4.1                 # agent/dist/janus-agent-linux-{amd64,arm64,arm}
-    docker run --rm -v "$PWD/agent/dist:/dist" -v "$HOME/release.pem:/key:ro" \
-      lordraw77/janus-ops:0.4.0 \
-      agent-sign --private-key /key --dir /dist --agent-version 0.4.1
+The agent ships **inside the image** of each Janus-Ops version, so the signatures must ship with it, but
+the private key must never enter CI or the image. That works because the agent build is reproducible
+(`-trimpath -buildvcs=false`, pinned Go image): the binaries built on the release machine and the ones
+built by the image are bit-for-bit the same, so a signature made on the release machine is valid for the
+image's binaries. The signatures are public data and live in git.
 
-The image's entrypoint is `janus-ops`, so only the subcommand follows the image name. This writes a `janus-agent-linux-<arch>.sig` next to each binary (version, architecture, SHA-256 and the
-signature over them). Copy the `dist` directory to the server and mount it with
-`deploy/compose.release.yaml` (`JANUS_AGENT_RELEASE_DIR=/path/to/dist`). The key never has to be on the
-server: only the binaries and the `.sig` files are.
+1. Bump `__version__` in `backend/src/janus_ops/__init__.py`, merge, and make sure `main` is what you release.
+2. `make agent/sign` builds the agent and signs it with `secrets/release/release.pem`, then copies the
+   `.sig` files to **`agent/release/`**. Commit and push that directory.
+3. `make release` (`scripts/release.sh`) checks that `agent/release/` is signed for this exact version and
+   verifies the signatures against the public key (`agent-verify`) **before** it creates the tag, then pushes
+   the tag.
+4. CI builds the image with `REQUIRE_SIGNED=true`: the `Dockerfile` compares each signature's SHA-256 and
+   version with the binary it just built and refuses to build on any mismatch or missing signature. A build
+   without that flag (a developer `docker build`) still works, but the image cannot update agents and says so.
+
+`janus-ops agent-verify --dir <dir> --public-key <key> [--agent-version X]` checks a directory of binaries
+and `.sig` files by hand, for example inside a published image:
+
+    docker run --rm lordraw77/janus-ops:0.4.1 agent-verify --dir /app/agent --public-key "$JANUS_AGENT_RELEASE_PUBLIC_KEY"
+
+A server that runs the new image already has the signed agents in `/app/agent`: nothing to mount. (The
+`compose.release.yaml` override is only for signing by hand or testing a build that is not an image.)
 
 ## Roll out
 
