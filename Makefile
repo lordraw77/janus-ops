@@ -48,6 +48,14 @@ agent/build: ## Agent: static binaries for amd64, arm64 and arm (32-bit Raspberr
 	    -ldflags "-s -w -X main.version=$(VERSION)" -o dist/janus-agent-linux-$$arch ./cmd/janus-agent; \
 	done
 
+# The release key lives in secrets/release/release.pem: a git-ignored folder that is also outside
+# the Docker build context (see docs/AGENT_RELEASE.md). Never commit it, never mount it into the stack.
+.PHONY: agent/sign
+agent/sign: agent/build ## Build the agent and sign agent/dist with secrets/release/release.pem
+	@test -f secrets/release/release.pem || { echo "no release key: put it in secrets/release/release.pem" >&2; exit 1; }
+	cd backend && uv run janus-ops agent-sign --private-key ../secrets/release/release.pem \
+	  --dir ../agent/dist --agent-version $(VERSION)
+
 .PHONY: test/integration
 test/integration: ## Integration tests against a throwaway TimescaleDB container
 	scripts/integration-test.sh

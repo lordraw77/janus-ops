@@ -5,6 +5,16 @@ only the **public** key (`JANUS_AGENT_RELEASE_PUBLIC_KEY`, written into each age
 and distributes the signed files; it cannot forge a signature. For this to mean anything the **private
 key must not live on the Janus-Ops server**: keep it on the workstation or machine you release from.
 
+## Where the key lives in this repository
+
+`secrets/release/release.pem` (folder mode 700, file 600). The folder is ignored by git (`**/secrets/` in
+`.gitignore`) and is outside the Docker build context (`.dockerignore` admits only `agent/`, `backend/`,
+`frontend/` and `res/`, and excludes `*.pem`), so it cannot end up in a commit or in an image. `make
+agent/sign` builds the agent and signs `agent/dist` with it. If this checkout is also the machine that runs
+the stack, the key sits on the same host as the server: acceptable while you release from here, but
+anyone who can read that folder can sign agents, so keep a copy elsewhere and move the key to the release
+machine (or CI) when releases happen from somewhere else.
+
 ## One time: create the key
 
     docker run --rm -v "$PWD:/out" lordraw77/janus-ops:0.4.0 \
@@ -18,6 +28,8 @@ node until then.
 
 ## Every release: build, sign, publish
 
+    make agent/sign                                # build + sign with secrets/release/release.pem (version from __init__.py)
+    # or by hand, from any machine with Docker:
     make agent/build VERSION=0.4.1                 # agent/dist/janus-agent-linux-{amd64,arm64,arm}
     docker run --rm -v "$PWD/agent/dist:/dist" -v "$HOME/release.pem:/key:ro" \
       lordraw77/janus-ops:0.4.0 \
