@@ -82,6 +82,7 @@ jobs:
         run: |
           version="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/janus_ops/__init__.py)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
             echo "::error::tag $GITHUB_REF_NAME does not match __version__ $version"
             exit 1
@@ -108,7 +109,18 @@ jobs:
             REQUIRE_SIGNED=${{ github.ref_type == 'tag' }}
           push: ${{ github.ref_type == 'tag' }}
           tags: |
-            lordraw77/janus-ops:${{ steps.version.outputs.version }}
-            lordraw77/janus-ops:latest
+            lordraw/janus-ops:${{ steps.version.outputs.version }}
+            lordraw/janus-ops:${{ steps.version.outputs.minor }}
+            lordraw/janus-ops:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Docker Hub overview
+        if: github.ref_type == 'tag'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: lordraw/janus-ops
+          short-description: "One portal for your infrastructure: monitoring, containers, Proxmox, SSH, Ansible, AI."
+          readme-filepath: docs/dockerhub/OVERVIEW.md

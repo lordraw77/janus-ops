@@ -268,7 +268,7 @@ all its sessions; every use is audited and logged as a warning.
 | `make test` | Backend unit tests |
 | `make test/integration` | Schema and sign-in tests against throwaway TimescaleDB and lldap containers |
 | `make run` / `make run/ui` | Backend on :8000 (needs `JANUS_DATABASE_URL`) / Next.js dev server on :3000 |
-| `make docker/build` | Build `lordraw77/janus-ops:<version>` |
+| `make docker/build` | Build `lordraw/janus-ops:<version>` |
 | `make breakglass` | Create the break-glass admin or rotate its password |
 | `make release` | Tag `v<version>`; CI then publishes the multi-arch image to Docker Hub |
 
@@ -337,7 +337,7 @@ Implementation plan, ADRs and roadmap: [docs/PLAN.md](docs/PLAN.md)
 | Workers | Async task queue + scheduler (see ADR in [docs/PLAN.md](docs/PLAN.md)) |
 | Integrations | AsyncSSH, aiodocker / Docker Engine API, Proxmox VE REST API, pysnmp, ansible-runner |
 | Frontend | Next.js (App Router, static export served by the API), TypeScript, Tailwind CSS v4; later shadcn/ui, TanStack Query, Zustand, ECharts, Monaco, xterm.js, React Flow |
-| Packaging | One image `lordraw77/janus-ops` (amd64/arm64), Docker Compose with Caddy for TLS |
+| Packaging | One image `lordraw/janus-ops` (amd64/arm64), Docker Compose with Caddy for TLS |
 | Agent | Go, `CGO_ENABLED=0` static builds for `linux/amd64`, `linux/arm64` (Windows later) |
 | AI | OpenAI-compatible API to self-hosted models (Ollama / vLLM / SGLang), read-only tool calling |
 
@@ -367,7 +367,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 
 ## Project status & roadmap
 
-> 🚧 **Pre-alpha (0.1.0).** Available today: the single `lordraw77/janus-ops` image, LDAP
+> 🚧 **Pre-alpha (0.1.0).** Available today: the single `lordraw/janus-ops` image, LDAP
 > sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
 > audit log, inventory and credential vault (phase F0), **web SSH bastion** with host key
 > pinning, session recording, SFTP browser, command broadcast and snippets (phase F1),

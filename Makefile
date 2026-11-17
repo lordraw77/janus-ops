@@ -4,7 +4,7 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 VERSION   := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/janus_ops/__init__.py)
-IMAGE     ?= lordraw77/janus-ops
+IMAGE     ?= lordraw/janus-ops
 # COMPOSE_EXTRA adds override files, e.g. the signed agents and the OpenBao of this stack:
 #   make docker/run COMPOSE_EXTRA="-f deploy/compose.release.yaml -f deploy/compose.openbao.yaml"
 COMPOSE_EXTRA ?=

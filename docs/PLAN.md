@@ -11,7 +11,7 @@
 > **v0.3** — **Apache-2.0** licence (A8), **Janus-Ops** brand spelling (C15), favicon and logo variants
 > generated from the master, `res/` as the single design-assets folder (§8). No open questions.
 >
-> **v0.4** — start of F0: single image `lordraw77/janus-ops` (ADR-009, AMEND ADR-006), F0–F3 DDL schema
+> **v0.4** — start of F0: single image `lordraw/janus-ops` (ADR-009, AMEND ADR-006), F0–F3 DDL schema
 > as Alembic migration `0001`, backend/frontend/deploy/CI scaffold, Docker Hub overview
 > (`docs/dockerhub/`). Progress in §5.1.
 >
@@ -412,7 +412,7 @@ janus-ops/
 - **AMEND Architect (v0.4)**: the frontend is built with `output: 'export'` (static files) and served by the FastAPI process, not by a Next.js server — to allow the single image (ADR-009). Consequences: no SSR, Server Actions or dynamic routes without `generateStaticParams`; detail pages will use query-string parameters or client-side routing. No requirement depends on it, because with (a) all the rendering was already client-side.
 
 **ADR-009 — Packaging: single image**
-- *Context*: a single Docker Hub repository (`lordraw77/janus-ops`) and a simple deploy for air-gapped environments.
+- *Context*: a single Docker Hub repository (`lordraw/janus-ops`) and a simple deploy for air-gapped environments.
 - *Options*: (a) **single image**: API + exported UI, the same image also for `migrate` and for the future workers (different command) — one artefact, one version; (b) separate `-api` and `-frontend` images — they scale separately, but two repositories and an extra Node container with no benefit, since the UI does no SSR.
 - *Decision*: **(a)**. Multi-stage build: Node 24 for the UI export → uv for the virtualenv → `python:3.12-slim` runtime, non-root user `10001`.
 - *Consequences*: TLS outside the image (Caddy in the reference stack); the future roles (worker, scheduler, agent-gateway) will be subcommands of `janus-ops` on the same image; the agent binaries (F2) can be included in the image for the air-gapped auto-update.

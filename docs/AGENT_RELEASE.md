@@ -17,7 +17,7 @@ machine (or CI) when releases happen from somewhere else.
 
 ## One time: create the key
 
-    docker run --rm -v "$PWD:/out" lordraw77/janus-ops:0.5.0 \
+    docker run --rm -v "$PWD:/out" lordraw/janus-ops:0.5.0 \
       agent-keygen --private-key /out/release.pem
 
 It prints the public key. Put it in `deploy/.env` as `JANUS_AGENT_RELEASE_PUBLIC_KEY`, then reinstall each
@@ -47,7 +47,7 @@ image's binaries. The signatures are public data and live in git.
 `janus-ops agent-verify --dir <dir> --public-key <key> [--agent-version X]` checks a directory of binaries
 and `.sig` files by hand, for example inside a published image:
 
-    docker run --rm lordraw77/janus-ops:0.4.1 agent-verify --dir /app/agent --public-key "$JANUS_AGENT_RELEASE_PUBLIC_KEY"
+    docker run --rm lordraw/janus-ops:0.4.1 agent-verify --dir /app/agent --public-key "$JANUS_AGENT_RELEASE_PUBLIC_KEY"
 
 A server that runs the new image already has the signed agents in `/app/agent`: nothing to mount. (The
 `compose.release.yaml` override is only for signing by hand or testing a build that is not an image.)
