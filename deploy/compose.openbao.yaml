@@ -1,0 +1,44 @@
+# An OpenBao in the stack, as the home of the master key (FR-86). Use together with compose.yaml:
+#   scripts/openbao-setup.sh      first time: keys, certificates, init, Transit/KV, AppRole, .env
+#   docker compose -f compose.yaml -f compose.openbao.yaml up -d
+# It unseals itself after a restart (static key, see openbao/openbao.hcl and docs/OPENBAO.md).
+services:
+  openbao:
+    image: openbao/openbao:2.4.1
+    restart: unless-stopped
+    command: ["server"]
+    # the image's own user: uid 100, gid 1000 (the files in secrets/openbao belong to it)
+    user: "100:1000"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      BAO_ADDR: https://127.0.0.1:8200
+      BAO_CACERT: /openbao/tls/ca.crt
+    volumes:
+      - openbao_data:/openbao/file
+      - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - ./secrets/openbao/seal.key:/openbao/secrets/seal.key:ro
+      - ./secrets/openbao/tls:/openbao/tls:ro
+    healthcheck:
+      # exit 0 = initialised and unsealed; 2 = sealed; 1 = not reachable
+      test: ["CMD", "bao", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: [backend]
+
+  janus-ops:
+    environment:
+      JANUS_BAO_ADDR: ${JANUS_BAO_ADDR:-https://openbao:8200}
+      JANUS_BAO_CA_FILE: /etc/janus-ops/openbao-ca.crt
+    volumes:
+      - ./secrets/openbao/tls/ca.crt:/etc/janus-ops/openbao-ca.crt:ro
+    depends_on:
+      openbao:
+        condition: service_healthy
+
+volumes:
+  openbao_data:

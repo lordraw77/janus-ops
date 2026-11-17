@@ -5,7 +5,10 @@ SHELL := /usr/bin/env bash
 
 VERSION   := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/janus_ops/__init__.py)
 IMAGE     ?= lordraw77/janus-ops
-COMPOSE   := docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml --env-file deploy/.env
+# COMPOSE_EXTRA adds override files, e.g. the signed agents and the OpenBao of this stack:
+#   make docker/run COMPOSE_EXTRA="-f deploy/compose.release.yaml -f deploy/compose.openbao.yaml"
+COMPOSE_EXTRA ?=
+COMPOSE   := docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml $(COMPOSE_EXTRA) --env-file deploy/.env
 
 .PHONY: help
 help: ## Show this help
