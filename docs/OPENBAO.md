@@ -1,35 +1,37 @@
-# OpenBao nella stack: la chiave master fuori da Janus-Ops (FR-86)
+# OpenBao in the stack: the master key outside Janus-Ops (FR-86)
 
-`deploy/compose.openbao.yaml` aggiunge un OpenBao (storage raft, TLS interno) che si **sblocca da solo**
-a ogni riavvio con una chiave statica (`seal "static"`). Janus-Ops lo usa come motore Transit (la chiave
-master non esce mai da OpenBao) o come KV v2.
+`deploy/compose.openbao.yaml` adds an OpenBao (raft storage, internal TLS) that **unseals itself**
+on every restart with a static key (`seal "static"`). Janus-Ops uses it as the Transit engine (the
+master key never leaves OpenBao) or as KV v2.
 
-## Prima volta
+## First time
 
-    scripts/openbao-setup.sh                      # chiavi, certificati, init, Transit, KV, AppRole, .env
-    make docker/run COMPOSE_EXTRA="-f deploy/compose.openbao.yaml"   # (con il tuo elenco di override)
+    scripts/openbao-setup.sh                      # keys, certificates, init, Transit, KV, AppRole, .env
+    make docker/run COMPOSE_EXTRA="-f deploy/compose.openbao.yaml"   # (with your own list of overrides)
     docker compose ... exec janus-ops janus-ops secrets migrate --to openbao-transit
-    # poi in deploy/.env: JANUS_SECRET_BACKEND=openbao-transit, e ricrea janus-ops
+    # then in deploy/.env: JANUS_SECRET_BACKEND=openbao-transit, and recreate janus-ops
 
-Lo script è idempotente e non stampa segreti. Scrive in `deploy/secrets/openbao/` (ignorata da git):
-`seal.key` (chiave di unseal), `tls/` (CA e certificato), `init.json` (chiave di recupero; il root token
-viene revocato a fine setup) e in `deploy/.env` i valori `JANUS_BAO_*` (role id e secret id dell'AppRole).
+The script is idempotent and prints no secrets. It writes to `deploy/secrets/openbao/` (ignored by git):
+`seal.key` (the unseal key), `tls/` (CA and certificate), `init.json` (the recovery key; the root token
+is revoked at the end of the setup) and, in `deploy/.env`, the `JANUS_BAO_*` values (the AppRole's role id
+and secret id).
 
-## Cosa protegge e cosa no
+## What it protects and what it does not
 
-- La chiave di unseal sta **sullo stesso host** dei dati: protegge da una copia del solo volume dati o
-  da un backup, non da chi controlla l'host. È il prezzo dello sblocco automatico (OpenBao lo sconsiglia
-  se non c'è già un'altra radice di fiducia). Alternativa più forte: unseal manuale con chiavi Shamir
-  custodite da persone, o un KMS esterno, con il costo di un intervento a ogni riavvio.
-- **Fai il backup** di `deploy/secrets/openbao/` (soprattutto `seal.key` e `init.json`) **separatamente**
-  dal volume `openbao_data` e dal dump del DB: senza la chiave di unseal i dati di OpenBao, e quindi tutti i
-  segreti in Transit, sono persi. Snapshot dei dati: `bao operator raft snapshot save`.
-- Rotazione della chiave Transit: `bao write -f transit/keys/janus-kek/rotate`; i vecchi segreti restano
-  leggibili. Nuovo secret id dell'app: `scripts/openbao-setup.sh --new-secret-id` e ricrea janus-ops.
+- The unseal key lives on the **same host** as the data: it protects against a copy of the data volume
+  alone, or a backup, not against whoever controls the host. This is the price of automatic unsealing
+  (OpenBao advises against it unless another root of trust already exists). A stronger alternative:
+  manual unsealing with Shamir keys held by people, or an external KMS, at the cost of an intervention
+  on every restart.
+- **Back up** `deploy/secrets/openbao/` (above all `seal.key` and `init.json`) **separately** from the
+  `openbao_data` volume and from the database dump: without the unseal key the OpenBao data, and therefore
+  every secret in Transit, is lost. Data snapshot: `bao operator raft snapshot save`.
+- Transit key rotation: `bao write -f transit/keys/janus-kek/rotate`; old secrets stay readable. New
+  secret id for the app: `scripts/openbao-setup.sh --new-secret-id`, then recreate janus-ops.
 
-## Se OpenBao non c'è
+## If OpenBao is not there
 
-Credenziali, canali di notifica e TOTP non si leggono: le funzioni che li usano rispondono
-`vault_unavailable` e `/api/v1/ready` mostra `secret_manager: unreachable`. Il login con password senza
-TOTP e l'account break-glass continuano a funzionare. Tornare indietro:
-`janus-ops secrets migrate --to local` (serve `JANUS_SECRET_KEY` ancora impostata).
+Credentials, notification channels and TOTP cannot be read: the functions that use them answer
+`vault_unavailable` and `/api/v1/ready` shows `secret_manager: unreachable`. Password login without TOTP
+and the break-glass account keep working. To go back: `janus-ops secrets migrate --to local`
+(`JANUS_SECRET_KEY` must still be set).

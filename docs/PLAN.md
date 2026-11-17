@@ -1,273 +1,294 @@
-# Janus-Ops — Analisi & Piano di Implementazione
+# Janus-Ops — Analysis & Implementation Plan
 
-> Documento di pianificazione derivato da [specs.md](specs.md).
-> Stato: **bozza v0.2 — 2026-11-13**. Le decisioni marcate `OPEN` attendono conferma.
+> Planning document derived from [specs.md](specs.md).
+> Status: **draft v0.2 — 2026-11-13**. Decisions marked `OPEN` await confirmation.
 >
-> **v0.2** — integrate le risposte alle domande aperte: scala confermata (A2), LDAP come directory
-> sidecar nello stack (A5 → ADR-008), Windows fuori dall'MVP (A4), AI su modelli self-hosted esterni
-> con accesso a tutti i dati operativi (A6), licenza TimescaleDB verificata (C12). Aggiunta analisi del
+> **v0.2** — integrated the answers to the open questions: scale confirmed (A2), LDAP as a sidecar
+> directory in the stack (A5 → ADR-008), Windows out of the MVP (A4), AI on external self-hosted models
+> with access to all operational data (A6), TimescaleDB licence verified (C12). Added the analysis of the
 > `janusops-design-kit/` (§8).
 >
-> **v0.3** — licenza **Apache-2.0** (A8), grafia del brand **Janus-Ops** (C15), favicon e varianti del
-> logo generate dal master, `res/` come unica cartella degli asset di design (§8). Nessuna domanda aperta.
+> **v0.3** — **Apache-2.0** licence (A8), **Janus-Ops** brand spelling (C15), favicon and logo variants
+> generated from the master, `res/` as the single design-assets folder (§8). No open questions.
 >
-> **v0.4** — avvio F0: immagine unica `lordraw77/janus-ops` (ADR-009, AMEND ADR-006), schema DDL
-> F0–F3 come migrazione Alembic `0001`, scaffold backend/frontend/deploy/CI, overview Docker Hub
-> (`docs/dockerhub/`). Avanzamento in §5.1.
+> **v0.4** — start of F0: single image `lordraw77/janus-ops` (ADR-009, AMEND ADR-006), F0–F3 DDL schema
+> as Alembic migration `0001`, backend/frontend/deploy/CI scaffold, Docker Hub overview
+> (`docs/dockerhub/`). Progress in §5.1.
 >
-> **v0.5** — login LDAP con username e password, ruoli dai gruppi, sessioni, break-glass, audit con
-> hash chain, pagina di login (AC-02, AC-02b, AC-02c verificati). Dettagli implementativi in ADR-008.
+> **v0.5** — LDAP login with username and password, roles from groups, sessions, break-glass, audit with
+> hash chain, login page (AC-02, AC-02b, AC-02c verified). Implementation details in ADR-008.
 >
-> **v0.6** — amministratore iniziale da `.env`; gestione utenti dalla UI (lldap via `janus-manager`);
-> ruoli configurabili con permessi (ADR-010), incluso chi legge l'audit log; viewer dell'audit;
-> **TOTP opzionale** per utente, funzionante dietro proxy aziendale e air-gapped.
+> **v0.6** — initial administrator from `.env`; user management from the UI (lldap through `janus-manager`);
+> configurable roles with permissions (ADR-010), including who reads the audit log; audit viewer;
+> **optional TOTP** per user, working behind a corporate proxy and air-gapped.
 >
-> **v0.7** — inventory (nodi, tag, gruppi, capability) e vault credenziali (ADR-004 implementato):
-> **fase F0 completata**, AC-01 verificato. Migrazione `0003`, permessi `inventory.*` e
-> `credentials.manage`.
+> **v0.7** — inventory (nodes, tags, groups, capabilities) and credential vault (ADR-004 implemented):
+> **phase F0 completed**, AC-01 verified. Migration `0003`, `inventory.*` and
+> `credentials.manage` permissions.
 >
-> **v0.8** — F1 avviata: bastion SSH web (xterm.js ⇄ WebSocket ⇄ AsyncSSH) con credenziali dal
-> vault, jump host, pinning delle host key (TOFU), registrazione e replay delle sessioni,
-> permesso `ssh.connect`, migrazione `0004`. AC-03 verificato.
+> **v0.8** — F1 started: web SSH bastion (xterm.js ⇄ WebSocket ⇄ AsyncSSH) with credentials from the
+> vault, jump host, host-key pinning (TOFU), session recording and replay,
+> `ssh.connect` permission, migration `0004`. AC-03 verified.
 >
-> **v0.9** — roadmap: segreti e chiavi in un secret manager esterno (OpenBao, HashiCorp Vault o
-> simili), FR-86 promosso da WON'T a SHOULD, proposta in ADR-011.
+> **v0.9** — roadmap: secrets and keys in an external secret manager (OpenBao, HashiCorp Vault or
+> similar), FR-86 promoted from WON'T to SHOULD, proposed in ADR-011.
 >
-> **v0.10** — **fase F1 completata**: browser SFTP (FR-11), broadcast dei comandi su più terminali
-> e libreria di snippet (FR-12). Migrazione `0005` (tabella `snippet`), permessi `sftp.transfer`
-> (operator) e `snippets.manage` (solo admin di default). Migrazione `0006`: credenziale
-> Proxmox con utente e password (`proxmox_password`, utente con realm `root@pam`), oltre al token API.
+> **v0.10** — **phase F1 completed**: SFTP browser (FR-11), command broadcast to several terminals
+> and snippet library (FR-12). Migration `0005` (`snippet` table), `sftp.transfer` permissions
+> (operator) and `snippets.manage` (admin only by default). Migration `0006`: Proxmox credential
+> with user and password (`proxmox_password`, user with realm `root@pam`), besides the API token.
 >
-> **v0.11** — **fase F2**: agent Go (`agent/`, binario statico amd64/arm64), gateway WebSocket,
-> enrollment con token monouso e chiave ed25519 generata sul nodo (AMEND ADR-002), bootstrap via
-> SSH, telemetria con buffer su disco e ingest idempotente in TimescaleDB, dashboard NOC (esagono,
-> node card, "needs attention") e pagina nodo con grafici. Migrazione `0007`, permesso
-> `agents.manage` (operator). Avanzamento in §5.3.
+> **v0.11** — **phase F2**: Go agent (`agent/`, static amd64/arm64 binary), WebSocket gateway,
+> enrollment with a single-use token and an ed25519 key generated on the node (AMEND ADR-002), bootstrap
+> over SSH, telemetry with on-disk buffer and idempotent ingest into TimescaleDB, NOC dashboard (hexagon,
+> node cards, "needs attention") and node page with charts. Migration `0007`, `agents.manage`
+> permission (operator). Progress in §5.3.
 >
-> **v0.12** — **fase F3**: motore dei check (agent, metriche, systemd, porte, TCP e HTTP dal server)
-> con isteresi, stati soft/hard e flapping; problemi, ack, downtime, dipendenze padre/figlio;
-> notifiche e-mail (SMTP con o senza login), Telegram, webhook firmato, Discord, Slack, ntfy;
-> discovery dei check. Migrazione `0008`, permessi `monitoring.manage` (operator) e
-> `notifications.manage` (admin). Avanzamento in §5.4.
+> **v0.12** — **phase F3**: check engine (agent, metrics, systemd, ports, TCP and HTTP from the server)
+> with hysteresis, soft/hard states and flapping; problems, ack, downtime, parent/child dependencies;
+> email notifications (SMTP with or without login), Telegram, signed webhook, Discord, Slack, ntfy;
+> check discovery. Migration `0008`, `monitoring.manage` (operator) and
+> `notifications.manage` (admin) permissions. Progress in §5.4.
 >
-> **v0.13** — **fase F4**: container Docker via tunnel dell'agent (stream multiplexati, policy
-> locale `allow_docker`) o via SSH (inoltro del socket Unix); elenco, stack Compose, inspect,
-> log in diretta, statistiche, azioni, exec nel browser. Migrazione `0009`, permessi
-> `containers.manage` e `containers.exec` (operator). Avanzamento in §5.5. La vista Containers è
-> una tabella (stato, salute, uptime, riavvii, CPU, memoria, rete, disco, IP, porte
-> pubblicate, stack) con ricerca, filtri e ordinamento.
+> **v0.13** — **phase F4**: Docker containers through the agent tunnel (multiplexed streams, local
+> `allow_docker` policy) or over SSH (Unix socket forwarding); list, Compose stacks, inspect,
+> live logs, statistics, actions, exec in the browser. Migration `0009`, `containers.manage` and
+> `containers.exec` permissions (operator). Progress in §5.5. The Containers view is
+> a table (state, health, uptime, restarts, CPU, memory, network, disk, IP, published
+> ports, stack) with search, filters and sorting.
 >
-> **v0.14** — **fase F5**: Proxmox VE. Client async httpx (ADR C4: Proxmoxer non serve), ticket o
-> token API dal vault, cluster raggruppati con failover tra i membri, panoramica nodi/storage/VM/LXC,
-> ciclo di vita, snapshot, clone, migrazione, task con log, audit dei backup vzdump/PBS e console
-> xterm.js via termproxy. Migrazione `0010`, permessi `proxmox.manage` e `proxmox.console`
-> (operator). Avanzamento in §5.6.
+> **v0.14** — **phase F5**: Proxmox VE. Async httpx client (ADR C4: Proxmoxer is not needed), ticket or
+> API token from the vault, clusters grouped with failover between members, overview of nodes/storage/VMs/LXCs,
+> lifecycle, snapshot, clone, migration, tasks with logs, vzdump/PBS backup audit and xterm.js
+> console via termproxy. Migration `0010`, `proxmox.manage` and `proxmox.console` permissions
+> (operator). Progress in §5.6.
 >
-> **v0.15** — **ambienti configurabili e ambito dei nodi per ruolo**. Gli ambienti sono una
-> tabella (non più un vincolo fisso): CRUD per gli admin (`environments.manage`). Ogni ruolo vede
-> tutti i nodi oppure solo quelli che soddisfano almeno una regola; una regola combina in AND
-> ambiente, tag, gruppo, capability e nodi specifici; più ruoli si sommano. Applicato a inventory,
-> check, problemi, downtime, dashboard, agent, terminale, SFTP, container, Proxmox e storico delle
-> sessioni; i nodi fuori ambito rispondono 404. Migrazione `0011`. Dettagli in §5.7.
+> **v0.15** — **configurable environments and per-role node scope**. Environments are a
+> table (no longer a fixed constraint): CRUD for admins (`environments.manage`). Each role sees
+> all the nodes or only those that satisfy at least one rule; a rule combines with AND
+> environment, tag, group, capability and specific nodes; several roles add up. Applied to inventory,
+> checks, problems, downtime, dashboard, agent, terminal, SFTP, containers, Proxmox and session
+> history; nodes outside the scope answer 404. Migration `0011`. Details in §5.7.
 >
-> **v0.16** — **F6 — catalogo playbook da più sorgenti**: oltre a Git, i playbook possono arrivare
-> da upload di un file locale, da un editor incorporato nella UI, da una mount di rete (NFS/SMB)
-> o da un host remoto via SFTP/SCP. Ogni sorgente è registrata con il suo tipo; le sorgenti remote
-> usano credenziali dal vault (ADR-004). Le sorgenti sono lette in sola lettura, tranne l'editor e
-> l'upload che scrivono nel catalogo interno. Ulteriori dettagli in §5.8 (decisioni F6).
-> In questa versione chiuso in F5 l'alert dai backup verso il motore F3 (check `backup`); resta
-> aperto il collaudo con un PBS reale.
+> **v0.16** — **F6 — playbook catalogue from several sources**: besides Git, playbooks can come
+> from a local file upload, from an editor built into the UI, from a network mount (NFS/SMB)
+> or from a remote host over SFTP/SCP. Each source is registered with its type; remote sources
+> use credentials from the vault (ADR-004). Sources are read-only, except the editor and
+> the upload, which write to the internal catalogue. Further details in §5.8 (F6 decisions).
+> In this version the alert from the backups to the F3 engine (`backup` check) was closed in F5; testing
+> with a real PBS remains open.
 >
-> **v0.17** — **fase F6 avviata**: backend del catalogo playbook (migrazione `0012`, permessi
-> `ansible.read`, `ansible.manage`, `ansible.run`). Sorgenti git, upload, editor e mount di rete
-> (solo directory elencate in `JANUS_ANSIBLE_MOUNT_ROOTS`); file versionati, diff, run con
-> storico congelato, UI in console. Avanzamento in §5.9.
+> **v0.17** — **phase F6 started**: backend of the playbook catalogue (migration `0012`, permissions
+> `ansible.read`, `ansible.manage`, `ansible.run`). Git, upload, editor and network mount sources
+> (only directories listed in `JANUS_ANSIBLE_MOUNT_ROOTS`); versioned files, diff, runs with a
+> frozen history, UI in the console. Progress in §5.9.
 >
-> **v0.18** — **fase F6 completata** (con verifiche parziali, vedi §5.9): password SSH, jump host
-> (un salto, solo chiave), survey dei playbook (`<nome>.survey.json`, valori congelati nel run),
-> sorgente SFTP in sola lettura con host key TOFU, test d'integrazione dedicati. Migrazione `0013`.
+> **v0.18** — **phase F6 completed** (with partial verifications, see §5.9): SSH password, jump host
+> (one hop, key only), playbook surveys (`<name>.survey.json`, values frozen in the run),
+> read-only SFTP source with TOFU host key, dedicated integration tests. Migration `0013`.
 >
-> **v0.19** — **fase F7 avviata** (ADR-007): Copilot su endpoint OpenAI-compatible self-hosted (https),
-> tool read-only (inventory, metriche, storico check, audit del nodo), diagnosi asincrona su un
-> problem aperto, action plan approvabile o modificabile (`ai.use`, `ai.approve`). Migrazione `0014`.
-> Avanzamento in §5.10.
+> **v0.19** — **phase F7 started** (ADR-007): Copilot on a self-hosted OpenAI-compatible endpoint (https),
+> read-only tools (inventory, metrics, check history, node audit), asynchronous diagnosis of an
+> open problem, approvable or editable action plan (`ai.use`, `ai.approve`). Migration `0014`.
+> Progress in §5.10.
 >
-> **v0.20** — **fase F8 avviata** (§5.11): exec via agent con policy locale `allow_exec` e esecuzione delle
-> azioni approvate del Copilot (`actions.execute`), audit di ogni tentativo. Allineati stato, README e
-> STATE alle fasi F0–F7 già completate.
+> **v0.20** — **phase F8 started** (§5.11): exec through the agent with local `allow_exec` policy and execution of the
+> Copilot's approved actions (`actions.execute`), audit of every attempt. Status, README and
+> STATE aligned with the already completed phases F0–F7.
 >
-> **v0.21** — **F8, GitOps compose** (FR-81, backend): stack da repository https, deploy via agent, webhook firmato, storico dei run, permessi `gitops.manage` e `gitops.deploy`. Migrazione `0015`. Interfaccia web e workflow ancora da fare. Dettagli in §5.11.
+> **v0.21** — **F8, GitOps compose** (FR-81, backend): stacks from an https repository, deploy through the agent, signed webhook, run history, `gitops.manage` and `gitops.deploy` permissions. Migration `0015`. Web interface and workflows still to do. Details in §5.11.
 >
-> **v0.22** — **F8, SNMP v2c/v3** (FR-82): check `snmp` (una lettura GET di un OID numerico dal server,
-> soglie e stati come gli altri check), capability `snmp` con versione, porta, livello di sicurezza e
-> algoritmi v3; credenziali `generic` (community) e `snmp_v3` (utente e passphrase nel vault). Dipendenza
-> `pysnmp` (ADR-012). Nessuna migrazione per SNMP.
+> **v0.22** — **F8, SNMP v2c/v3** (FR-82): `snmp` check (one GET read of a numeric OID from the server,
+> thresholds and states like the other checks), `snmp` capability with version, port, security level and
+> v3 algorithms; `generic` (community) and `snmp_v3` (user and passphrase in the vault) credentials. `pysnmp`
+> dependency (ADR-012). No migration for SNMP.
 >
-> **v0.23** — **catalogo degli OID SNMP** (migrazione `0016`): tabella `snmp_oid` con le voci della guida
-> Synology DiskStation MIB (sistema, dischi, RAID, UPS). Nel form dei check si sceglie un nome dal catalogo;
-> per le colonne di tabella (dischi, pool) si indica il numero dell'istanza. Le voci si aggiungono e si
-> segnano come verificate dalla UI. Lettura con `inventory.read`, modifica con `monitoring.manage`, audit
-> di ogni modifica. Dettagli in §5.11.
+> **v0.23** — **SNMP OID catalogue** (migration `0016`): `snmp_oid` table with the entries of the
+> Synology DiskStation MIB guide (system, disks, RAID, UPS). In the check form you pick a name from the catalogue;
+> for table columns (disks, pools) you give the instance number. Entries are added and
+> marked as verified from the UI. Read with `inventory.read`, edit with `monitoring.manage`, audit
+> of every change. Details in §5.11.
 >
-> **v0.26** — **agent per Raspberry Pi a 32 bit** (`armv7l`, Pi 2 e 3 con sistema a 32 bit): build
-> `GOARCH=arm GOARM=7` nel Makefile e nel Dockerfile, bootstrap che riconosce `armv7l`. Il Pi a 64 bit
-> usa già l'agent `arm64`.
+> **v0.26** — **agent for the 32-bit Raspberry Pi** (`armv7l`, Pi 2 and 3 with a 32-bit system): build
+> `GOARCH=arm GOARM=7` in the Makefile and in the Dockerfile, bootstrap that recognises `armv7l`. The 64-bit Pi
+> already uses the `arm64` agent.
 >
-> Check **service** (systemd via agent): `systemctl is-active <unità>` eseguito dall'agent (serve agent
-> connesso e `allow_exec`). Il comando è fisso, nel parametro c'è solo il nome dell'unità (validato): `active`
-> è ok, `activating`/`reloading` avviso, il resto critico. Il check `systemd` resta per gli unit falliti.
+> **service** check (systemd through the agent): `systemctl is-active <unit>` run by the agent (needs a connected
+> agent and `allow_exec`). The command is fixed, the parameter holds only the (validated) unit name: `active`
+> is ok, `activating`/`reloading` warning, anything else critical. The `systemd` check remains for failed units.
 >
-> Inventario: colonne **Agent** (versione e architettura) e **Installed at** (il percorso del binario,
-> `/usr/local/bin/janus-agent`, o `—` se l'agent non è installato o è revocato). Migrazione `0022`: il
-> vincolo sull'architettura accetta `arm`, altrimenti l'agent di un Pi a 32 bit non potrebbe registrarsi.
+> Inventory: **Agent** (version and architecture) and **Installed at** columns (the path of the binary,
+> `/usr/local/bin/janus-agent`, or `—` if the agent is not installed or is revoked). Migration `0022`: the
+> architecture constraint accepts `arm`, otherwise the agent of a 32-bit Pi could not register.
 >
-> **v0.25** — **F8, workflow** (FR-80, migrazione `0021`): definizioni con trigger manuale, a intervallo e
-> alert; passi exec (via agent), notify (verso un canale di notifica) e approval; approvazioni con rifiuto; i passi fatti non si ripetono.
-> Esecuzione in background con scheduler di 30 secondi. Dettagli in §5.11.
+> **v0.25** — **F8, workflows** (FR-80, migration `0021`): definitions with manual, interval and
+> alert triggers; exec (through the agent), notify (to a notification channel) and approval steps; approvals with rejection; completed steps are not repeated.
+> Background execution with a 30-second scheduler. Details in §5.11.
 >
-> **v0.24** — **SNMP: discovery, tipi di dispositivo, template di check** (migrazioni `0017`, `0018`).
-> Discovery di un nodo SNMP in sola lettura (GETNEXT sotto le radici scelte, al massimo tre, solo
-> sotto `1.3.6.1`, 500 risposte e 60 secondi per radice): i candidati si selezionano e solo allora
-> entrano nel catalogo. Ogni voce del catalogo ha un tipo di dispositivo (nas, ups, switch, router,
-> server, generic). Template di check preconfigurati (`snmp_template`): un NAS Synology di base e un
-> UPS di base; applicarne uno crea i check sul nodo, un check per istanza per le voci di tabella
-> (dischi, pool), e salta i check già presenti.
+> **v0.24** — **SNMP: discovery, device types, check templates** (migrations `0017`, `0018`).
+> Read-only discovery of an SNMP node (GETNEXT under the chosen roots, at most three, only
+> under `1.3.6.1`, 500 responses and 60 seconds per root): candidates are selected and only then
+> enter the catalogue. Each catalogue entry has a device type (nas, ups, switch, router,
+> server, generic). Preconfigured check templates (`snmp_template`): a basic Synology NAS and a basic
+> UPS; applying one creates the checks on the node, one check per instance for table entries
+> (disks, pools), and skips checks that already exist.
+>
+> **v0.27** — **workflows: webhook trigger and conditional branches** (migration `0024`): a signed
+> `POST /workflows/{id}/webhook` starts a run (secret sealed in the vault, shown once, rotation, rate limit);
+> steps may carry a `when` condition on an earlier step and `on_failure: continue`; skipped steps are recorded.
+> Details in §5.11.
+>
+> **v0.28** — **external AD/LDAP (FR-07) and external secret manager (FR-86)**: configurable login attribute
+> (`sAMAccountName`), UPN filter, verified StartTLS, no referrals, nested groups, and
+> `deploy/compose.external-directory.yaml`; master key in OpenBao / Vault Transit (`openbao-transit`) or secret
+> content in KV v2 (`openbao-kv`), `janus-ops secrets status|migrate|prune`, readiness that checks the secret
+> manager. ADR-011 implemented and tested against real OpenBao 2.4.1 and Vault 1.20.
+>
+> **v0.30** — **documents in English, visual workflow editor, release-key procedure**: `PLAN.md`, `specs.md` and `OPENBAO.md`
+> translated; the workflow page gets a visual editor (flow of cards with branch badges, JSON tab, edit of existing
+> workflows) with tested rules in `frontend/lib/workflows.ts` (`npm test`, also in CI); `docs/AGENT_RELEASE.md` describes
+> keeping the release private key off the server and signing from the release image.
+>
+> **v0.29** — **real-node test, OpenBao in the stack, release 0.4.0**: PTY, signed update (single and mass) and
+> rollback tried on real nodes; the systemd unit is no longer sandboxed when a shell is allowed, can replace the
+> agent binary and has a rollback guard that does not depend on the binary; `deploy/compose.openbao.yaml` and
+> `scripts/openbao-setup.sh` run an OpenBao with automatic unseal (`docs/OPENBAO.md`); the live stack runs on it.
 
-**Tier: L** — sistema multi-servizio (backend, worker, frontend, agent Go), integrazioni esterne
-(SSH, Docker, Proxmox, SNMP, LLM), requisiti di sicurezza elevati (esecuzione remota di comandi).
+**Tier: L** — multi-service system (backend, worker, frontend, Go agent), external integrations
+(SSH, Docker, Proxmox, SNMP, LLM), high security requirements (remote command execution).
 
 ---
 
 ## ASSUMPTIONS
 
-Ogni assunzione è versionata. Se viene invalidata, la colonna "Impatta" indica cosa rivedere.
+Every assumption is versioned. If one is invalidated, the "Impacts" column says what to review.
 
-| ID | Assunzione | Impatta |
+| ID | Assumption | Impacts |
 |---|---|---|
-| A1 | Deploy **self-hosted, single-tenant** (una organizzazione per installazione) | Data model, RBAC, ADR-001 |
-| A2 | ✅ *confermata "per il momento"* — Scala MVP: **≤ 500 nodi**, **≤ 20 utenti concorrenti**, un singolo server Janus-Ops (no HA nell'MVP) | ADR-002, ADR-005, sizing Timescale |
-| A3 | Runtime target: **Docker Compose** su un host Linux; k8s non nell'MVP | DevOps, deploy/ |
-| A4 | ✅ *confermata* — Agent MVP solo **Linux amd64/arm64** con systemd; Windows e OpenRC rimandati a F8+ | Agent, bootstrap |
-| A5 | ✅ *rivista v0.2* — Autenticazione MVP: **directory LDAP come container sidecar nello stack** (utenti e gruppi), ruoli Janus mappati sui gruppi LDAP, **TOTP gestito da Janus-Ops, opzionale per utente** (*rivista v0.6*), un account locale *break-glass* per l'emergenza. Collegamento ad AD/LDAP aziendale esterno: SHOULD successivo. Vedi ADR-008 | Auth, F0, deploy |
-| A6 | ✅ *rivista v0.2* — LLM: modelli **self-hosted su host esterni allo stack** (Ollama / vLLM / SGLang), endpoint OpenAI-compatible configurabile; **nessun provider cloud**. All'AI è consentito l'accesso a **tutti i dati operativi** (log, metriche, audit, inventory). Restano esclusi solo i segreti del vault | AI, sicurezza |
-| A7 | Il server Janus-Ops può raggiungere direttamente (o via jump host) le API Proxmox e gli host SSH | F1, F5 |
-| A8 | ✅ *decisa v0.3* — Janus-Ops è rilasciato sotto **Apache-2.0** (`LICENSE`, `NOTICE`). Le dipendenze devono avere una licenza compatibile; per TimescaleDB vedi C12. Ansible (GPLv3) è invocato come processo esterno via ansible-runner (Apache-2.0), non incluso nel codice di Janus-Ops | Supply chain |
+| A1 | **Self-hosted, single-tenant** deployment (one organisation per installation) | Data model, RBAC, ADR-001 |
+| A2 | ✅ *confirmed "for the time being"* — MVP scale: **≤ 500 nodes**, **≤ 20 concurrent users**, a single Janus-Ops server (no HA in the MVP) | ADR-002, ADR-005, Timescale sizing |
+| A3 | Target runtime: **Docker Compose** on a Linux host; k8s not in the MVP | DevOps, deploy/ |
+| A4 | ✅ *confirmed* — MVP agent for **Linux amd64/arm64** with systemd only; Windows and OpenRC postponed to F8+ | Agent, bootstrap |
+| A5 | ✅ *revised v0.2* — MVP authentication: **LDAP directory as a sidecar container in the stack** (users and groups), Janus roles mapped to LDAP groups, **TOTP managed by Janus-Ops, optional per user** (*revised v0.6*), one local *break-glass* account for emergencies. Connection to an external corporate AD/LDAP: later SHOULD. See ADR-008 | Auth, F0, deploy |
+| A6 | ✅ *revised v0.2* — LLM: **self-hosted models on hosts outside the stack** (Ollama / vLLM / SGLang), configurable OpenAI-compatible endpoint; **no cloud provider**. The AI is allowed access to **all operational data** (logs, metrics, audit, inventory). Only the vault secrets stay excluded | AI, security |
+| A7 | The Janus-Ops server can reach the Proxmox APIs and the SSH hosts directly (or through a jump host) | F1, F5 |
+| A8 | ✅ *decided v0.3* — Janus-Ops is released under **Apache-2.0** (`LICENSE`, `NOTICE`). Dependencies must have a compatible licence; for TimescaleDB see C12. Ansible (GPLv3) is invoked as an external process through ansible-runner (Apache-2.0), not included in the Janus-Ops code | Supply chain |
 
 ---
 
-## 1. Analisi critica delle specifiche
+## 1. Critical analysis of the specifications
 
-Punti delle specifiche che vanno corretti, chiariti o ridimensionati prima di scrivere codice.
+Points of the specifications that must be corrected, clarified or scaled down before writing code.
 
-| # | Punto in specs.md | Problema | Proposta |
+| # | Point in specs.md | Problem | Proposal |
 |---|---|---|---|
-| C1 | Scope generale (8 moduli) | Equivale a ricostruire Checkmk + Portainer + PVE UI + Termius + AWX + n8n + Copilot. Senza fasi rigide il progetto non arriva mai a un MVP utilizzabile. | Roadmap a fasi incrementali, ognuna rilasciabile (§5). Ogni modulo parte con un sottoinsieme MUST. |
-| C2 | Agent: "gRPC over HTTP/2 **o** WebSocket" | Due protocolli = doppio costo. gRPC/HTTP2 viene spesso rotto dai proxy aziendali con TLS inspection. | **Solo WSS** su 443 con multiplexing di stream (ADR-002). |
-| C3 | Scheduler: "Taskiq / Celery" + workflow "Temporal o Celery Canvas" | Tre motori candidati per due esigenze. Temporal aggiunge un cluster da gestire. Celery non è nativo async. | Un solo motore async per task + workflow engine interno persistito su Postgres (ADR-003). Temporal rivalutato solo se servono workflow di lunga durata complessi. |
-| C4 | "Proxmoxer (wrapper Python **asincrono**)" | Proxmoxer è sincrono `[VERIFY: supporto async nelle versioni correnti]`. | Client HTTP async (httpx) sottile sulle API REST PVE, oppure proxmoxer in thread pool. Decisione in F5. |
-| C5 | Docker "via tunnel agent **oppure** `ssh://`" con aiodocker | aiodocker non gestisce `ssh://` nativamente `[VERIFY]`. | L'agent espone la Docker Engine API come stream nel tunnel; il backend parla HTTP Docker su quello stream. `ssh://` solo come fallback futuro. |
-| C6 | Proxy con autenticazione **NTLM** | Non supportato dalla stdlib Go; richiede libreria terza `[VERIFY: libreria mantenuta]`. | MVP: proxy senza auth + Basic + CA custom. NTLM come SHOULD in fase successiva. |
-| C7 | Agent: token + certificato CA | Un token statico in chiaro su disco è il solo segreto di autenticazione. | Enrollment con token **monouso** → emissione certificato client per agent (**mTLS**), rotazione periodica. |
-| C8 | Auto-update agent | Distribuire binari a tutta la flotta è un vettore di compromissione di massa. | Binari **firmati** (ed25519) con chiave di release separata dal server; l'agent verifica firma e checksum prima di sostituirsi. |
-| C9 | "Remote Command / Task Executor" nell'agent | Di fatto RCE by design: il server Janus-Ops diventa il bersaglio più critico dell'infrastruttura. | Policy locale sull'agent (`allow_exec`, `allow_pty`, `allow_docker`) che il server non può sovrascrivere; tutto auditato. |
-| C10 | AI RCA su log | I log sono input non fidato → **prompt injection** (un log può contenere istruzioni). | Tool AI read-only; output mai eseguito senza approvazione; i segreti del vault non sono mai esposti ai tool AI; traffico verso gli endpoint LLM esterni solo su TLS (A6). |
-| C11 | "Audit Log Immutabile" | Una tabella SQL non è immutabile per un admin DB. | Append-only (no UPDATE/DELETE via grant) + hash chain per evidenziare manomissioni; export esterno opzionale. |
-| C12 | TimescaleDB | ✅ *verificato v0.2*: due edizioni. **Apache 2 Edition** (core, hypertable) e **Community Edition** sotto **Timescale License (TSL)**, che include compressione e continuous aggregates. La TSL è gratuita per uso self-hosted, anche commerciale; vieta di offrire TimescaleDB come servizio database gestito. | Usare la Community Edition (immagine ufficiale), che è il default (`SHOW timescaledb.license;` → `timescale`). Janus-Ops usa il DB via SQL senza modificarne il codice e non lo vende come DBaaS, quindi la TSL non vincola la licenza di Janus-Ops. |
-| C13 | Next.js "15" | Versione da verificare al momento del bootstrap `[VERIFY: ultima stable]`. Tailwind: i file in `res/` usano `@import "tailwindcss"` → **Tailwind v4**. | Fissare le versioni in F0. |
-| C14 | File in `res/` | ✅ *risolto v0.2*: i file sono stati rinominati. | — |
-| C15 | Nome del brand | ✅ *risolto v0.3*: grafia ufficiale **Janus-Ops**. Nel wordmark della UI: "Janus-" in `--text-primary`, "Ops" in `--accent-primary`. Per identificatori tecnici: `janus-ops` / `janus-agent`. | — |
+| C1 | General scope (8 modules) | Equivalent to rebuilding Checkmk + Portainer + PVE UI + Termius + AWX + n8n + Copilot. Without rigid phases the project never reaches a usable MVP. | Roadmap of incremental phases, each releasable (§5). Each module starts with a MUST subset. |
+| C2 | Agent: "gRPC over HTTP/2 **or** WebSocket" | Two protocols = double cost. gRPC/HTTP2 is often broken by corporate proxies with TLS inspection. | **WSS only** on 443 with stream multiplexing (ADR-002). |
+| C3 | Scheduler: "Taskiq / Celery" + workflow "Temporal or Celery Canvas" | Three candidate engines for two needs. Temporal adds a cluster to run. Celery is not natively async. | A single async engine for tasks + an internal workflow engine persisted in Postgres (ADR-003). Temporal reconsidered only if complex long-running workflows are needed. |
+| C4 | "Proxmoxer (**asynchronous** Python wrapper)" | Proxmoxer is synchronous `[VERIFY: async support in current versions]`. | Thin async HTTP client (httpx) over the PVE REST APIs, or proxmoxer in a thread pool. Decision in F5. |
+| C5 | Docker "through the agent tunnel **or** `ssh://`" with aiodocker | aiodocker does not handle `ssh://` natively `[VERIFY]`. | The agent exposes the Docker Engine API as a stream in the tunnel; the backend speaks Docker HTTP over that stream. `ssh://` only as a future fallback. |
+| C6 | Proxy with **NTLM** authentication | Not supported by the Go stdlib; needs a third-party library `[VERIFY: maintained library]`. | MVP: proxy without auth + Basic + custom CA. NTLM as a SHOULD in a later phase. |
+| C7 | Agent: token + CA certificate | A static clear-text token on disk is the only authentication secret. | Enrollment with a **single-use** token → issuance of a client certificate per agent (**mTLS**), periodic rotation. |
+| C8 | Agent auto-update | Distributing binaries to the whole fleet is a mass-compromise vector. | **Signed** binaries (ed25519) with a release key separate from the server; the agent verifies signature and checksum before replacing itself. |
+| C9 | "Remote Command / Task Executor" in the agent | In effect RCE by design: the Janus-Ops server becomes the most critical target of the infrastructure. | Local policy on the agent (`allow_exec`, `allow_pty`, `allow_docker`) that the server cannot override; everything audited. |
+| C10 | AI RCA on logs | Logs are untrusted input → **prompt injection** (a log can contain instructions). | Read-only AI tools; output never executed without approval; vault secrets never exposed to AI tools; traffic to external LLM endpoints only over TLS (A6). |
+| C11 | "Immutable Audit Log" | A SQL table is not immutable to a DB admin. | Append-only (no UPDATE/DELETE via grants) + hash chain to reveal tampering; optional external export. |
+| C12 | TimescaleDB | ✅ *verified v0.2*: two editions. **Apache 2 Edition** (core, hypertable) and **Community Edition** under the **Timescale License (TSL)**, which includes compression and continuous aggregates. The TSL is free for self-hosted use, including commercial; it forbids offering TimescaleDB as a managed database service. | Use the Community Edition (official image), which is the default (`SHOW timescaledb.license;` → `timescale`). Janus-Ops uses the DB through SQL without modifying its code and does not sell it as DBaaS, so the TSL does not constrain the Janus-Ops licence. |
+| C13 | Next.js "15" | Version to be verified at bootstrap time `[VERIFY: latest stable]`. Tailwind: the files in `res/` use `@import "tailwindcss"` → **Tailwind v4**. | Pin the versions in F0. |
+| C14 | Files in `res/` | ✅ *resolved v0.2*: the files were renamed. | — |
+| C15 | Brand name | ✅ *resolved v0.3*: official spelling **Janus-Ops**. In the UI wordmark: "Janus-" in `--text-primary`, "Ops" in `--accent-primary`. For technical identifiers: `janus-ops` / `janus-agent`. | — |
 
 ---
 
-## 2. Product Owner — Requisiti
+## 2. Product Owner — Requirements
 
-### 2.1 Requisiti funzionali (MVP = F0–F3, poi per fase)
+### 2.1 Functional requirements (MVP = F0–F3, then per phase)
 
-| ID | Requisito | Priorità | Fase |
+| ID | Requirement | Priority | Phase |
 |---|---|---|---|
-| FR-01 | Inventory unificato di nodi con tag, gruppi, ambiente (`prod/lab/dmz`) e capability attivabili | MUST | F0 |
-| FR-02 | Vault cifrato per chiavi SSH, password sudo, token API | MUST | F0 |
-| FR-03 | Login con utenti della directory LDAP sidecar, ruoli mappati sui gruppi LDAP. **AMEND Product Owner (v0.6)**: TOTP **opzionale** per utente (era obbligatorio), su richiesta dell'utente | MUST | F0 |
-| FR-08 | Amministratore iniziale creato da `.env` al primo avvio, solo se assente | MUST | F0 |
-| FR-09 | Gestione utenti dalla UI: crea, modifica, ruoli, disabilita, reset password, reset 2FA, elimina | MUST | F0 |
-| FR-10b | Ruoli configurabili: gruppo LDAP + insieme di permessi; ruoli custom; chi legge l'audit log è un permesso (`audit.read`) | MUST | F0 |
-| FR-11b | TOTP funzionante senza accesso a internet (proxy aziendali, air-gapped) | MUST | F0 |
-| FR-06 | Account locale *break-glass*, usabile anche con LDAP non disponibile, ogni uso segnalato nell'audit | MUST | F0 |
-| FR-07 | Collegamento opzionale ad AD/LDAP aziendale esterno al posto del sidecar. **Fatto (v0.28)**: attributo di login configurabile (`sAMAccountName`), filtro con UPN, StartTLS verificato, referral mai seguiti, gruppi annidati con la regola `LDAP_MATCHING_RULE_IN_CHAIN`, `deploy/compose.external-directory.yaml`. Test con server LDAP in memoria (`test_ldap_ad_unit.py`); **non provato su un AD reale** | SHOULD | F8 |
-| FR-04 | Audit log di ogni azione privilegiata, consultabile e filtrabile | MUST | F0 |
-| FR-05 | Command palette `Ctrl+K` per navigare su nodi e azioni | SHOULD | F0 |
-| FR-10 | Sessione SSH web 1-click su un nodo, con credenziali dal vault | MUST | F1 |
+| FR-01 | Unified node inventory with tags, groups, environment (`prod/lab/dmz`) and activatable capabilities | MUST | F0 |
+| FR-02 | Encrypted vault for SSH keys, sudo passwords, API tokens | MUST | F0 |
+| FR-03 | Login with users of the sidecar LDAP directory, roles mapped to LDAP groups. **AMEND Product Owner (v0.6)**: **optional** TOTP per user (it was mandatory), at the user's request | MUST | F0 |
+| FR-08 | Initial administrator created from `.env` at first start, only if absent | MUST | F0 |
+| FR-09 | User management from the UI: create, edit, roles, disable, reset password, reset 2FA, delete | MUST | F0 |
+| FR-10b | Configurable roles: LDAP group + set of permissions; custom roles; who reads the audit log is a permission (`audit.read`) | MUST | F0 |
+| FR-11b | TOTP working without internet access (corporate proxies, air-gapped) | MUST | F0 |
+| FR-06 | Local *break-glass* account, usable even when LDAP is unavailable, every use flagged in the audit | MUST | F0 |
+| FR-07 | Optional connection to an external corporate AD/LDAP instead of the sidecar. **Done (v0.28)**: configurable login attribute (`sAMAccountName`), filter with UPN, verified StartTLS, referrals never followed, nested groups with the `LDAP_MATCHING_RULE_IN_CHAIN` rule, `deploy/compose.external-directory.yaml`. Tested with an in-memory LDAP server (`test_ldap_ad_unit.py`); **not tested on a real AD** | SHOULD | F8 |
+| FR-04 | Audit log of every privileged action, searchable and filterable | MUST | F0 |
+| FR-05 | `Ctrl+K` command palette to navigate to nodes and actions | SHOULD | F0 |
+| FR-10 | 1-click web SSH session on a node, with credentials from the vault | MUST | F1 |
 | FR-11 | Multi-tab / split, SFTP browser, upload/download | SHOULD | F1 |
-| FR-12 | Broadcast comando su più terminali, snippet library | SHOULD | F1 |
-| FR-13 | Registrazione sessione (asciinema) | SHOULD | F1 |
-| FR-14 | ProxyJump tramite jump host | SHOULD | F1 |
-| FR-20 | Bootstrap agent via SSH (detect arch, copia binario, config, systemd) | MUST | F2 |
-| FR-21 | Agent connesso in uscita via WSS, proxy HTTP(S) con CA custom | MUST | F2 |
-| FR-22 | Telemetria ogni 5–15 s: CPU, RAM/swap, disk I/O, filesystem, unit systemd, porte, top processi | MUST | F2 |
-| FR-23 | Buffer locale su disco durante disconnessione e invio differito | MUST | F2 |
-| FR-24 | NOC dashboard: hexagon widget, node cards, tabella unhandled problems | MUST | F2 |
-| FR-30 | Stati OK/WARN/CRIT/UNKNOWN con soglie e isteresi (N cicli) | MUST | F3 |
+| FR-12 | Command broadcast to several terminals, snippet library | SHOULD | F1 |
+| FR-13 | Session recording (asciinema) | SHOULD | F1 |
+| FR-14 | ProxyJump through a jump host | SHOULD | F1 |
+| FR-20 | Agent bootstrap over SSH (detect arch, copy binary, config, systemd) | MUST | F2 |
+| FR-21 | Agent connected outbound over WSS, HTTP(S) proxy with custom CA | MUST | F2 |
+| FR-22 | Telemetry every 5–15 s: CPU, RAM/swap, disk I/O, filesystem, systemd units, ports, top processes | MUST | F2 |
+| FR-23 | Local on-disk buffer during disconnection and deferred sending | MUST | F2 |
+| FR-24 | NOC dashboard: hexagon widget, node cards, unhandled-problems table | MUST | F2 |
+| FR-30 | OK/WARN/CRIT/UNKNOWN states with thresholds and hysteresis (N cycles) | MUST | F3 |
 | FR-31 | Acknowledge, scheduled downtime | MUST | F3 |
-| FR-32 | Dipendenze parent/child con soppressione alert figli | MUST | F3 |
+| FR-32 | Parent/child dependencies with suppression of child alerts | MUST | F3 |
 | FR-33 | Flapping detection | SHOULD | F3 |
-| FR-34 | Notifiche Telegram, Webhook, Email; Slack/Discord | MUST (primi 3) / SHOULD | F3 |
-| FR-35 | Service discovery automatico con proposta check | SHOULD | F3 |
-| FR-40 | Docker: lista container per host, start/stop/restart/kill, inspect, log streaming, stats | MUST | F4 |
-| FR-41 | Exec shell nel container dal browser | MUST | F4 |
-| FR-42 | Compose stack: editor YAML, `.env` cifrati, deploy/redeploy | SHOULD | F4 |
-| FR-43 | Volumi, reti, prune selettivo, check aggiornamenti immagini | SHOULD | F4 |
-| FR-50 | Proxmox: stato cluster/quorum, nodi, storage | MUST | F5 |
-| FR-51 | VM/LXC: start/shutdown/reboot/snapshot/clone/migrazione | MUST | F5 |
-| FR-52 | Console VM/LXC (xterm.js seriale; noVNC) | SHOULD | F5 |
-| FR-53 | Audit backup vzdump/PBS: mancanti, falliti, troppo vecchi | MUST | F5 |
-| FR-60 | Inventory Ansible dinamico dal DB | MUST | F6 |
-| FR-61 | Catalogo playbook da più sorgenti: Git, upload da file locale, editor incorporato, mount di rete (NFS/SMB), SFTP/SCP; survey, esecuzione con output live, storico | MUST | F6 |
-| FR-70 | AI "Diagnose" su servizio CRIT: raccolta log/metriche/audit → diagnosi + action plan | MUST | F7 |
-| FR-71 | Action plan approvabile/modificabile prima dell'esecuzione | MUST | F7 |
-| FR-72 | Generatore IaC contestuale | SHOULD | F7 |
-| FR-80 | Workflow visuale (trigger cron/webhook/manuale/alert; azioni SSH/Ansible/Docker/Proxmox/AI/approvazione/notifica) | SHOULD | F8 |
-| FR-81 | GitOps compose con webhook auto-deploy | SHOULD | F8 |
-| FR-82 | SNMP (v2c/v3) per NAS, switch, UPS | SHOULD | F8 |
-| FR-83 | PTY e comandi remoti via tunnel agent | SHOULD | F8 |
-| FR-84 | Auto-update agent air-gapped firmato | SHOULD | F8 |
-| FR-85 | Agent Windows | WON'T (MVP) | F9+ |
-| FR-86 | **Fatto (v0.28, opzione a di ADR-011)**: `JANUS_SECRET_BACKEND=openbao-transit`, la chiave master nel motore Transit di OpenBao/Vault (AppRole, policy minima encrypt/decrypt, rinnovo del token, cache delle DEK `JANUS_BAO_DEK_CACHE_S`), `janus-ops secrets status` e `secrets migrate --to ...` (solo re-wrap delle DEK, idempotente, reversibile, tutto o niente, audit), readiness che controlla il secret manager, TOTP inclusi. Provato contro un OpenBao 2.4.1 e un HashiCorp Vault 1.20 reali (Transit, rotazione della chiave senza re-wrap, KV v2). **Opzione (b) `openbao-kv`** fatta: il contenuto di ogni segreto vive in KV v2, Postgres tiene solo un riferimento (`kv1:` + mount, percorso e versione fissata), il percorso deriva dall'id del record e un riferimento altrove è rifiutato; `secrets migrate --to openbao-kv` e ritorno, eliminazione delle credenziali che toglie il contenuto da KV, `secrets prune` per gli orfani (stack GitOps, workflow e canali cancellati non lo fanno da soli). TOTP resta sulla chiave Transit o locale. **OpenBao nella stack** (`deploy/compose.openbao.yaml`, `scripts/openbao-setup.sh`, `docs/OPENBAO.md`): storage raft, TLS con CA propria, **auto-unseal con chiave statica** al riavvio (provato: riavvio del container e dell'intero stack), AppRole e policy minima; lo stack vivo ci gira dal 2026-11-17 con `openbao-transit` (18 segreti migrati). Un difetto trovato nella migrazione reale (i segreti dei canali sono sigillati sotto `channel-<id>`) è corretto e coperto da test. **Non ancora:** credenziali «a riferimento» verso segreti di altri team (sola lettura). Segreti e chiavi in un secret manager esterno (OpenBao, HashiCorp Vault o simili): chiave master (KEK) e/o contenuto dei segreti fuori da Janus-Ops. **AMEND Product Owner (v0.9)**: da WON'T a SHOULD, su richiesta dell'utente; disegno in ADR-011 | SHOULD | F8+ |
-| FR-87 | Multi-tenancy, HA del server | WON'T (MVP) | — |
+| FR-34 | Telegram, Webhook, Email notifications; Slack/Discord | MUST (first 3) / SHOULD | F3 |
+| FR-35 | Automatic service discovery with check proposal | SHOULD | F3 |
+| FR-40 | Docker: container list per host, start/stop/restart/kill, inspect, log streaming, stats | MUST | F4 |
+| FR-41 | Exec shell in the container from the browser | MUST | F4 |
+| FR-42 | Compose stack: YAML editor, encrypted `.env`, deploy/redeploy | SHOULD | F4 |
+| FR-43 | Volumes, networks, selective prune, image update checks | SHOULD | F4 |
+| FR-50 | Proxmox: cluster/quorum state, nodes, storage | MUST | F5 |
+| FR-51 | VM/LXC: start/shutdown/reboot/snapshot/clone/migration | MUST | F5 |
+| FR-52 | VM/LXC console (xterm.js serial; noVNC) | SHOULD | F5 |
+| FR-53 | vzdump/PBS backup audit: missing, failed, too old | MUST | F5 |
+| FR-60 | Dynamic Ansible inventory from the DB | MUST | F6 |
+| FR-61 | Playbook catalogue from several sources: Git, local file upload, built-in editor, network mount (NFS/SMB), SFTP/SCP; survey, execution with live output, history | MUST | F6 |
+| FR-70 | AI "Diagnose" on a CRIT service: log/metric/audit collection → diagnosis + action plan | MUST | F7 |
+| FR-71 | Action plan approvable/editable before execution | MUST | F7 |
+| FR-72 | Contextual IaC generator | SHOULD | F7 |
+| FR-80 | Visual workflow (cron/webhook/manual/alert triggers; SSH/Ansible/Docker/Proxmox/AI/approval/notification actions) | SHOULD | F8 |
+| FR-81 | GitOps compose with auto-deploy webhook | SHOULD | F8 |
+| FR-82 | SNMP (v2c/v3) for NAS, switches, UPS | SHOULD | F8 |
+| FR-83 | PTY and remote commands through the agent tunnel | SHOULD | F8 |
+| FR-84 | Signed air-gapped agent auto-update | SHOULD | F8 |
+| FR-85 | Windows agent | WON'T (MVP) | F9+ |
+| FR-86 | Secrets and keys in an external secret manager (OpenBao, HashiCorp Vault or similar): master key (KEK) and/or secret content outside Janus-Ops. **AMEND Product Owner (v0.9)**: from WON'T to SHOULD, at the user's request; design in ADR-011. **Done (v0.28, option a of ADR-011)**: `JANUS_SECRET_BACKEND=openbao-transit`, the master key in the Transit engine of OpenBao/Vault (AppRole, minimal encrypt/decrypt policy, token renewal, DEK cache `JANUS_BAO_DEK_CACHE_S`), `janus-ops secrets status` and `secrets migrate --to ...` (DEK re-wrap only, idempotent, reversible, all or nothing, audit), readiness that checks the secret manager, TOTP included. Tested against a real OpenBao 2.4.1 and a real HashiCorp Vault 1.20 (Transit, key rotation without re-wrap, KV v2). **Option (b) `openbao-kv`** done: the content of each secret lives in KV v2, Postgres keeps only a reference (`kv1:` + mount, path and pinned version), the path derives from the record id and a reference pointing elsewhere is refused; `secrets migrate --to openbao-kv` and back, deleting a credential removes its content from KV, `secrets prune` for orphans (deleted GitOps stacks, workflows and channels do not do it by themselves). TOTP stays on the Transit or local key. **OpenBao in the stack** (`deploy/compose.openbao.yaml`, `scripts/openbao-setup.sh`, `docs/OPENBAO.md`): raft storage, TLS with its own CA, **auto-unseal with a static key** on restart (tested: restart of the container and of the whole stack), AppRole and minimal policy; the live stack has run on it since 2026-11-17 with `openbao-transit` (18 secrets migrated). A defect found in the real migration (channel secrets are sealed under `channel-<id>`) is fixed and covered by tests. **Not yet:** "by reference" credentials pointing to secrets of other teams (read-only) | SHOULD | F8+ |
+| FR-87 | Multi-tenancy, server HA | WON'T (MVP) | — |
 
-### 2.2 Requisiti non funzionali
+### 2.2 Non-functional requirements
 
-| ID | Requisito | Verifica |
+| ID | Requirement | Verification |
 |---|---|---|
-| NFR-01 | Agent: singolo binario statico, nessuna dipendenza runtime, nessuna porta in ascolto | `ldd` → "not a dynamic executable"; `ss -ltnp` sul nodo non mostra l'agent |
-| NFR-02 | Agent funzionante dietro proxy HTTP(S) con CA custom | Test E2E con proxy (es. squid) in compose di test |
-| NFR-03 | Nessuna perdita di metriche per disconnessioni ≤ 1 h | Test: disconnessione 60 min → gap assente nei dati |
-| NFR-04 | Latenza ingest → stato in dashboard ≤ 30 s (p95) | Misura end-to-end in test di carico |
-| NFR-05 | Ingest sostenuto per 500 nodi a 10 s (~10k punti/s stimati) | Test di carico sintetico |
-| NFR-06 | Segreti mai inviati al browser, mai nei log | Test automatici su response/log + review |
-| NFR-07 | Ogni azione privilegiata produce un evento di audit attribuito | Test per ogni endpoint mutante |
-| NFR-08 | Installazione da clone pulito con soli comandi documentati | Job CI "fresh install" |
-| NFR-09 | UI usabile ≥ 1280 px; dashboard leggibile a 1920 px (NOC wall) | Review visuale / Playwright screenshot |
+| NFR-01 | Agent: single static binary, no runtime dependencies, no listening ports | `ldd` → "not a dynamic executable"; `ss -ltnp` on the node does not show the agent |
+| NFR-02 | Agent working behind an HTTP(S) proxy with custom CA | E2E test with a proxy (e.g. squid) in the test compose |
+| NFR-03 | No metric loss for disconnections ≤ 1 h | Test: 60-minute disconnection → no gap in the data |
+| NFR-04 | Latency from ingest to dashboard state ≤ 30 s (p95) | End-to-end measurement in a load test |
+| NFR-05 | Sustained ingest for 500 nodes at 10 s (~10k points/s estimated) | Synthetic load test |
+| NFR-06 | Secrets never sent to the browser, never in the logs | Automated tests on responses/logs + review |
+| NFR-07 | Every privileged action produces an attributed audit event | Test for each mutating endpoint |
+| NFR-08 | Installation from a clean clone with documented commands only | "Fresh install" CI job |
+| NFR-09 | UI usable at ≥ 1280 px; dashboard readable at 1920 px (NOC wall) | Visual review / Playwright screenshot |
 
-### 2.3 Criteri di accettazione MVP (estratto)
+### 2.3 MVP acceptance criteria (excerpt)
 
-| ID | Criterio (osservabile dall'esterno) | Metodo |
+| ID | Criterion (observable from outside) | Method |
 |---|---|---|
-| AC-01 | Un Operator aggiunge un host con IP + credenziale SSH e vede la capability "SSH Target" attiva | E2E Playwright |
-| AC-02 | Un Auditor non può aprire shell né modificare nodi (HTTP 403, pulsanti assenti) | API test + E2E |
-| AC-02b | Un utente aggiunto al gruppo LDAP `janus-operators` ottiene il ruolo Operator al login successivo; rimosso dal gruppo, lo perde | Integration test con container LDAP |
-| AC-02c | Con il container LDAP fermo, solo l'account break-glass può accedere e l'evento compare nell'audit | Integration test |
-| AC-03 | Aprendo una shell, l'audit log registra utente, nodo, timestamp inizio/fine | API test |
-| AC-04 | Bootstrap agent su Debian e Rocky (amd64/arm64): l'host diventa "online" entro 60 s | E2E su VM/container di test |
-| AC-05 | Bloccando l'uscita per 10 min, al ripristino la serie temporale è continua | Integration test |
-| AC-06 | CPU > soglia CRIT per 3 cicli → stato CRIT e notifica webhook; per 2 cicli → nessun alert | Integration test |
-| AC-07 | Con nodo padre DOWN, i figli sono "UNREACHABLE" e non generano notifiche | Integration test |
-| AC-08 | In downtime programmato nessuna notifica viene inviata | Integration test |
+| AC-01 | An Operator adds a host with IP + SSH credential and sees the "SSH Target" capability active | Playwright E2E |
+| AC-02 | An Auditor cannot open a shell or edit nodes (HTTP 403, buttons absent) | API test + E2E |
+| AC-02b | A user added to the LDAP group `janus-operators` gets the Operator role at the next login; removed from the group, loses it | Integration test with an LDAP container |
+| AC-02c | With the LDAP container stopped, only the break-glass account can sign in and the event appears in the audit | Integration test |
+| AC-03 | When a shell is opened, the audit log records user, node, start/end timestamp | API test |
+| AC-04 | Agent bootstrap on Debian and Rocky (amd64/arm64): the host becomes "online" within 60 s | E2E on test VMs/containers |
+| AC-05 | Blocking the outbound traffic for 10 min, the time series is continuous after restoration | Integration test |
+| AC-06 | CPU > CRIT threshold for 3 cycles → CRIT state and webhook notification; for 2 cycles → no alert | Integration test |
+| AC-07 | With the parent node DOWN, the children are "UNREACHABLE" and generate no notifications | Integration test |
+| AC-08 | During a scheduled downtime no notification is sent | Integration test |
 
 ---
 
-## 3. Architect — Componenti, flussi, ADR
+## 3. Architect — Components, flows, ADRs
 
-### 3.1 Componenti
+### 3.1 Components
 
 ```mermaid
 flowchart TB
@@ -287,7 +308,7 @@ flowchart TB
         LD[("LDAP directory<br/>sidecar")]
     end
     AG["janus-agent"]
-    LLM["LLM self-hosted<br/>(host esterni)"]
+    LLM["LLM self-hosted<br/>(external hosts)"]
 
     RP --> FE
     RP --> API
@@ -304,563 +325,570 @@ flowchart TB
     WK -->|TLS| LLM
 ```
 
-| Componente | Responsabilità | Requisiti coperti |
+| Component | Responsibility | Requirements covered |
 |---|---|---|
-| reverse proxy | TLS, routing per path, unico ingresso :443 | NFR-01, NFR-02 |
-| frontend | UI, stato real-time via WS | FR-05, FR-24, tutte le viste |
-| api | Auth, RBAC, inventory, vault, audit, REST, WS verso browser, SSH bastion | FR-01..14, FR-40..72 (lato API) |
-| agent-gateway | Terminazione tunnel agent, enrollment, routing stream (docker/exec/pty), ingest metriche in batch | FR-20..23, FR-40, FR-83 |
-| worker | Valutazione check, alerting, notifiche, Ansible, Proxmox, AI, workflow | FR-30..35, FR-50..53, FR-60..80 |
-| scheduler | Timer di check, cron workflow, retention | FR-30, FR-80 |
-| ldap (sidecar) | Directory utenti e gruppi; raggiungibile solo sulla rete interna del compose | FR-03, FR-06 |
-| janus-agent | Telemetria, docker proxy, exec/PTY, buffer, update | FR-20..23, FR-83, FR-84 |
+| reverse proxy | TLS, path-based routing, single :443 entry point | NFR-01, NFR-02 |
+| frontend | UI, real-time state over WS | FR-05, FR-24, all the views |
+| api | Auth, RBAC, inventory, vault, audit, REST, WS to the browser, SSH bastion | FR-01..14, FR-40..72 (API side) |
+| agent-gateway | Agent tunnel termination, enrollment, stream routing (docker/exec/pty), batch metric ingest | FR-20..23, FR-40, FR-83 |
+| worker | Check evaluation, alerting, notifications, Ansible, Proxmox, AI, workflows | FR-30..35, FR-50..53, FR-60..80 |
+| scheduler | Check timers, workflow cron, retention | FR-30, FR-80 |
+| ldap (sidecar) | User and group directory; reachable only on the internal network of the compose | FR-03, FR-06 |
+| janus-agent | Telemetry, docker proxy, exec/PTY, buffer, update | FR-20..23, FR-83, FR-84 |
 
-`agent-gateway` nell'MVP può essere un modulo dello stesso processo `api`; resta separabile
-perché comunica solo via Redis/PG (scalabilità oltre A2).
+In the MVP `agent-gateway` can be a module of the same `api` process; it remains separable
+because it communicates only through Redis/PG (scalability beyond A2).
 
-### 3.2 Struttura del repository
+### 3.2 Repository structure
 
-Stato attuale (v0.4). Le cartelle marcate *(F…)* arrivano con la fase indicata.
+Current state (v0.4). Folders marked *(F…)* arrive with the indicated phase.
 
 ```
 janus-ops/
 ├── backend/
-│   ├── pyproject.toml, uv.lock     dipendenze pinnate (uv)
+│   ├── pyproject.toml, uv.lock     pinned dependencies (uv)
 │   ├── src/janus_ops/
 │   │   ├── cli.py                  janus-ops serve | migrate | version
-│   │   ├── config.py               Settings da variabili JANUS_*
-│   │   ├── db.py, health.py        engine async, /health, /ready
-│   │   ├── main.py                 app factory, header di sicurezza, UI statica
-│   │   ├── logsetup.py             log JSON su stdout
-│   │   ├── migrations/             Alembic (SQL scritto a mano, niente autogenerate)
+│   │   ├── config.py               Settings from JANUS_* variables
+│   │   ├── db.py, health.py        async engine, /health, /ready
+│   │   ├── main.py                 app factory, security headers, static UI
+│   │   ├── logsetup.py             JSON logs on stdout
+│   │   ├── migrations/             Alembic (hand-written SQL, no autogenerate)
 │   │   └── modules/  (F0+)         auth, inventory, vault, audit, ssh, monitoring, ...
-│   └── tests/                      unit + integration (TimescaleDB reale)
+│   └── tests/                      unit + integration (real TimescaleDB)
 ├── frontend/
 │   ├── app/, components/           App Router, Sidebar, StatusBadge
-│   └── scripts/sync-assets.mjs     copia icone e logo da res/ in public/
+│   └── scripts/sync-assets.mjs     copies icons and logo from res/ to public/
 ├── agent/  (F2)                    janus-agent in Go
-├── proto/  (F2)                    contratti agent ⇄ server
+├── proto/  (F2)                    agent ⇄ server contracts
 ├── deploy/                         compose.yaml, compose.build.yaml, Caddyfile, .env.example
 ├── scripts/                        gen-env.sh, integration-test.sh, release.sh
 ├── docs/                           specs, PLAN, dockerhub/
 ├── res/                            brand & design resources
-├── Dockerfile, .dockerignore       immagine unica (ADR-009)
-├── .github/workflows/ci.yml        lint, test, integration, build; push su tag v*
+├── Dockerfile, .dockerignore       single image (ADR-009)
+├── .github/workflows/ci.yml        lint, test, integration, build; push on v* tags
 └── Makefile
 ```
 
-### 3.3 ADR
+### 3.3 ADRs
 
 **ADR-001 — Monorepo**
-- *Opzioni*: (a) monorepo unico — versionamento atomico dei contratti agent⇄server, CI unica; (b) repo separati — release indipendenti, ma contratti duplicati e drift.
-- *Decisione*: **(a)**. I contratti `proto/` devono cambiare insieme ad agent e gateway.
-- *Conseguenze*: CI con job per linguaggio filtrati per path.
+- *Options*: (a) single monorepo — atomic versioning of the agent⇄server contracts, single CI; (b) separate repos — independent releases, but duplicated contracts and drift.
+- *Decision*: **(a)**. The `proto/` contracts must change together with the agent and the gateway.
+- *Consequences*: CI with one job per language filtered by path.
 
-**ADR-002 — Trasporto agent: WSS + multiplexing**
-- *Opzioni*: (a) gRPC bidi su HTTP/2 — tipizzato, ma fragile con proxy TLS-inspecting e alcuni L7 LB; (b) WebSocket su HTTP/1.1 Upgrade + multiplexer di stream (es. yamux `[VERIFY: libreria]`) + messaggi protobuf — massima compatibilità con proxy; (c) SSH reverse tunnel — maturo ma porta 22 spesso bloccata e gestione chiavi più complessa.
-- *Decisione*: **(b)**. Un canale di controllo + stream dedicati per metriche, docker, exec, PTY.
-- *Conseguenze*: si implementano a mano heartbeat, backpressure e reconnect (backoff esponenziale con jitter). Autenticazione mTLS (cert per-agent da enrollment, vedi C7). Se un proxy TLS-inspecting rompe l'mTLS: fallback a token firmato a breve scadenza dentro il tunnel `OPEN`.
-- **AMEND Architect (v0.11)**: implementato in F2 con tre scostamenti, contratto in [`proto/agent-protocol.md`](../proto/agent-protocol.md).
-  1. *Autenticazione*: il fallback diventa la soluzione principale. L'agent genera sul nodo una chiave ed25519 (non lascia mai il nodo); a ogni connessione firma un nonce casuale del server legato a node id e host del server. Il token monouso del bootstrap registra la chiave (solo hash SHA-256 in DB, TTL 15 min, invalidato da un nuovo bootstrap). Motivi: il TLS è terminato da Caddy (ADR-009), quindi un certificato client non arriverebbe all'app senza una seconda porta e header fidati; funziona sulla 443 dietro proxy che ispezionano il TLS; nessuna CA da gestire o ruotare. Rischio residuo: chi intercetta il TLS (CA fidata dall'agent) e inoltra il challenge in tempo reale può impersonare l'agent per quella connessione, come con qualunque bearer; non può riusare la firma altrove né più tardi. Revoca = rifiuto della chiave (`revoked_at`).
-  2. *Codifica*: messaggi JSON (campo `t`) invece di protobuf: volumi bassi (≤ 500 nodi ogni 10 s), leggibili nei log, nessun codegen in due linguaggi; il campo `v` permette di cambiare codifica.
-  3. *Multiplexing*: rimandato a F4, quando serviranno gli stream Docker; in F2 c'è un solo canale. Sarà fatto con frame binari con id di stream sopra lo stesso WebSocket (yamux `[VERIFY]` non serve).
+**ADR-002 — Agent transport: WSS + multiplexing**
+- *Options*: (a) bidirectional gRPC over HTTP/2 — typed, but fragile with TLS-inspecting proxies and some L7 LBs; (b) WebSocket over HTTP/1.1 Upgrade + a stream multiplexer (e.g. yamux `[VERIFY: library]`) + protobuf messages — maximum proxy compatibility; (c) SSH reverse tunnel — mature, but port 22 is often blocked and key management is more complex.
+- *Decision*: **(b)**. One control channel + dedicated streams for metrics, docker, exec, PTY.
+- *Consequences*: heartbeat, backpressure and reconnect (exponential backoff with jitter) are implemented by hand. mTLS authentication (per-agent cert from enrollment, see C7). If a TLS-inspecting proxy breaks mTLS: fallback to a short-lived signed token inside the `OPEN` tunnel.
+- **AMEND Architect (v0.11)**: implemented in F2 with three deviations, contract in [`proto/agent-protocol.md`](../proto/agent-protocol.md).
+  1. *Authentication*: the fallback becomes the main solution. The agent generates an ed25519 key on the node (it never leaves the node); on each connection it signs a random server nonce bound to the node id and the server host. The single-use bootstrap token registers the key (only the SHA-256 hash in the DB, TTL 15 min, invalidated by a new bootstrap). Reasons: TLS is terminated by Caddy (ADR-009), so a client certificate would not reach the app without a second port and trusted headers; it works on 443 behind proxies that inspect TLS; no CA to manage or rotate. Residual risk: whoever intercepts TLS (a CA trusted by the agent) and forwards the challenge in real time can impersonate the agent for that connection, as with any bearer; they cannot reuse the signature elsewhere or later. Revocation = refusal of the key (`revoked_at`).
+  2. *Encoding*: JSON messages (field `t`) instead of protobuf: low volumes (≤ 500 nodes every 10 s), readable in the logs, no codegen in two languages; the `v` field allows changing the encoding.
+  3. *Multiplexing*: postponed to F4, when the Docker streams will be needed; in F2 there is a single channel. It will be done with binary frames carrying a stream id over the same WebSocket (yamux `[VERIFY]` is not needed).
 
-**ADR-003 — Task queue e workflow**
-- *Opzioni*: (a) Celery + Canvas — maturo, ma sync-first e Canvas poco adatto a workflow con attese umane; (b) Taskiq (async) + workflow engine interno (DAG persistito in PG, step idempotenti) — coerente con FastAPI async, stato ispezionabile in SQL; (c) Temporal — durabilità eccellente, ma un servizio pesante in più da operare.
-- *Decisione*: **(b)** `[VERIFY: maturità Taskiq al bootstrap; alternativa equivalente: arq]`.
-- *Conseguenze*: l'engine workflow (F8) va progettato con stati espliciti (pending/running/waiting_approval/failed/done) e retry idempotenti.
+**ADR-003 — Task queue and workflow**
+- *Options*: (a) Celery + Canvas — mature, but sync-first and Canvas poorly suited to workflows with human waits; (b) Taskiq (async) + an internal workflow engine (DAG persisted in PG, idempotent steps) — consistent with async FastAPI, state inspectable in SQL; (c) Temporal — excellent durability, but one more heavy service to operate.
+- *Decision*: **(b)** `[VERIFY: Taskiq maturity at bootstrap; equivalent alternative: arq]`.
+- *Consequences*: the workflow engine (F8) must be designed with explicit states (pending/running/waiting_approval/failed/done) and idempotent retries.
 
 **ADR-004 — Secret vault**
-- *Opzioni*: (a) cifratura applicativa AES-256-GCM con envelope encryption (DEK per segreto, KEK da master key in env/file) — nessuna dipendenza; (b) OpenBao/Vault esterno — più robusto ma un servizio in più; (c) pgcrypto — chiave visibile al DB.
-- *Decisione*: **(a)** dietro un'interfaccia `SecretBackend`, così (b) diventa un'implementazione aggiuntiva (FR-86).
-- *Conseguenze*: procedura di rotazione KEK documentata; la master key non va mai nel DB né nei backup DB.
-- *Implementazione (v0.7)*: KEK = `JANUS_SECRET_KEY`; una DEK casuale per credenziale; segreto e DEK cifrati AES-256-GCM con AAD legata all'id della credenziale (righe non scambiabili); `kek_version` per la futura rotazione della KEK (solo re-wrap delle DEK). Segreti in sola scrittura via API; `reveal()` riservato ai moduli che li useranno (F1+). Chiavi SSH validate al salvataggio (OpenSSH/PEM, passphrase via `cryptography[ssh]`/bcrypt), con tipo e fingerprint salvati in `public_info`. Rotazione della KEK: non ancora implementata `OPEN`.
+- *Options*: (a) application-level AES-256-GCM encryption with envelope encryption (a DEK per secret, KEK from a master key in env/file) — no dependencies; (b) external OpenBao/Vault — more robust but one more service; (c) pgcrypto — key visible to the DB.
+- *Decision*: **(a)** behind a `SecretBackend` interface, so that (b) becomes an additional implementation (FR-86).
+- *Consequences*: documented KEK rotation procedure; the master key never goes into the DB or into the DB backups.
+- *Implementation (v0.7)*: KEK = `JANUS_SECRET_KEY`; one random DEK per credential; secret and DEK encrypted with AES-256-GCM with AAD bound to the credential id (rows cannot be swapped); `kek_version` for the future KEK rotation (DEK re-wrap only). Write-only secrets through the API; `reveal()` reserved to the modules that will use them (F1+). SSH keys validated on saving (OpenSSH/PEM, passphrase through `cryptography[ssh]`/bcrypt), with type and fingerprint stored in `public_info`. KEK rotation: not implemented yet `OPEN`.
 
-**ADR-005 — Storage metriche**
-- *Opzioni*: (a) TimescaleDB nello stesso Postgres — un solo DB, SQL e JOIN con inventory; (b) Prometheus/VictoriaMetrics — ottimi per metriche, ma secondo sistema e modello dati separato.
-- *Decisione*: **(a)** con hypertable, compressione dopo 7 giorni, continuous aggregates 1m/1h, retention raw 30 giorni `OPEN` (vedi C12).
-- *Conseguenze*: ingest in batch (COPY / insert multi-riga) dal gateway; schema metriche "narrow" (`time, node_id, metric_id, value`) + tabella `metric_series` per le label.
+**ADR-005 — Metrics storage**
+- *Options*: (a) TimescaleDB in the same Postgres — one DB, SQL and JOINs with the inventory; (b) Prometheus/VictoriaMetrics — excellent for metrics, but a second system and a separate data model.
+- *Decision*: **(a)** with a hypertable, compression after 7 days, 1m/1h continuous aggregates, raw retention 30 days `OPEN` (see C12).
+- *Consequences*: batch ingest (COPY / multi-row insert) from the gateway; "narrow" metrics schema (`time, node_id, metric_id, value`) + a `metric_series` table for the labels.
 
-**ADR-006 — Frontend e sessione**
-- *Opzioni*: (a) Next.js come SPA prevalentemente client-side, API FastAPI stessa origine via reverse proxy, sessione in cookie httpOnly; (b) Next.js come BFF con proxy delle API — più codice, doppia auth.
-- *Decisione*: **(a)**. Niente segreti né logica di autorizzazione nel layer Next.
-- *Conseguenze*: CSRF token per richieste mutanti; WebSocket autenticati con lo stesso cookie + verifica Origin.
-- **AMEND Architect (v0.4)**: il frontend è compilato con `output: 'export'` (file statici) e servito dal processo FastAPI, non da un server Next.js — per permettere l'immagine unica (ADR-009). Conseguenze: niente SSR, Server Actions né rotte dinamiche senza `generateStaticParams`; le pagine di dettaglio useranno parametri in query string o routing client-side. Nessun requisito ne dipende, perché con (a) tutto il rendering era già lato client.
+**ADR-006 — Frontend and session**
+- *Options*: (a) Next.js as a mostly client-side SPA, FastAPI API on the same origin through the reverse proxy, session in an httpOnly cookie; (b) Next.js as a BFF proxying the APIs — more code, double auth.
+- *Decision*: **(a)**. No secrets or authorisation logic in the Next layer.
+- *Consequences*: CSRF token for mutating requests; WebSockets authenticated with the same cookie + Origin check.
+- **AMEND Architect (v0.4)**: the frontend is built with `output: 'export'` (static files) and served by the FastAPI process, not by a Next.js server — to allow the single image (ADR-009). Consequences: no SSR, Server Actions or dynamic routes without `generateStaticParams`; detail pages will use query-string parameters or client-side routing. No requirement depends on it, because with (a) all the rendering was already client-side.
 
-**ADR-009 — Packaging: immagine unica**
-- *Contesto*: un solo repository Docker Hub (`lordraw77/janus-ops`) e un deploy semplice per ambienti air-gapped.
-- *Opzioni*: (a) **immagine unica**: API + UI esportata, stessa immagine anche per `migrate` e per i futuri worker (comando diverso) — un artefatto, una versione; (b) immagini separate `-api` e `-frontend` — scalano separatamente, ma due repository e un container Node in più senza benefici, dato che l'UI non fa SSR.
-- *Decisione*: **(a)**. Build multi-stage: Node 24 per l'export della UI → uv per il virtualenv → runtime `python:3.12-slim`, utente non-root `10001`.
-- *Conseguenze*: TLS fuori dall'immagine (Caddy nella stack di riferimento); i ruoli futuri (worker, scheduler, agent-gateway) saranno sottocomandi di `janus-ops` sulla stessa immagine; i binari dell'agent (F2) potranno essere inclusi nell'immagine per l'auto-update air-gapped.
+**ADR-009 — Packaging: single image**
+- *Context*: a single Docker Hub repository (`lordraw77/janus-ops`) and a simple deploy for air-gapped environments.
+- *Options*: (a) **single image**: API + exported UI, the same image also for `migrate` and for the future workers (different command) — one artefact, one version; (b) separate `-api` and `-frontend` images — they scale separately, but two repositories and an extra Node container with no benefit, since the UI does no SSR.
+- *Decision*: **(a)**. Multi-stage build: Node 24 for the UI export → uv for the virtualenv → `python:3.12-slim` runtime, non-root user `10001`.
+- *Consequences*: TLS outside the image (Caddy in the reference stack); the future roles (worker, scheduler, agent-gateway) will be subcommands of `janus-ops` on the same image; the agent binaries (F2) can be included in the image for the air-gapped auto-update.
 
-**ADR-010 — Ruoli e permessi configurabili (v0.6)**
-- *Contesto*: l'utente chiede che l'accesso all'audit log (e in generale ai moduli) sia configurabile dalla gestione utenti.
-- *Opzioni*: (a) ruoli fissi in codice (stato v0.5) — semplice ma ogni cambio richiede un rilascio; (b) **permessi definiti nel codice, ruoli nel database** — ogni ruolo = gruppo LDAP + insieme di permessi, modificabili dalla UI; (c) policy engine (es. OPA/Casbin) — potente ma sproporzionato per l'MVP.
-- *Decisione*: **(b)**. Catalogo permessi in `rbac.py` (`audit.read`, `users.read`, `users.manage`, `roles.manage`; cresce con i moduli). Ruoli built-in `admin` (tutti i permessi, non modificabile), `operator`, `auditor`; ruoli custom creabili. Più ruoli = unione dei permessi.
-- *Conseguenze*: la sessione salva i ruoli al login; i permessi sono ricalcolati a ogni richiesta, quindi una modifica vale subito anche per chi è collegato. Anti-escalation: solo un admin può assegnare/togliere il ruolo admin o agire su un admin; nessuno può eliminarsi, disabilitarsi o togliersi admin. Chi ha `roles.manage` può però darsi altri permessi: per questo di default ce l'ha solo admin. `JANUS_LDAP_GROUP_*` rimossi (AMEND ADR-008).
+**ADR-010 — Configurable roles and permissions (v0.6)**
+- *Context*: the user asks that access to the audit log (and in general to the modules) be configurable from user management.
+- *Options*: (a) fixed roles in code (state v0.5) — simple but every change requires a release; (b) **permissions defined in code, roles in the database** — each role = LDAP group + set of permissions, editable from the UI; (c) policy engine (e.g. OPA/Casbin) — powerful but disproportionate for the MVP.
+- *Decision*: **(b)**. Permission catalogue in `rbac.py` (`audit.read`, `users.read`, `users.manage`, `roles.manage`; it grows with the modules). Built-in roles `admin` (all permissions, not editable), `operator`, `auditor`; custom roles can be created. Several roles = union of the permissions.
+- *Consequences*: the session stores the roles at login; permissions are recomputed on every request, so a change takes effect immediately even for those already connected. Anti-escalation: only an admin can assign/remove the admin role or act on an admin; nobody can delete or disable themselves or remove their own admin role. Whoever has `roles.manage` can however give themselves other permissions: that is why by default only admin has it. `JANUS_LDAP_GROUP_*` removed (AMEND ADR-008).
 
-**ADR-011 — Secret manager esterno: OpenBao / HashiCorp Vault (proposta, v0.9)**
-- *Contesto*: oggi (ADR-004) i segreti sono cifrati nel database con una chiave master (`JANUS_SECRET_KEY`) che sta nel file `.env`. L'utente chiede di poter tenere segreti e chiavi in un secret manager dedicato, come già fanno molte organizzazioni.
-- *Opzioni*:
-  (a) **KEK esterna** — il motore *Transit* di OpenBao/Vault cifra e decifra le chiavi dei singoli segreti (DEK); i segreti restano cifrati in Postgres. La chiave master non esce mai dal secret manager e non serve più in `.env`; la rotazione è quella di Transit (`rotate` + `rewrap`). Cambio minimo al modello attuale.
-  (b) **Segreti esterni** — il contenuto del segreto vive nel motore *KV v2* (es. `janus-ops/credentials/<id>`); Postgres tiene solo metadati e riferimento (mount, path, versione). Permette anche credenziali "a riferimento" verso segreti già gestiti da altri team, in sola lettura.
-  (c) restare solo sul vault locale — nessuna dipendenza, ma la chiave master resta un file da proteggere a mano.
-- *Decisione proposta*: **(a) e (b) entrambe disponibili, (c) resta il default**, selezionabili con `JANUS_SECRET_BACKEND=local|openbao-transit|openbao-kv` dietro l'interfaccia `SecretBackend` già prevista da ADR-004 (l'attuale classe `Vault` ne diventa l'implementazione `local`). Prima (a), più semplice e già sufficiente a togliere la chiave master da `.env`; poi (b).
-- *Prodotti*: **OpenBao** (fork di Vault della Linux Foundation, licenza MPL-2.0, compatibile con Apache-2.0) come riferimento e unico candidato a un eventuale sidecar nella stack; **HashiCorp Vault** con la stessa API (licenza BSL 1.1 dal 2023: utilizzabile dall'utente come servizio esterno, non distribuibile da noi nella stack); altri prodotti (Infisical, CyberArk Conjur, KMS cloud) tramite la stessa interfaccia, i KMS cloud solo dove non serve funzionare air-gapped.
-- *Accesso di Janus-Ops al secret manager*: AppRole (`role_id` + `secret_id` da file o variabile), token rinnovati automaticamente, TLS con CA configurabile, policy minime (solo `encrypt`/`decrypt` sulla chiave Transit; solo il prefisso `janus-ops/` su KV).
-- *Ambito*: credenziali del vault, seed TOTP, e in seguito la chiave privata della CA degli agent (F2) e i segreti delle notifiche (F3).
-- *Migrazione*: comando `janus-ops secrets migrate --to <backend>` che sposta o ricifra tutte le credenziali esistenti, idempotente e registrato nell'audit; ritorno indietro con lo stesso comando.
-- *Conseguenze*: il secret manager diventa una dipendenza di runtime: se non risponde, SSH e tutto ciò che usa credenziali falliscono con `vault_unavailable` (il login no, se il TOTP non è attivo). Nessuna cache del testo in chiaro; eventuale cache in memoria delle DEK decifrate per pochi minuti `OPEN`. Un OpenBao in produzione richiede gestione dell'unseal e backup propri: documentarlo; la modalità "dev" non è ammessa. `[VERIFY: client Python (hvac o HTTP diretto) e parità dell'API Transit/KV tra OpenBao e Vault]`
+**ADR-011 — External secret manager: OpenBao / HashiCorp Vault (proposed v0.9; implemented v0.28–v0.29)**
+- *Context*: today (ADR-004) secrets are encrypted in the database with a master key (`JANUS_SECRET_KEY`) that lives in the `.env` file. The user asks to be able to keep secrets and keys in a dedicated secret manager, as many organisations already do.
+- *Options*:
+  (a) **External KEK** — the *Transit* engine of OpenBao/Vault encrypts and decrypts the keys of the individual secrets (DEK); the secrets stay encrypted in Postgres. The master key never leaves the secret manager and is no longer needed in `.env`; rotation is Transit's (`rotate` + `rewrap`). Minimal change to the current model.
+  (b) **External secrets** — the content of the secret lives in the *KV v2* engine (e.g. `janus-ops/credentials/<id>`); Postgres keeps only metadata and a reference (mount, path, version). It also allows "by reference" credentials pointing to secrets already managed by other teams, read-only.
+  (c) stay on the local vault only — no dependency, but the master key remains a file to protect by hand.
+- *Proposed decision*: **(a) and (b) both available, (c) remains the default**, selectable with `JANUS_SECRET_BACKEND=local|openbao-transit|openbao-kv` behind the `SecretBackend` interface already foreseen by ADR-004 (the current `Vault` class becomes its `local` implementation). First (a), simpler and already enough to remove the master key from `.env`; then (b).
+- *Products*: **OpenBao** (the Linux Foundation fork of Vault, MPL-2.0 licence, compatible with Apache-2.0) as the reference and only candidate for a possible sidecar in the stack; **HashiCorp Vault** with the same API (BSL 1.1 licence since 2023: usable by the user as an external service, not distributable by us in the stack); other products (Infisical, CyberArk Conjur, cloud KMS) through the same interface, cloud KMS only where air-gapped operation is not needed.
+- *Janus-Ops access to the secret manager*: AppRole (`role_id` + `secret_id` from a file or variable), automatically renewed tokens, TLS with a configurable CA, minimal policies (only `encrypt`/`decrypt` on the Transit key; only the `janus-ops/` prefix on KV).
+- *Scope*: vault credentials, TOTP seeds, and later the private key of the agent CA (F2) and the notification secrets (F3).
+- *Migration*: command `janus-ops secrets migrate --to <backend>` that moves or re-encrypts all the existing credentials, idempotent and recorded in the audit; going back with the same command.
+- *Consequences*: the secret manager becomes a runtime dependency: if it does not answer, SSH and everything that uses credentials fail with `vault_unavailable` (login does not, if TOTP is not active). No clear-text cache; a possible in-memory cache of the decrypted DEKs for a few minutes `OPEN`. An OpenBao in production requires its own unseal management and backups: document it; "dev" mode is not allowed. `[VERIFY: Python client (hvac or direct HTTP) and Transit/KV API parity between OpenBao and Vault]`
+- *Outcome (v0.28–v0.29)*: both options implemented and tested against real OpenBao 2.4.1 and Vault 1.20; the Python client is a standard-library HTTP client (no `hvac`); the DEK cache exists (`JANUS_BAO_DEK_CACHE_S`, default 300 s); API parity confirmed. The stack ships an OpenBao with automatic unseal (`docs/OPENBAO.md`).
 
-**ADR-012 — Client SNMP (F8, FR-82)**
-- *Contesto*: NAS, switch e UPS si leggono via SNMP. Serve un client che parli v2c e v3 con autenticazione e cifratura.
-- *Opzioni*: (a) **pysnmp** (lextudio, BSD): puro Python, asyncio, USM v3 completo; l'unica dipendenza transitiva è `pyasn1`, già nel lockfile; (b) `net-snmp` (`snmpget`) come binario nell'immagine: funziona, ma è un processo per lettura, parsing testuale dell'output e gestione delle chiavi v3 sulla riga di comando (la passphrase finirebbe negli argomenti del processo); (c) implementazione propria di BER e USM: nessuna dipendenza, ma crittografia e parsing scritti a mano su un protocollo che parse male è un rischio inaccettabile.
-- *Decisione*: **(a)**, `pysnmp>=7.1.33` (una riga di giustificazione in `backend/pyproject.toml`). Dipendenza da tenere: senza, FR-82 non è realizzabile senza (b) o (c).
-- *Scelte di sicurezza*: solo GET di OID numerici (niente SET, walk, trap, MIB da caricare); v3 con SHA/SHA-256 e AES-128/256; MD5 e DES non offerti; v2c offerto perché molti dispositivi lo usano, ma la community viaggia in chiaro (rischio residuo documentato); `noAuthNoPriv` e `authNoPriv` esistono solo come scelta esplicita dell'operatore, il default è `authPriv`. Ogni lettura usa un `SnmpEngine` nuovo: pysnmp lega un engine al loop che lo usa per primo.
-- *Conseguenze*: pysnmp non ha stub di tipo: nel `pyproject.toml` il modulo è escluso da mypy (`ignore_missing_imports`), i valori restano `Any` al confine.
+**ADR-012 — SNMP client (F8, FR-82)**
+- *Context*: NAS, switches and UPS are read through SNMP. A client is needed that speaks v2c and v3 with authentication and encryption.
+- *Options*: (a) **pysnmp** (lextudio, BSD): pure Python, asyncio, complete v3 USM; the only transitive dependency is `pyasn1`, already in the lockfile; (b) `net-snmp` (`snmpget`) as a binary in the image: it works, but it is one process per read, text parsing of the output and v3 key handling on the command line (the passphrase would end up in the process arguments); (c) own implementation of BER and USM: no dependency, but hand-written cryptography and parsing of a protocol that is easy to parse wrongly is an unacceptable risk.
+- *Decision*: **(a)**, `pysnmp>=7.1.33` (a line of justification in `backend/pyproject.toml`). A dependency to keep: without it, FR-82 cannot be built without (b) or (c).
+- *Security choices*: only GET of numeric OIDs (no SET, walk, trap, MIBs to load); v3 with SHA/SHA-256 and AES-128/256; MD5 and DES not offered; v2c offered because many devices use it, but the community travels in clear text (documented residual risk); `noAuthNoPriv` and `authNoPriv` exist only as an explicit operator choice, the default is `authPriv`. Each read uses a new `SnmpEngine`: pysnmp binds an engine to the loop that uses it first.
+- *Consequences*: pysnmp has no type stubs: in `pyproject.toml` the module is excluded from mypy (`ignore_missing_imports`), values stay `Any` at the boundary.
 
-**ADR-007 — Integrazione AI**
-- *Decisione*: client OpenAI-compatible verso endpoint **self-hosted esterni** (A6), con tool **read-only** esposti dal backend (get_logs, get_metrics, get_audit, get_inventory). LiteLLM solo se serve il routing tra più endpoint/modelli; altrimenti SDK diretto `[VERIFY in F7]`. Le azioni sono prodotte come *Action Plan* strutturato e passano dal normale flusso RBAC + approvazione.
-- *Conseguenze*: nessuna redazione dei dati operativi (consentiti da A6); i segreti del vault non sono mai raggiungibili dai tool; ogni prompt/risposta registrato nell'audit; più endpoint configurabili (es. modello piccolo per triage, grande per RCA).
+**ADR-007 — AI integration**
+- *Decision*: OpenAI-compatible client towards **external self-hosted** endpoints (A6), with **read-only** tools exposed by the backend (get_logs, get_metrics, get_audit, get_inventory). LiteLLM only if routing between several endpoints/models is needed; otherwise the SDK directly `[VERIFY in F7]`. Actions are produced as a structured *Action Plan* and go through the normal RBAC + approval flow.
+- *Consequences*: no redaction of operational data (allowed by A6); vault secrets are never reachable by the tools; every prompt/response recorded in the audit; several endpoints configurable (e.g. a small model for triage, a large one for RCA).
 
-**ADR-008 — Directory utenti: LDAP sidecar**
-- *Contesto*: A5 richiede LDAP come container sidecar nello stack, in modo che utenti e gruppi siano gestiti fuori dal DB applicativo.
-- *Opzioni*: (a) **lldap** — server LDAP leggero con interfaccia web per utenti e gruppi; un solo container, poca configurazione, ma implementa solo un sottoinsieme di LDAP `[VERIFY: attributi di gruppo/memberOf, supporto LDAPS]`; (b) **OpenLDAP** (immagine Bitnami o simile `[VERIFY: immagine mantenuta]`) — LDAP completo, ma gestione schemi e ACL onerosa e nessuna interfaccia inclusa; (c) **389-DS / FreeIPA** — directory enterprise complete, troppo pesanti per un sidecar.
-- *Decisione*: **(a) lldap**, dietro un'interfaccia `DirectoryBackend` basata su LDAP standard (bind + search). Così passare a OpenLDAP o a un AD esterno (FR-07) richiede solo configurazione.
-- *Dettagli (implementati, v0.5)*:
-  - **Flusso**: bind con l'account di servizio `janus-svc` (gruppo `lldap_strict_readonly`) → ricerca dell'utente con filtro configurabile e valore escapato → esattamente un risultato, altrimenti credenziali non valide → bind con il DN dell'utente e la password inserita → gruppi da `memberOf`.
-  - **Ruoli**: dal CN dei gruppi (`JANUS_LDAP_GROUP_*`, default `janus-admins` / `janus-operators` / `janus-auditors`); vince il ruolo più alto; nessun gruppo = accesso negato (403 `no_role`). Il ruolo è fotografato nella sessione al login.
-  - **Client**: **ldap3** 2.9.1 (Python puro) in thread pool. Alternative valutate: *bonsai* (async e mantenuto, ma senza wheel Linux → compilazione con libldap nell'immagine) e *python-ldap* (estensione C, stesso problema). **Rischio residuo**: ultima release di ldap3 nel 2021 e uso di API pyasn1 deprecate (warning filtrati nei test). Mitigazioni: versioni bloccate in `uv.lock`, test di integrazione su lldap reale in CI, interfaccia `DirectoryBackend` per sostituirlo.
-  - **Provisioning**: il job `ldap-init` usa `/app/bootstrap.sh` dell'immagine lldap (idempotente) per creare gruppi e account di servizio. Il `curl` dell'immagine non usa il DNS di Docker: il nome del servizio viene risolto con `getent`.
-  - **Sessioni**: token casuale da 256 bit in cookie `HttpOnly; Secure; SameSite=Strict`, solo lo SHA-256 nel DB; durata 8 h, inattività 1 h; logout e rotazione break-glass revocano le sessioni.
-  - **Protezioni**: max 5 errori per username e 30 per IP in 15 minuti (in memoria, processo singolo come da A2); scritture `/api` con Origin/Referer diverso dall'host rifiutate (CSRF); password vuote rifiutate prima del bind; username limitati a `[A-Za-z0-9._@-]{1,64}`.
-  - **Gestione utenti (v0.6)**: account `janus-manager` nel gruppo `lldap_admin`; utenti e gruppi via API GraphQL di lldap (HTTP con la libreria standard), password via LDAP Password Modify (RFC 3062), perché lldap salva le password con OPAQUE e GraphQL non può impostarle. Con una directory esterna (`JANUS_LLDAP_HTTP_URL` non impostato) la gestione utenti è in sola lettura, la disabilitazione lato Janus resta possibile.
-  - **TOTP (v0.6)**: RFC 6238 implementato con la libreria standard (verificato con i vettori ufficiali), QR generato in locale (`segno`), segreti cifrati AES-256-GCM (`cryptography`) con `JANUS_SECRET_KEY` e legati all'utente; finestra ±1 passo, anti-replay, 10 codici di recupero monouso, 5 errori chiudono la sessione in attesa; dopo il secondo fattore viene emesso un token nuovo. Nessuna chiamata di rete: funziona dietro proxy aziendali e air-gapped.
-  - **Break-glass**: un solo account locale (`JANUS_BREAKGLASS_USERNAME`), hash scrypt (stdlib), impostato con `janus-ops breakglass`; il suo nome non passa mai da LDAP.
-- *Conseguenze*: LDAP diventa una dipendenza del login, mitigata dall'account break-glass (FR-06). Il container LDAP non espone porte all'esterno del compose; la sua interfaccia web va pubblicata solo dietro il reverse proxy e solo per gli Admin `OPEN`. Il volume dati LDAP entra nella procedura di backup.
+**ADR-008 — User directory: LDAP sidecar**
+- *Context*: A5 requires LDAP as a sidecar container in the stack, so that users and groups are managed outside the application DB.
+- *Options*: (a) **lldap** — a lightweight LDAP server with a web interface for users and groups; one container, little configuration, but it implements only a subset of LDAP `[VERIFY: group/memberOf attributes, LDAPS support]`; (b) **OpenLDAP** (Bitnami image or similar `[VERIFY: maintained image]`) — full LDAP, but schema and ACL management is burdensome and no interface is included; (c) **389-DS / FreeIPA** — complete enterprise directories, too heavy for a sidecar.
+- *Decision*: **(a) lldap**, behind a `DirectoryBackend` interface based on standard LDAP (bind + search). So moving to OpenLDAP or to an external AD (FR-07) requires configuration only.
+- *Details (implemented, v0.5)*:
+  - **Flow**: bind with the `janus-svc` service account (group `lldap_strict_readonly`) → search of the user with a configurable filter and escaped value → exactly one result, otherwise invalid credentials → bind with the user's DN and the entered password → groups from `memberOf`.
+  - **Roles**: from the CN of the groups (`JANUS_LDAP_GROUP_*`, default `janus-admins` / `janus-operators` / `janus-auditors`); the highest role wins; no group = access denied (403 `no_role`). The role is snapshotted in the session at login.
+  - **Client**: **ldap3** 2.9.1 (pure Python) in a thread pool. Alternatives evaluated: *bonsai* (async and maintained, but no Linux wheel → compilation with libldap in the image) and *python-ldap* (C extension, same problem). **Residual risk**: last ldap3 release in 2021 and use of deprecated pyasn1 APIs (warnings filtered in the tests). Mitigations: versions pinned in `uv.lock`, integration tests on a real lldap in CI, `DirectoryBackend` interface to replace it.
+  - **Provisioning**: the `ldap-init` job uses `/app/bootstrap.sh` of the lldap image (idempotent) to create groups and service accounts. The image's `curl` does not use Docker's DNS: the service name is resolved with `getent`.
+  - **Sessions**: random 256-bit token in a `HttpOnly; Secure; SameSite=Strict` cookie, only the SHA-256 in the DB; duration 8 h, inactivity 1 h; logout and break-glass rotation revoke the sessions.
+  - **Protections**: max 5 failures per username and 30 per IP in 15 minutes (in memory, single process as per A2); `/api` writes with an Origin/Referer different from the host are refused (CSRF); empty passwords refused before the bind; usernames limited to `[A-Za-z0-9._@-]{1,64}`.
+  - **User management (v0.6)**: `janus-manager` account in the `lldap_admin` group; users and groups through lldap's GraphQL API (HTTP with the standard library), password through LDAP Password Modify (RFC 3062), because lldap stores passwords with OPAQUE and GraphQL cannot set them. With an external directory (`JANUS_LLDAP_HTTP_URL` not set) user management is read-only, disabling on the Janus side remains possible.
+  - **TOTP (v0.6)**: RFC 6238 implemented with the standard library (verified with the official vectors), QR generated locally (`segno`), secrets encrypted with AES-256-GCM (`cryptography`) with `JANUS_SECRET_KEY` and bound to the user; ±1 step window, anti-replay, 10 single-use recovery codes, 5 failures close the pending session; after the second factor a new token is issued. No network calls: it works behind corporate proxies and air-gapped.
+  - **Break-glass**: a single local account (`JANUS_BREAKGLASS_USERNAME`), scrypt hash (stdlib), set with `janus-ops breakglass`; its name never goes through LDAP.
+- *Consequences*: LDAP becomes a dependency of login, mitigated by the break-glass account (FR-06). The LDAP container exposes no ports outside the compose; its web interface must be published only behind the reverse proxy and only for Admins `OPEN`. The LDAP data volume enters the backup procedure.
+- *External directory (v0.28, FR-07)*: the same `DirectoryBackend` serves an external LDAP / Active Directory with a configurable login attribute (`sAMAccountName`), a filter that can also match the UPN, verified StartTLS, no referrals, and nested groups through the `LDAP_MATCHING_RULE_IN_CHAIN` rule; `deploy/compose.external-directory.yaml` runs the stack without the sidecar. Tested with an in-memory LDAP server; not yet on a real AD.
 
-### 3.4 Flussi principali
+### 3.4 Main flows
 
-**Bootstrap agent (F2)**
-1. Operator abilita "Janus Agent" su un nodo con capability SSH.
-2. Worker: SSH → `uname -m`, detect init system → SFTP del binario in `/usr/local/bin/janus-agent`.
-3. Server genera **token di enrollment monouso** (TTL breve) + scrive `/etc/janus-agent/config.yaml` (URL, CA, token, proxy, policy).
-4. Unit systemd avviata → agent si connette, presenta il token, riceve un certificato client (CSR generata sull'agent: la chiave privata non lascia mai il nodo).
-5. Il token viene invalidato; il nodo passa "online".
+**Agent bootstrap (F2)**
+1. An Operator enables "Janus Agent" on a node with the SSH capability.
+2. Worker: SSH → `uname -m`, detect the init system → SFTP of the binary to `/usr/local/bin/janus-agent`.
+3. The server generates a **single-use enrollment token** (short TTL) + writes `/etc/janus-agent/config.yaml` (URL, CA, token, proxy, policy).
+4. systemd unit started → the agent connects, presents the token, receives a client certificate (CSR generated on the agent: the private key never leaves the node).
+5. The token is invalidated; the node goes "online".
 
-**Telemetria → stato → notifica (F2–F3)**
-agent (batch ogni N s, buffer bbolt) → gateway (validazione, insert batch) → Redis pub/sub → evaluator nel worker (soglie, isteresi, dipendenze, downtime) → `problem` aperto/chiuso → notification router → WS al browser.
+**Telemetry → state → notification (F2–F3)**
+agent (batch every N s, bbolt buffer) → gateway (validation, batch insert) → Redis pub/sub → evaluator in the worker (thresholds, hysteresis, dependencies, downtime) → `problem` opened/closed → notification router → WS to the browser.
 
 ---
 
-## 4. Data Engineer — Modello dati (logico)
+## 4. Data Engineer — Data model (logical)
 
-| Entità | Campi chiave | Note |
+| Entity | Key fields | Notes |
 |---|---|---|
-| `user` | id, ldap_dn, username, totp_secret_enc, totp_enabled, totp_last_step, is_breakglass, pwd hash (scrypt, solo break-glass), is_active, last_login | Profilo locale creato al primo login LDAP |
-| `role`, `role_permission` | name, description, ldap_group (unico), builtin; (role, permission) | **AMEND Data Engineer (v0.6)**: sostituiscono `role_mapping` (migrazione `0002`) |
-| `user_session` | token_hash, roles[], stage (`mfa_pending`/`full`), mfa_failures, scadenze | `0002`: più ruoli per sessione e passo TOTP |
-| `totp_recovery_code` | user_id, code_hash (SHA-256), used_at | Codici monouso |
-| `node` | id, name, fqdn/ip, environment, parent_id, created_by | `parent_id` → dipendenze (FR-32) |
+| `user` | id, ldap_dn, username, totp_secret_enc, totp_enabled, totp_last_step, is_breakglass, pwd hash (scrypt, break-glass only), is_active, last_login | Local profile created at the first LDAP login |
+| `role`, `role_permission` | name, description, ldap_group (unique), builtin; (role, permission) | **AMEND Data Engineer (v0.6)**: they replace `role_mapping` (migration `0002`) |
+| `user_session` | token_hash, roles[], stage (`mfa_pending`/`full`), mfa_failures, expiries | `0002`: several roles per session and the TOTP step |
+| `totp_recovery_code` | user_id, code_hash (SHA-256), used_at | Single-use codes |
+| `node` | id, name, fqdn/ip, environment, parent_id, created_by | `parent_id` → dependencies (FR-32) |
 | `node_capability` | node_id, type (`agent/ssh/proxmox/docker/snmp`), config jsonb, credential_id | |
-| `tag`, `node_tag`, `group`, `node_group` | | Inventory Ansible dinamico |
-| `credential` | id, type, ciphertext, dek_wrapped, kek_version | Mai restituito in chiaro via API |
+| `tag`, `node_tag`, `group`, `node_group` | | Dynamic Ansible inventory |
+| `credential` | id, type, ciphertext, dek_wrapped, kek_version | Never returned in clear through the API |
 | `agent` | node_id, cert_fingerprint, version, arch, last_seen, policy jsonb | |
-| `enrollment_token` | hash, node_id, expires_at, used_at | Solo l'hash in DB |
-| `metric_series` | id, node_id, name, labels jsonb | Indice unico (node_id, name, labels) |
-| `metric_point` (hypertable) | time, series_id, value | Indice (series_id, time DESC) |
+| `enrollment_token` | hash, node_id, expires_at, used_at | Only the hash in the DB |
+| `metric_series` | id, node_id, name, labels jsonb | Unique index (node_id, name, labels) |
+| `metric_point` (hypertable) | time, series_id, value | Index (series_id, time DESC) |
 | `check` | id, node_id, type, params, warn/crit, cycles, interval | |
-| `check_state` | check_id, state, since, consecutive, last_output | Stato corrente |
-| `check_result` (hypertable) | time, check_id, state, output | Storico |
-| `problem` | id, check_id, opened_at, closed_at, ack_by, ack_comment | Tabella "unhandled problems" |
+| `check_state` | check_id, state, since, consecutive, last_output | Current state |
+| `check_result` (hypertable) | time, check_id, state, output | History |
+| `problem` | id, check_id, opened_at, closed_at, ack_by, ack_comment | "Unhandled problems" table |
 | `downtime` | scope (node/check/group), start, end, author, reason | |
 | `notification_channel`, `notification_rule` | | Escalation |
 | `audit_event` | id, ts, actor, action, target, payload, prev_hash, hash | Append-only, hash chain |
 | `terminal_session` | id, user, node, started, ended, recording_path | |
 | `playbook`, `job_run`, `job_event` | | ansible-runner events |
-| `gitops_stack`, `gitops_run` | | F8 (GitOps, migrazione `0015`): segreto webhook sigillato nel vault; al più un run `running` per stack |
-| `workflow`, `workflow_run`, `workflow_step_run` | | F8 (da fare) |
+| `gitops_stack`, `gitops_run` | | F8 (GitOps, migration `0015`): webhook secret sealed in the vault; at most one `running` run per stack |
+| `workflow`, `workflow_run`, `workflow_step_run`, `workflow_approval` | | F8 (migrations `0021`, `0024`): definition as JSON, runs, one row per step (`skipped` included), approvals; webhook secret sealed in the vault |
 | `ai_conversation`, `action_plan` | status (draft/approved/rejected/executed) | |
 
-Consistenza: transazionale (PG) per inventory/vault/audit; eventual (≤ ciclo check) per gli stati di monitoring.
-Migrazioni: Alembic, up/down, reversibili. Lo **schema DDL F0–F3** è nella migrazione
+Consistency: transactional (PG) for inventory/vault/audit; eventual (≤ one check cycle) for the monitoring states.
+Migrations: Alembic, up/down, reversible. The **F0–F3 DDL schema** is in migration
 [`0001_initial_schema.py`](../backend/src/janus_ops/migrations/versions/0001_initial_schema.py):
-ogni indice ha un commento con il pattern di query che lo giustifica. Scelte rilevanti: enumerazioni come
-`text` + `CHECK` (niente `ALTER TYPE`), hypertable `metric_point` (compressione 7 g, retention 30 g) e
-`check_result` (compressione 7 g, retention 90 g) senza FK verso le tabelle padre, `audit_event`
-append-only tramite trigger (UPDATE/DELETE/TRUNCATE bloccati), al massimo un problema aperto per check
-e un solo account break-glass (indici unici parziali). Continuous aggregates rimandati a F2, quando
-esisteranno le query delle dashboard. Le tabelle di F4+ arriveranno con migrazioni dedicate.
+every index has a comment with the query pattern that justifies it. Notable choices: enumerations as
+`text` + `CHECK` (no `ALTER TYPE`), hypertables `metric_point` (7 d compression, 30 d retention) and
+`check_result` (7 d compression, 90 d retention) without FKs to the parent tables, `audit_event`
+append-only through triggers (UPDATE/DELETE/TRUNCATE blocked), at most one open problem per check
+and a single break-glass account (partial unique indexes). Continuous aggregates postponed to F2, when
+the dashboard queries will exist. The F4+ tables will arrive with dedicated migrations.
 
 ---
 
-## 5. Roadmap per fasi
+## 5. Roadmap by phase
 
-Ogni fase termina con un rilascio installabile e i propri criteri di accettazione verdi.
+Each phase ends with an installable release and its own acceptance criteria green.
 
-| Fase | Contenuto | Uscita |
+| Phase | Content | Exit |
 |---|---|---|
-| **F0 Foundations** | Monorepo, Makefile, CI (lint/test per linguaggio), compose (proxy, app, migrate, PG+TS, LDAP sidecar), login LDAP + TOTP + break-glass, RBAC da gruppi LDAP, inventory CRUD, vault, audit con hash chain, UI shell (sidebar, command palette, design tokens Obsidian Graphite) | AC-01, AC-02, AC-02b, AC-02c |
-| **F1 SSH Bastion** | AsyncSSH ⇄ WS ⇄ xterm.js, credenziali dal vault, multi-tab, SFTP, ProxyJump, recording | AC-03 |
-| **F2 Agent & Telemetry** | Agent Go (tunnel, telemetria, buffer), gateway, enrollment mTLS, bootstrap SSH, ingest Timescale, NOC dashboard (hexagon, node cards) | AC-04, AC-05 |
-| **F3 Alerting** | Check engine, isteresi, problems, ack, downtime, dipendenze, flapping, notifiche, discovery | AC-06..08 |
-| **F4 Containers** | Docker proxy nell'agent, viste container, log/stats/exec, compose stack | |
-| **F5 Proxmox** | Client PVE, overview cluster, lifecycle VM/LXC, backup audit, console | |
-| **F6 Ansible** | Inventory dinamico, catalogo playbook da Git, upload locale, editor incorporato, mount di rete (NFS/SMB), SFTP/SCP; survey, run live, storico | |
-| **F7 AI Copilot** | Diagnose su problem, tool read-only, action plan + approvazione | |
-| **F8+** | Workflow visuale, GitOps, SNMP, PTY/exec via agent, auto-update firmato, NTLM, AD/LDAP esterno, OIDC, agent Windows, **secret manager esterno OpenBao / HashiCorp Vault (ADR-011)** | FR-86 |
+| **F0 Foundations** | Monorepo, Makefile, CI (lint/test per language), compose (proxy, app, migrate, PG+TS, LDAP sidecar), LDAP login + TOTP + break-glass, RBAC from LDAP groups, inventory CRUD, vault, audit with hash chain, UI shell (sidebar, command palette, Obsidian Graphite design tokens) | AC-01, AC-02, AC-02b, AC-02c |
+| **F1 SSH Bastion** | AsyncSSH ⇄ WS ⇄ xterm.js, credentials from the vault, multi-tab, SFTP, ProxyJump, recording | AC-03 |
+| **F2 Agent & Telemetry** | Go agent (tunnel, telemetry, buffer), gateway, mTLS enrollment, SSH bootstrap, Timescale ingest, NOC dashboard (hexagon, node cards) | AC-04, AC-05 |
+| **F3 Alerting** | Check engine, hysteresis, problems, ack, downtime, dependencies, flapping, notifications, discovery | AC-06..08 |
+| **F4 Containers** | Docker proxy in the agent, container views, logs/stats/exec, compose stacks | |
+| **F5 Proxmox** | PVE client, cluster overview, VM/LXC lifecycle, backup audit, console | |
+| **F6 Ansible** | Dynamic inventory, playbook catalogue from Git, local upload, built-in editor, network mounts (NFS/SMB), SFTP/SCP; survey, live runs, history | |
+| **F7 AI Copilot** | Diagnose on a problem, read-only tools, action plan + approval | |
+| **F8+** | Visual workflow, GitOps, SNMP, PTY/exec through the agent, signed auto-update, NTLM, external AD/LDAP, OIDC, Windows agent, **external secret manager OpenBao / HashiCorp Vault (ADR-011)** | FR-86 |
 
-Razionale dell'ordine: F1 dà valore immediato senza agent e costruisce i mattoni (vault, WS, audit) riusati
+Rationale for the order: F1 gives immediate value without an agent and builds the bricks (vault, WS, audit) reused by everything else; F2–F3 are the "Checkmk" core; Docker comes before Proxmox because it reuses the tunnel just built.
 
-### 5.1 Avanzamento F0
+### 5.1 F0 progress
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Monorepo, Makefile, `.env.example`, script | ✅ | `make help`; `make env` idempotente |
-| Schema DDL F0–F3 (migrazione `0001`) | ✅ | 13 test di integrazione su TimescaleDB 2.32 reale: round trip up/down/up, hypertable e policy, trigger append-only, vincoli |
-| Backend: config, log JSON, `/health`, `/ready`, CLI | ✅ | 21 unit test, ruff, mypy strict |
-| UI shell (sidebar dal mockup, token, favicon, stato del control plane) | ✅ | ESLint, `tsc`, export statico |
-| Immagine unica + Compose (Caddy, app, migrate, TimescaleDB, lldap) | ✅ | Stack avviata: HTTPS, `/ready` = ok, migrazione ripetuta senza effetti |
-| CI GitHub Actions + publish Docker Hub su tag | ✅ | actionlint, shellcheck; prima esecuzione al push |
-| Login LDAP (username + password), ruoli da gruppi, sessioni, `require_role` | ✅ | 26 test di integrazione su lldap + TimescaleDB reali, inclusi AC-02b (cambio gruppo via API lldap) e AC-02c (LDAP spento) |
-| Break-glass (`janus-ops breakglass`) | ✅ | Test di integrazione + prova nello stack Compose |
-| Audit con hash chain (scrittura e verifica) | ✅ | `verify_chain` nei test; trigger append-only |
-| Pagina di login, guardia sulle pagine, utente e logout nella sidebar | ✅ | ESLint, `tsc`, export statico; prova HTTPS via Caddy |
-| Amministratore iniziale da `.env` (`janus-ops setup`, solo se assente) | ✅ | Test di integrazione + stack Compose (rilancio idempotente) |
-| Gestione utenti (API + pagina Users & roles) | ✅ | Test: ciclo di vita completo, validazioni, anti-escalation, anti-lockout |
-| Ruoli e permessi configurabili, ruoli custom (ADR-010) | ✅ | Test: permesso `audit.read` concesso/revocato con effetto immediato su sessioni attive |
-| TOTP opzionale (setup con QR, login in due passi, recovery, reset admin) | ✅ | Vettori RFC 6238; test di integrazione; prova HTTPS via Caddy |
-| Consultazione audit (API + UI, filtri, verifica catena) | ✅ | AC-03 |
-| Inventory: nodi, tag, gruppi (variabili Ansible), dipendenze, capability validate | ✅ | AC-01; test su regole capability/credenziale, cicli, filtri, audit |
-| Vault credenziali (envelope encryption, segreti in sola scrittura) | ✅ | Test: cifratura legata alla riga, rotazione, nessun segreto in API/DB/audit; fingerprint uguale a `ssh-keygen` |
-| Command palette `Ctrl+K` | ⏳ | FR-05 |
+| Monorepo, Makefile, `.env.example`, scripts | ✅ | `make help`; `make env` idempotent |
+| F0–F3 DDL schema (migration `0001`) | ✅ | 13 integration tests on a real TimescaleDB 2.32: up/down/up round trip, hypertables and policies, append-only trigger, constraints |
+| Backend: config, JSON log, `/health`, `/ready`, CLI | ✅ | 21 unit tests, ruff, mypy strict |
+| UI shell (sidebar from the mockup, tokens, favicon, control-plane status) | ✅ | ESLint, `tsc`, static export |
+| Single image + Compose (Caddy, app, migrate, TimescaleDB, lldap) | ✅ | Stack started: HTTPS, `/ready` = ok, repeated migration without effects |
+| GitHub Actions CI + Docker Hub publish on tag | ✅ | actionlint, shellcheck; first run at the push |
+| LDAP login (username + password), roles from groups, sessions, `require_role` | ✅ | 26 integration tests on real lldap + TimescaleDB, including AC-02b (group change through the lldap API) and AC-02c (LDAP off) |
+| Break-glass (`janus-ops breakglass`) | ✅ | Integration test + test in the Compose stack |
+| Audit with hash chain (write and verify) | ✅ | `verify_chain` in the tests; append-only trigger |
+| Login page, guard on the pages, user and logout in the sidebar | ✅ | ESLint, `tsc`, static export; HTTPS test through Caddy |
+| Initial administrator from `.env` (`janus-ops setup`, only if absent) | ✅ | Integration test + Compose stack (idempotent re-run) |
+| User management (API + Users & roles page) | ✅ | Test: full lifecycle, validations, anti-escalation, anti-lockout |
+| Configurable roles and permissions, custom roles (ADR-010) | ✅ | Test: `audit.read` permission granted/revoked with immediate effect on active sessions |
+| Optional TOTP (setup with QR, two-step login, recovery, admin reset) | ✅ | RFC 6238 vectors; integration test; HTTPS test through Caddy |
+| Audit viewer (API + UI, filters, chain verification) | ✅ | AC-03 |
+| Inventory: nodes, tags, groups (Ansible variables), dependencies, validated capabilities | ✅ | AC-01; tests on capability/credential rules, cycles, filters, audit |
+| Credential vault (envelope encryption, write-only secrets) | ✅ | Test: row-bound encryption, rotation, no secret in API/DB/audit; fingerprint equal to `ssh-keygen` |
+| `Ctrl+K` command palette | ⏳ | FR-05 |
 
-### 5.3 Avanzamento F2
+### 5.3 F2 progress
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Agent Go statico (CGO off), nessuna porta in ascolto (NFR-01) | ✅ | CI: `file` → statically linked; E2E: `ldd` → not a dynamic executable, nessun socket in LISTEN dell'agent |
-| Bootstrap via SSH (FR-20): root o `sudo -n`, `uname -m`, systemd, copia binario, config 0600, unit con hardening | ✅ | 8 test con SSH in-process (token mai su riga di comando, errori `needs_root`, `unsupported_arch`, `systemd_required`, re-bootstrap); E2E su Debian 13 amd64 con systemd: online in 0,9 s |
-| Tunnel WSS in uscita, proxy HTTP(S) con CONNECT, CA custom (FR-21) | ✅ | Test Go con server TLS e proxy CONNECT; certificato non fidato → nessun dato inviato. E2E dietro squid non fatto (NFR-02 `OPEN`) |
-| Enrollment con token monouso, chiave ed25519, revoca, disinstallazione | ✅ | Test: firma sbagliata, nonce/host diversi, token scaduto o riusato, chiave clonata su altro nodo, capability disattivata (connessione chiusa subito), revoca e reintegro |
-| Telemetria ogni 5–15 s (FR-22): CPU, load, RAM/swap, disk I/O, file system, rete, uptime, processi, unit systemd fallite, porte in ascolto, top processi | ✅ | Test Go su procfs finto (rate, reset dei contatori, nomi di processo con parentesi, socket IPv4/IPv6); valori uguali a `df` sull'host |
-| Buffer su disco (bbolt, 24 h) e invio differito (FR-23, AC-05) | ✅ | Test Go: campioni non confermati reinviati dopo la riconnessione; ingest idempotente (indice unico `series_id, time`). E2E: server fermo 3 min → 27 punti, gap massimo 10,04 s |
-| Dashboard NOC (FR-24): esagono host, node card con CPU/RAM/disco e sparkline, "needs attention" | ✅ | Test API; screenshot. "Needs attention" usa soglie fisse finché F3 non porta check, problemi e notifiche |
-| Pagina nodo: agent, azioni, grafici 1h/6h/24h/7d, porte, processi, systemd | ✅ | Test API dei grafici; screenshot |
-| AC-04 su Debian **e Rocky**, amd64 **e arm64** | ⚠️ | Verificato su Debian 13 amd64; Rocky e arm64 non ancora provati |
-| Continuous aggregates 1m/1h, test di carico 500 nodi (NFR-05) | ⏳ | Rimandati: i grafici fino a 7 giorni leggono i dati grezzi con `time_bucket` |
+| Static Go agent (CGO off), no listening ports (NFR-01) | ✅ | CI: `file` → statically linked; E2E: `ldd` → not a dynamic executable, no LISTEN socket of the agent |
+| Bootstrap over SSH (FR-20): root or `sudo -n`, `uname -m`, systemd, binary copy, config 0600, unit with hardening | ✅ | 8 tests with in-process SSH (token never on a command line, errors `needs_root`, `unsupported_arch`, `systemd_required`, re-bootstrap); E2E on Debian 13 amd64 with systemd: online in 0.9 s |
+| Outbound WSS tunnel, HTTP(S) proxy with CONNECT, custom CA (FR-21) | ✅ | Go tests with a TLS server and a CONNECT proxy; untrusted certificate → no data sent. E2E behind squid not done (NFR-02 `OPEN`) |
+| Enrollment with a single-use token, ed25519 key, revocation, uninstall | ✅ | Tests: wrong signature, different nonce/host, expired or reused token, key cloned on another node, capability disabled (connection closed at once), revocation and re-enrollment |
+| Telemetry every 5–15 s (FR-22): CPU, load, RAM/swap, disk I/O, file systems, network, uptime, processes, failed systemd units, listening ports, top processes | ✅ | Go tests on a fake procfs (rates, counter resets, process names with parentheses, IPv4/IPv6 sockets); values equal to `df` on the host |
+| On-disk buffer (bbolt, 24 h) and deferred sending (FR-23, AC-05) | ✅ | Go tests: unconfirmed samples resent after reconnection; idempotent ingest (unique index `series_id, time`). E2E: server stopped for 3 min → 27 points, maximum gap 10.04 s |
+| NOC dashboard (FR-24): host hexagon, node cards with CPU/RAM/disk and sparkline, "needs attention" | ✅ | API tests; screenshot. "Needs attention" uses fixed thresholds until F3 brings checks, problems and notifications |
+| Node page: agent, actions, 1h/6h/24h/7d charts, ports, processes, systemd | ✅ | API tests of the charts; screenshot |
+| AC-04 on Debian **and Rocky**, amd64 **and arm64** | ⚠️ | Verified on Debian 13 amd64; Rocky and arm64 not tried yet |
+| 1m/1h continuous aggregates, 500-node load test (NFR-05) | ⏳ | Postponed: charts up to 7 days read the raw data with `time_bucket` |
 
-Decisioni (Security):
-- **Agent come root con hardening systemd**: serve root per leggere i socket di tutti i processi (porte in ascolto) e interrogare systemd; `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, `RestrictAddressFamilies` e scrittura solo in `/etc/janus-agent` (rimozione del token) e `/var/lib/janus-agent`.
-- **Il token non compare mai su una riga di comando**: viaggia solo nel file di configurazione (0600) caricato via SFTP; l'agent lo cancella dal file dopo l'enrollment.
-- **Policy locale** (`allow_exec`, `allow_pty`, `allow_docker`, tutte `false`): scritta nella config dal bootstrap, riportata al server e mostrata, mai modificabile dal server (C9). In F2 l'agent non esegue nulla per conto del server.
-- **CA dell'agent**: il proxy pubblica solo il certificato *pubblico* della CA interna di Caddy in un volume condiviso (`pki_public`); la chiave della CA resta nel volume di Caddy, non montato nell'app. Con certificati ACME pubblici gli agent usano le CA di sistema.
-- **Ingest robusto**: un punto non valido viene scartato, mai l'intero batch (bloccherebbe il buffer dell'agent); limite di 2000 serie per nodo contro label esplosive; timestamp accettati tra −48 h e +5 min.
-- **Una connessione per nodo**: una nuova connessione con la stessa chiave chiude la precedente (`replaced`); una chiave già registrata su un altro nodo (VM clonata) è rifiutata.
-- **Redis non introdotto**: la dashboard interroga l'API ogni 10 s (NFR-04 ≤ 30 s rispettato); Redis arriverà se servirà con il worker di F3.
+Decisions (Security):
+- **Agent as root with systemd hardening**: root is needed to read the sockets of all the processes (listening ports) and to query systemd; `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, `RestrictAddressFamilies` and writing only to `/etc/janus-agent` (token removal) and `/var/lib/janus-agent`.
+- **The token never appears on a command line**: it travels only in the configuration file (0600) uploaded over SFTP; the agent deletes it from the file after enrollment.
+- **Local policy** (`allow_exec`, `allow_pty`, `allow_docker`, all `false`): written to the config by the bootstrap, reported to the server and displayed, never modifiable by the server (C9). In F2 the agent executes nothing on behalf of the server.
+- **Agent CA**: the proxy publishes only the *public* certificate of Caddy's internal CA in a shared volume (`pki_public`); the CA key stays in Caddy's volume, not mounted in the app. With public ACME certificates the agents use the system CAs.
+- **Robust ingest**: an invalid point is discarded, never the whole batch (it would block the agent's buffer); limit of 2000 series per node against label explosions; timestamps accepted between −48 h and +5 min.
+- **One connection per node**: a new connection with the same key closes the previous one (`replaced`); a key already registered on another node (cloned VM) is refused.
+- **Redis not introduced**: the dashboard polls the API every 10 s (NFR-04 ≤ 30 s met); Redis will arrive if needed with the F3 worker.
 
-### 5.5 Avanzamento F4
+### 5.5 F4 progress
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Stream multiplexati sul WebSocket dell'agent (frame binari, feature `streams` annunciata nell'hello) | ✅ | Test Go (relay, rifiuto per policy, socket assente); test Python del mux; agent vecchi non ricevono frame binari (`agent_outdated`) |
-| Docker via agent solo con `allow_docker: true` nella policy locale, scelto all'installazione via SSH | ✅ | Test; E2E sul nodo `docker` reale: rifiuto prima, accesso dopo la reinstallazione |
-| Docker via SSH (`direct-streamlocal` a `/var/run/docker.sock`, connessioni riusate) | ✅ | E2E sul nodo reale |
-| Container: elenco, inspect (solo nomi delle variabili d'ambiente), log e log in diretta, statistiche, start/stop/restart/kill/pause/remove | ✅ | Test con Docker simulato attraverso il gateway; E2E in lettura su Docker 29 reale |
-| Stack Compose dalle label: elenco servizi, start/stop/restart dell'intero progetto | ✅ | Test; E2E (7 stack) |
-| Exec nel browser (xterm.js), audit di inizio e fine con comando e durata | ✅ | E2E: `echo` eseguito in un container reale |
-| Deploy di stack da file Compose | ⏳ | Richiede la CLI compose sul nodo o un parser lato server: rimandato |
+| Multiplexed streams on the agent WebSocket (binary frames, `streams` feature announced in the hello) | ✅ | Go tests (relay, refusal by policy, missing socket); Python mux tests; old agents receive no binary frames (`agent_outdated`) |
+| Docker through the agent only with `allow_docker: true` in the local policy, chosen at installation over SSH | ✅ | Tests; E2E on the real `docker` node: refusal before, access after the reinstallation |
+| Docker over SSH (`direct-streamlocal` to `/var/run/docker.sock`, reused connections) | ✅ | E2E on the real node |
+| Containers: list, inspect (environment variable names only), logs and live logs, statistics, start/stop/restart/kill/pause/remove | ✅ | Tests with simulated Docker through the gateway; read-only E2E on a real Docker 29 |
+| Compose stacks from labels: list of services, start/stop/restart of the whole project | ✅ | Tests; E2E (7 stacks) |
+| Exec in the browser (xterm.js), start and end audit with command and duration | ✅ | E2E: `echo` run in a real container |
+| Stack deploy from a Compose file | ⏳ | Requires the compose CLI on the node or a server-side parser: postponed |
 
-Decisioni (Security):
-- **Docker = root sul nodo**: per questo è opt-in nella policy locale dell'agent (C9), scritto solo da chi installa via SSH; il server non può attivarlo da remoto.
-- **Nessuna API Docker grezza esposta**: il browser chiama endpoint Janus-Ops; il server sceglie le chiamate. Nomi di container e progetti validati; variabili d'ambiente mostrate senza valori.
-- **Permessi separati**: `containers.manage` (azioni) e `containers.exec` (shell, come `ssh.connect`); la lettura usa `inventory.read`. Ogni azione ed exec nell'audit.
-- **Flusso**: al massimo 64 stream per agent; uno stream con troppi dati in coda viene chiuso per non bloccare il tunnel (manca un controllo di flusso per stream `OPEN`).
+Decisions (Security):
+- **Docker = root on the node**: that is why it is opt-in in the agent's local policy (C9), written only by whoever installs over SSH; the server cannot enable it remotely.
+- **No raw Docker API exposed**: the browser calls Janus-Ops endpoints; the server chooses the calls. Container and project names validated; environment variables shown without values.
+- **Separate permissions**: `containers.manage` (actions) and `containers.exec` (shell, like `ssh.connect`); reading uses `inventory.read`. Every action and exec in the audit.
+- **Flow**: at most 64 streams per agent; a stream with too much queued data is closed so as not to block the tunnel (per-stream flow control for `OPEN` is missing).
 
-### 5.6 Avanzamento F5
+### 5.6 F5 progress
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Client PVE async (httpx2): ticket con rinnovo e CSRF, o token API; errori tipizzati | ✅ | Test unitari con trasporto simulato (login, CSRF, ticket scaduto, token, 401/403/5xx, host irraggiungibile) |
-| Cluster dai nodi con capability `proxmox` (stesso cluster = stessa vista), failover tra i membri | ✅ | Test con server PVE finto in HTTPS: un membro giù non nasconde il cluster; E2E su cluster reale a 2 nodi (PVE 9.2.25) |
-| Panoramica: quorum, nodi, storage (condivisi una volta sola), VM/LXC (FR-50) | ✅ | Test; E2E sul cluster reale (12 guest) |
-| Ciclo di vita: start/shutdown/reboot/stop/suspend/resume, snapshot (crea/elimina/rollback), clone, migrazione, task con log (FR-51) | ✅ parziale | Test con PVE finto (reboot) e unitari; sul cluster reale **non** sono state eseguite azioni che modificano le VM |
-| Console LXC e shell nodo via termproxy (xterm.js); VM tramite porta seriale (FR-52) | ✅ parziale | E2E: console LXC reale con prompt di login; noVNC (grafica) non incluso |
-| Audit backup: mancanti, falliti, troppo vecchi, senza job; soglia dedotta dalla schedule di ogni job (FR-53) | ✅ | Test unitari sulle regole; E2E: 2 guest senza backup rilevati su 12 |
-| Backup in PBS e replica | ⏳ | I contenuti PBS sono letti come qualunque storage `backup` (test con la forma PBS di PVE, fixture); **da provare con un PBS reale**: il server non era raggiungibile da questo ambiente |
-| Alert dai backup (check `backup` verso il motore F3) | ✅ | Test unitari: nessun backup o backup falliti → CRIT, backup vecchi o guest fuori da ogni job → WARN, errore PVE → UNKNOWN, `max_age_h` rispettato. Audit condiviso tra API e motore (`proxmox/backup_audit.py`) |
+| Async PVE client (httpx2): ticket with renewal and CSRF, or API token; typed errors | ✅ | Unit tests with a simulated transport (login, CSRF, expired ticket, token, 401/403/5xx, unreachable host) |
+| Cluster from the nodes with the `proxmox` capability (same cluster = same view), failover between members | ✅ | Tests with a fake PVE server over HTTPS: a member down does not hide the cluster; E2E on a real 2-node cluster (PVE 9.2.25) |
+| Overview: quorum, nodes, storage (shared ones counted once), VMs/LXCs (FR-50) | ✅ | Tests; E2E on the real cluster (12 guests) |
+| Lifecycle: start/shutdown/reboot/stop/suspend/resume, snapshots (create/delete/rollback), clone, migration, tasks with logs (FR-51) | ✅ partial | Tests with a fake PVE (reboot) and unit tests; on the real cluster **no** actions that modify the VMs were run |
+| LXC console and node shell through termproxy (xterm.js); VMs through the serial port (FR-52) | ✅ partial | E2E: real LXC console with a login prompt; noVNC (graphical) not included |
+| Backup audit: missing, failed, too old, without a job; threshold deduced from each job's schedule (FR-53) | ✅ | Unit tests on the rules; E2E: 2 guests without a backup detected out of 12 |
+| Backups in PBS and replication | ⏳ | PBS contents are read like any `backup` storage (tests with PVE's PBS shape, fixture); **to be tried with a real PBS**: the server was not reachable from this environment |
+| Alerts from the backups (`backup` check towards the F3 engine) | ✅ | Unit tests: no backup or failed backups → CRIT, old backups or guests outside every job → WARN, PVE error → UNKNOWN, `max_age_h` respected. Audit shared between API and engine (`proxmox/backup_audit.py`) |
 
-Decisioni (Security):
-- **Credenziali nel vault**, mai nel browser; utente con 2FA non supportato con password: usare un token API.
-- **Il browser non chiama PVE**: endpoint Janus-Ops con nomi di nodo, snapshot e UPID validati; la password di cloud-init non è mai restituita.
-- **Permessi**: lettura con `inventory.read`; azioni con `proxmox.manage`; console con `proxmox.console`, e la shell del nodo richiede anche `ssh.connect`. Ogni azione e ogni console (inizio/fine, durata) nell'audit.
+Decisions (Security):
+- **Credentials in the vault**, never in the browser; a user with 2FA is not supported with a password: use an API token.
+- **The browser does not call PVE**: Janus-Ops endpoints with validated node names, snapshots and UPIDs; the cloud-init password is never returned.
+- **Permissions**: reading with `inventory.read`; actions with `proxmox.manage`; console with `proxmox.console`, and the node shell also requires `ssh.connect`. Every action and every console (start/end, duration) in the audit.
 
-### 5.7 Ambienti e ambito dei nodi
+### 5.7 Environments and node scope
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Ambienti configurabili (nome fisso, etichetta, colore, ordine); non eliminabili se in uso | ✅ | Test di integrazione; usati da nodi, filtri delle regole di notifica e UI |
-| Ambito per ruolo: `tutti` oppure regole (ambiente, tag, gruppo, capability, nodi) in AND dentro la regola e OR tra regole; unione tra ruoli, un ruolo senza limiti prevale | ✅ | Test con tre ruoli ristretti e uno senza limiti: elenchi, 404 sui singoli nodi, dashboard, check, downtime, container |
-| Chi può gestire i nodi non può crearne o spostarne fuori dal proprio ambito (403, annullato) | ✅ | Test |
-| Editor dell'ambito nella pagina ruoli (regole a pulsanti con riepilogo in parole) | ✅ | Build e prova manuale |
-| Audit log, notifiche e canali | ⚠️ | Restano globali (servono permessi amministrativi): l'audit non è filtrato per nodo |
-| Downtime di gruppo | ⚠️ | Solo per ruoli senza limiti, perché toccano nodi fuori ambito |
-| Proxmox | ⚠️ | L'ambito si applica agli host PVE dell'inventario: un cluster è visibile se uno dei suoi host lo è, e mostra tutti i suoi guest |
+| Configurable environments (fixed name, label, colour, order); not deletable while in use | ✅ | Integration test; used by nodes, notification-rule filters and the UI |
+| Per-role scope: `all` or rules (environment, tag, group, capability, nodes) in AND within a rule and OR between rules; union across roles, a role without limits prevails | ✅ | Test with three restricted roles and one without limits: lists, 404 on single nodes, dashboard, checks, downtime, containers |
+| Whoever can manage nodes cannot create or move them outside their own scope (403, cancelled) | ✅ | Test |
+| Scope editor in the roles page (rules as buttons with a summary in words) | ✅ | Build and manual test |
+| Audit log, notifications and channels | ⚠️ | They remain global (administrative permissions needed): the audit is not filtered by node |
+| Group downtime | ⚠️ | Only for roles without limits, because they touch nodes outside the scope |
+| Proxmox | ⚠️ | The scope applies to the PVE hosts of the inventory: a cluster is visible if one of its hosts is, and shows all its guests |
 
-Decisioni (Security):
-- **404 e non 403** per i nodi fuori ambito: non si rivela che esistono.
-- **Filtro nel server**, non nella UI: ogni query sui nodi riceve la condizione dell'ambito; le azioni su un nodo lo verificano prima (anche WebSocket e SFTP).
-- **Riferimenti per id** (tag, gruppi, nodi): se un tag viene eliminato la regola resta restrittiva, non si allarga.
-- Un ruolo cambiato vale al login successivo (i ruoli sono fissati nella sessione).
+Decisions (Security):
+- **404 and not 403** for nodes outside the scope: their existence is not revealed.
+- **Filtering on the server**, not in the UI: every node query receives the scope condition; actions on a node check it first (WebSocket and SFTP too).
+- **References by id** (tags, groups, nodes): if a tag is deleted the rule stays restrictive, it does not widen.
+- A changed role takes effect at the next login (roles are fixed in the session).
 
-### 5.4 Avanzamento F3
+### 5.4 F3 progress
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Stati OK/WARN/CRIT/UNKNOWN, soglie, isteresi su N cicli (FR-30, AC-06) | ✅ | Test unitari della macchina a stati; integrazione: CRIT 2 cicli → soft, nessun problema né notifica; 3 cicli → hard, problema e webhook; recovery notificata una sola volta |
-| Tipi di check: agent, metrica (anche media su finestra, serie peggiore), systemd, porta in ascolto, TCP e HTTP(S) dal server | ✅ | Test; E2E: TCP verso porta chiusa → CRIT in 10 s |
-| Ack con commento; peggioramento dello stato annulla l'ack; downtime per nodo, check o gruppo (FR-31, AC-08) | ✅ | Test: nessuna notifica in downtime, notifica alla fine del downtime se il problema è ancora aperto |
-| Dipendenze padre/figlio: figli UNREACHABLE, nessuna notifica (FR-32, AC-07) | ✅ | Test con nodo padre giù; il dispatcher ricontrolla il padre al momento dell'invio |
-| Flapping (FR-33) | ✅ | Ultimi 21 risultati: inizio ≥ 50 % di cambi, fine < 25 %; notifiche sospese |
-| Notifiche (FR-34): e-mail con e senza autenticazione, Telegram, webhook con firma HMAC, Discord, Slack, ntfy; regole per stato, ambiente, nodi, tipo di check, escalation | ✅ | Test con server HTTP e SMTP locali; E2E con i canali reali dell'utente (mail, Telegram, Discord, ntfy): problema e recovery consegnati |
-| Discovery dei check (FR-35) | ✅ | Proposte da capability, file system, porte in ascolto e systemd; applicate ai nodi reali (62 check) |
-| Problemi, downtime e notifiche nella UI; check nella pagina nodo; dashboard con problemi non gestiti e conteggio servizi | ✅ | Screenshot |
+| OK/WARN/CRIT/UNKNOWN states, thresholds, hysteresis over N cycles (FR-30, AC-06) | ✅ | State-machine unit tests; integration: CRIT 2 cycles → soft, no problem or notification; 3 cycles → hard, problem and webhook; recovery notified only once |
+| Check types: agent, metric (also window average, worst series), systemd, listening port, TCP and HTTP(S) from the server | ✅ | Tests; E2E: TCP to a closed port → CRIT in 10 s |
+| Ack with comment; a worsening of the state cancels the ack; downtime per node, check or group (FR-31, AC-08) | ✅ | Tests: no notification during downtime, notification at the end of the downtime if the problem is still open |
+| Parent/child dependencies: children UNREACHABLE, no notification (FR-32, AC-07) | ✅ | Test with the parent node down; the dispatcher rechecks the parent at sending time |
+| Flapping (FR-33) | ✅ | Last 21 results: start ≥ 50% of changes, end < 25%; notifications suspended |
+| Notifications (FR-34): email with and without authentication, Telegram, webhook with HMAC signature, Discord, Slack, ntfy; rules by state, environment, nodes, check type, escalation | ✅ | Tests with local HTTP and SMTP servers; E2E with the user's real channels (mail, Telegram, Discord, ntfy): problem and recovery delivered |
+| Check discovery (FR-35) | ✅ | Proposals from capabilities, file systems, listening ports and systemd; applied to the real nodes (62 checks) |
+| Problems, downtime and notifications in the UI; checks in the node page; dashboard with unhandled problems and service count | ✅ | Screenshot |
 
-Decisioni:
-- **Motore nel processo API** (A2, come il reaper SFTP): nessun worker né Redis finché non serve; disattivabile con `JANUS_MONITORING_ENABLED=false`.
-- **Dispatcher come riconciliatore**: confronta i problemi con `notification_delivery`; un riavvio non perde né ripete notifiche, le escalation sono regole con ritardo, 3 tentativi per invio.
-- **Segreti dei canali nel vault** (ADR-004, AAD legata al canale), in sola scrittura; mai nei log, nell'audit o nelle risposte. Solo librerie standard per i mittenti (proxy da `HTTPS_PROXY`).
-- **Check eseguiti dal server** (TCP, HTTP): partono dalla rete del server Janus-Ops; utili per nodi senza agent (es. NAS, apparati).
+Decisions:
+- **Engine in the API process** (A2, like the SFTP reaper): no worker or Redis until needed; can be disabled with `JANUS_MONITORING_ENABLED=false`.
+- **Dispatcher as a reconciler**: it compares problems with `notification_delivery`; a restart neither loses nor repeats notifications, escalations are rules with a delay, 3 attempts per sending.
+- **Channel secrets in the vault** (ADR-004, AAD bound to the channel), write-only; never in logs, audit or responses. Standard libraries only for the senders (proxy from `HTTPS_PROXY`).
+- **Checks run by the server** (TCP, HTTP): they start from the network of the Janus-Ops server; useful for nodes without an agent (e.g. NAS, appliances).
 
-### 5.2 Avanzamento F1
+### 5.2 F1 progress
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Terminale web 1-click con credenziali dal vault (FR-10) | ✅ | 12 test di integrazione con server SSH in-process; E2E via Caddy (WSS) verso OpenSSH reale |
-| Host key: pinning al primo uso prima dell'autenticazione, blocco su cambio, reset auditato | ✅ | Test chiave cambiata → `host_key_mismatch`; fingerprint uguale a `ssh-keygen` |
-| Jump host (ProxyJump, un livello) (FR-14) | ✅ | Test con tunnel attraverso il server di test |
-| Registrazione sessioni (asciicast v2, solo output) e replay in UI (FR-13) | ✅ | Test su header, eventi output/resize, permessi 0600, accesso proprio vs `audit.read` |
-| Audit apertura/chiusura/fallimenti (AC-03) | ✅ | Test su `ssh.session_started` / `ssh.session_ended` |
-| Chiusura terminali a logout, disabilitazione, permesso revocato, inattività; limite per utente | ✅ | Test logout e limite |
-| Multi-tab (FR-11, parte) | ✅ | UI |
-| Browser SFTP (FR-11): naviga, scarica, carica (drag & drop, progresso), rinomina, crea cartelle, elimina file e cartelle vuote | ✅ | 7 test di integrazione con SFTP in-process: round trip multi-chunk, nomi UTF-8, limite di upload (con e senza Content-Length), niente file troncati, riuso della connessione, chiusura al logout, audit |
-| Broadcast dei tasti su più terminali (FR-12) | ✅ | UI: tab selezionabili, evidenziati; avviso sempre visibile |
-| Libreria snippet personali e condivisi, eseguiti dal server (FR-12) | ✅ | Test: visibilità, permessi, nomi univoci per proprietario, esecuzione via WebSocket, audit con il testo inviato |
+| 1-click web terminal with credentials from the vault (FR-10) | ✅ | 12 integration tests with an in-process SSH server; E2E through Caddy (WSS) to a real OpenSSH |
+| Host key: pinning at first use before authentication, block on change, audited reset | ✅ | Test changed key → `host_key_mismatch`; fingerprint equal to `ssh-keygen` |
+| Jump host (ProxyJump, one level) (FR-14) | ✅ | Test with a tunnel through the test server |
+| Session recording (asciicast v2, output only) and replay in the UI (FR-13) | ✅ | Tests on header, output/resize events, 0600 permissions, own access vs `audit.read` |
+| Audit of open/close/failures (AC-03) | ✅ | Tests on `ssh.session_started` / `ssh.session_ended` |
+| Terminals closed on logout, disabling, revoked permission, inactivity; per-user limit | ✅ | Logout and limit tests |
+| Multi-tab (FR-11, part) | ✅ | UI |
+| SFTP browser (FR-11): navigate, download, upload (drag & drop, progress), rename, create folders, delete files and empty folders | ✅ | 7 integration tests with in-process SFTP: multi-chunk round trip, UTF-8 names, upload limit (with and without Content-Length), no truncated files, connection reuse, closing at logout, audit |
+| Key broadcast to several terminals (FR-12) | ✅ | UI: selectable tabs, highlighted; always-visible warning |
+| Library of personal and shared snippets, run by the server (FR-12) | ✅ | Tests: visibility, permissions, names unique per owner, execution over WebSocket, audit with the text sent |
 
-Decisioni (Security):
-- **TOFU invece di known_hosts statici**: nessun inventario di chiavi da gestire a mano; la prima connessione è il punto debole (documentato). Mitigazione: fingerprint visibile nella scheda *Host keys* e nell'audit, da confrontare con `ssh-keygen -l` sul server. Preferenza ED25519 → ECDSA → RSA-SHA2; `ssh-rsa` (SHA-1) solo come ultima risorsa.
-- **Registrazione del solo output**: le password digitate (es. `sudo`) non vengono registrate.
-- **Origin obbligatorio sul WebSocket**: i cookie viaggiano anche su handshake cross-site, quindi senza Origin dello stesso host la connessione è rifiutata.
-- **SFTP come permesso separato** (`sftp.transfer`): trasferire file è esfiltrazione potenziale, distinta dall'aprire una shell. Il confine sui percorsi è l'account remoto, non Janus-Ops. Download, upload, rinomina, cancellazione e nuove cartelle sono nell'audit con il percorso; i listing no (rumorosi e senza effetti). Connessioni SSH riusate per (sessione Janus-Ops, nodo), chiuse dopo `JANUS_SFTP_IDLE_S` o alla fine della sessione; stessa verifica host key e jump host dei terminali.
-- **Upload atomico**: scritto su un nome temporaneo e rinominato a fine trasferimento; mai sovrascrittura senza richiesta esplicita; limite `JANUS_SFTP_MAX_UPLOAD_MB` controllato anche in streaming. Nessuna cancellazione ricorsiva dal browser.
-- **Snippet eseguiti dal server**: il browser invia solo l'id; il testo viene dal database, quindi l'audit (`ssh.snippet_run`) registra esattamente cosa è stato digitato e dove. Gli snippet condivisi richiedono `snippets.manage` (non concesso agli operator di default): uno snippet condiviso è codice che altri eseguiranno.
-- **Broadcast lato browser**: i tasti sono inoltrati dal browser a ciascun terminale selezionato, come una digitazione normale (registrata nell'output di ogni sessione); nessun nuovo canale server. Gli snippet lanciati in broadcast sono marcati `broadcast: true` nell'audit.
+Decisions (Security):
+- **TOFU instead of static known_hosts**: no key inventory to manage by hand; the first connection is the weak point (documented). Mitigation: fingerprint visible in the *Host keys* tab and in the audit, to compare with `ssh-keygen -l` on the server. Preference ED25519 → ECDSA → RSA-SHA2; `ssh-rsa` (SHA-1) only as a last resort.
+- **Recording of the output only**: typed passwords (e.g. `sudo`) are not recorded.
+- **Origin mandatory on the WebSocket**: cookies also travel on cross-site handshakes, so without an Origin of the same host the connection is refused.
+- **SFTP as a separate permission** (`sftp.transfer`): transferring files is potential exfiltration, distinct from opening a shell. The boundary on paths is the remote account, not Janus-Ops. Download, upload, rename, deletion and new folders are in the audit with the path; listings are not (noisy and without effects). SSH connections reused per (Janus-Ops session, node), closed after `JANUS_SFTP_IDLE_S` or at the end of the session; same host-key verification and jump host as the terminals.
+- **Atomic upload**: written to a temporary name and renamed at the end of the transfer; never an overwrite without an explicit request; `JANUS_SFTP_MAX_UPLOAD_MB` limit also checked while streaming. No recursive deletion from the browser.
+- **Snippets run by the server**: the browser sends only the id; the text comes from the database, so the audit (`ssh.snippet_run`) records exactly what was typed and where. Shared snippets require `snippets.manage` (not granted to operators by default): a shared snippet is code that others will run.
+- **Browser-side broadcast**: the keys are forwarded by the browser to each selected terminal, like normal typing (recorded in the output of each session); no new server channel. Snippets launched in broadcast are marked `broadcast: true` in the audit.
 
-Rimandati alla fase che li usa, per la regola "nessun componente senza requisito": **Redis** e
+Postponed to the phase that uses them, per the rule "no component without a requirement": **Redis** and
 **worker/scheduler** (F2–F3), **agent-gateway** (F2).
-da tutto il resto; F2–F3 sono il cuore "Checkmk"; Docker prima di Proxmox perché riusa il tunnel appena costruito.
 
-### 5.8 F6 — Sorgenti del catalogo playbook (decisioni)
+### 5.8 F6 — Playbook catalogue sources (decisions)
 
-Un playbook è sempre una cartella (o un file) con un percorso relativo stabile dentro la sorgente.
-Ogni sorgente ha: nome, tipo, percorso base, ambiente/ambito (come per i nodi) e permesso di scrittura.
+A playbook is always a folder (or a file) with a stable relative path inside the source.
+Each source has: name, type, base path, environment/scope (as for nodes) and write permission.
 
-| Sorgente | Lettura | Scrittura | Note di sicurezza |
+| Source | Read | Write | Security notes |
 |---|---|---|---|
-| **Git** | clone/pull (branch o tag) | no | URL e chiave deploy nel vault; checkout in una cartella di Janus-Ops, non nel percorso di lavoro |
-| **Upload locale** | file caricato dal browser | sì (nel catalogo interno) | limite di dimensione; solo `.yml`/`.yaml` e archivi `.tar.gz`/`.zip` estratti senza link simbolici né percorsi assoluti |
-| **Editor incorporato** | sì | sì (nel catalogo interno) | salvataggio con versione; diff prima del salvataggio; il run usa sempre la versione salvata |
-| **Mount di rete** (NFS/SMB) | sì | opzionale, di default solo lettura | la mount è gestita dall'host Janus-Ops o dall'agent; il percorso è validato contro traversal e symlink fuori dalla radice |
-| **SFTP / SCP** | sì (listing e download) | opzionale | credenziali dal vault; riuso del client SFTP già presente (F1); host key con pinning TOFU |
+| **Git** | clone/pull (branch or tag) | no | URL and deploy key in the vault; checkout in a Janus-Ops folder, not in the working path |
+| **Local upload** | file uploaded from the browser | yes (in the internal catalogue) | size limit; only `.yml`/`.yaml` and `.tar.gz`/`.zip` archives extracted without symlinks or absolute paths |
+| **Built-in editor** | yes | yes (in the internal catalogue) | saving with a version; diff before saving; the run always uses the saved version |
+| **Network mount** (NFS/SMB) | yes | optional, read-only by default | the mount is managed by the Janus-Ops host or by the agent; the path is validated against traversal and symlinks outside the root |
+| **SFTP / SCP** | yes (listing and download) | optional | credentials from the vault; reuse of the SFTP client already present (F1); host key with TOFU pinning |
 
-Regole comuni:
-- Ogni sorgente è scritta in audit (creazione, modifica, sync, eliminazione); il contenuto del playbook
-  eseguito è congelato nel `job_run` (hash SHA-256 e copia), così lo storico resta riproducibile
-  anche se la sorgente cambia.
-- Il run non legge mai direttamente la sorgente remota: il catalogo viene sincronizzato prima, con
-  hash verificato.
-- Le sorgenti con ambito di nodo rispettano lo stesso ambito del §5.7: un playbook non si esegue su
-  nodi fuori ambito.
-- Permessi: `ansible.read` (lettura), `ansible.manage` (sorgenti e scrittura),
-  `ansible.run` (esecuzione); l'editor richiede `ansible.manage`.
+Common rules:
+- Every source is written to the audit (creation, change, sync, deletion); the content of the executed
+  playbook is frozen in the `job_run` (SHA-256 hash and copy), so that the history stays reproducible
+  even if the source changes.
+- The run never reads the remote source directly: the catalogue is synchronised first, with a
+  verified hash.
+- Sources with a node scope respect the same scope as §5.7: a playbook is not run on
+  nodes outside the scope.
+- Permissions: `ansible.read` (reading), `ansible.manage` (sources and writing),
+  `ansible.run` (execution); the editor requires `ansible.manage`.
 
-### 5.9 Avanzamento F6
+### 5.9 F6 progress
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Migrazione `0012`: sorgenti, file, versioni immutabili (sha256 + contenuto), run congelati; permessi per operator | ✅ | Upgrade, downgrade a `0011` e upgrade su TimescaleDB 2.32 reale |
-| Sorgenti: `editor` e `upload` scrivibili; `git` e `network` in sola lettura, sincronizzate in versioni | ✅ | Smoke API: creazione, conflitto nome, mount fuori dalle radici rifiutato, salvataggio con `expected_version` (409 se diverso) |
-| Upload `.yml`, `.zip`, `.tar.gz`: link simbolici, device, percorsi assoluti, `..`, binari, dimensioni rifiutati | ✅ | Test unitari sugli archivi e sui percorsi |
-| Versioni e diff; salvataggio identico non crea versione | ✅ | Smoke SQL e API |
-| Git: solo `https://`, `ssh://` o `user@host:path`, nessuna credenziale nell'URL, deploy key dal vault, ref validato | ⚠️ | Test unitari sugli URL; clone reale non provato (nessun repository raggiungibile da questo ambiente). Host key di Git in `accept-new` per clone temporaneo: nessun pinning persistente |
-| Mount di rete: solo sotto le radici di `JANUS_ANSIBLE_MOUNT_ROOTS` (default: disattivate), symlink ignorati | ✅ | Test unitari con symlink che escono dalla radice |
-| Run: nodi in ambito (404 fuori ambito), host key pinnata, solo chiavi SSH senza passphrase; chiave in file 0600 in cartella temporanea, rimossa a fine run | ✅ | Run end-to-end con `ansible-playbook` finto: inventory, `known_hosts`, permessi 600, segreto assente da log e storico |
-| Log del run aggiornato in background, storico e dettaglio per scope | ✅ parziale | Polling via API; nessuno streaming WebSocket |
-| Esecuzione reale con Ansible | ✅ parziale | `ansible-core` 2.21.5 nel venv e nell'immagine (`git` e `openssh-client` installati); `ansible-playbook` verificato nel container come utente 10001. Run su un host reale ancora da provare |
-| Password SSH (`sshpass`) | ✅ | Test unitari: inventory con `ansible_password` e senza BatchMode |
-| Jump host: un salto, solo chiave, `ProxyCommand` con la chiave del jump host | ✅ | Test unitari: rifiuti (non pinnato, con password, a catena), inventory e known_hosts con il jump host. Non provato su due host reali |
-| Survey: `<nome>.survey.json` accanto al playbook (text, integer, boolean, choice); valori congelati in `job_run.survey_values`, passati con `-e @file` 0600 | ✅ | Migrazione `0013`; test unitari su parsing, default e tipi; test d'integrazione: rifiuti API e valori salvati nel run |
-| Sorgente SFTP (sola lettura, `sftp://` con credenziale dal vault, host key TOFU salvata nella sorgente) | ⚠️ | Test unitari sugli URL; test d'integrazione sui rifiuti (credenziale, URL, tipo). SCP non implementato. Sync reale contro un server SFTP non provato |
-| UI: sorgenti, upload, editor con versioni e diff, avvio run con scelta dei nodi, storico con log | ✅ | `tsc`, ESLint, build statico; prova manuale nel browser non fatta |
-| Test d'integrazione dedicati nella suite | ✅ | `tests/test_ansible_integration.py`, `tests/test_ansible_*_unit.py`; suite completa con TimescaleDB 2.32 e lldap via `scripts/integration-test.sh` |
+| Migration `0012`: sources, files, immutable versions (sha256 + content), frozen runs; permissions for operator | ✅ | Upgrade, downgrade to `0011` and upgrade on a real TimescaleDB 2.32 |
+| Sources: `editor` and `upload` writable; `git` and `network` read-only, synchronised into versions | ✅ | API smoke test: creation, name conflict, mount outside the roots refused, saving with `expected_version` (409 if different) |
+| Upload `.yml`, `.zip`, `.tar.gz`: symlinks, devices, absolute paths, `..`, binaries, sizes refused | ✅ | Unit tests on the archives and on the paths |
+| Versions and diff; an identical save does not create a version | ✅ | SQL and API smoke test |
+| Git: only `https://`, `ssh://` or `user@host:path`, no credentials in the URL, deploy key from the vault, validated ref | ⚠️ | Unit tests on the URLs; real clone not tried (no repository reachable from this environment). Git host key in `accept-new` for a temporary clone: no persistent pinning |
+| Network mount: only under the roots of `JANUS_ANSIBLE_MOUNT_ROOTS` (default: disabled), symlinks ignored | ✅ | Unit tests with symlinks leaving the root |
+| Run: nodes in scope (404 outside the scope), pinned host key, only SSH keys without a passphrase; key in a 0600 file in a temporary folder, removed at the end of the run | ✅ | End-to-end run with a fake `ansible-playbook`: inventory, `known_hosts`, 600 permissions, secret absent from log and history |
+| Run log updated in the background, history and detail per scope | ✅ partial | Polling through the API; no WebSocket streaming |
+| Real execution with Ansible | ✅ partial | `ansible-core` 2.21.5 in the venv and in the image (`git` and `openssh-client` installed); `ansible-playbook` verified in the container as user 10001. Run on a real host still to be tried |
+| SSH password (`sshpass`) | ✅ | Unit tests: inventory with `ansible_password` and without BatchMode |
+| Jump host: one hop, key only, `ProxyCommand` with the jump host's key | ✅ | Unit tests: refusals (not pinned, with a password, chained), inventory and known_hosts with the jump host. Not tried on two real hosts |
+| Survey: `<name>.survey.json` next to the playbook (text, integer, boolean, choice); values frozen in `job_run.survey_values`, passed with `-e @file` 0600 | ✅ | Migration `0013`; unit tests on parsing, defaults and types; integration tests: API refusals and values saved in the run |
+| SFTP source (read-only, `sftp://` with a credential from the vault, TOFU host key saved in the source) | ⚠️ | Unit tests on the URLs; integration tests on the refusals (credential, URL, type). SCP not implemented. Real sync against an SFTP server not tried |
+| UI: sources, upload, editor with versions and diff, run start with node selection, history with log | ✅ | `tsc`, ESLint, static build; manual test in the browser not done |
+| Dedicated integration tests in the suite | ✅ | `tests/test_ansible_integration.py`, `tests/test_ansible_*_unit.py`; full suite with TimescaleDB 2.32 and lldap through `scripts/integration-test.sh` |
 
 ---
 
-### 5.10 Avanzamento F7
+### 5.10 F7 progress
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Migrazione `0014`: `ai_diagnosis` (prompt e risposta del modello, piano d'azione in JSON); permessi `ai.use`, `ai.approve` per operator | ✅ | Upgrade e downgrade nella suite d'integrazione su TimescaleDB 2.32 |
-| Client OpenAI-compatible (`/chat/completions`), solo https, chiave bearer da `JANUS_AI_API_KEY` | ✅ | Test unitari con transport finto (richiesta, header, codici di errore stabili). Endpoint reale non provato |
-| Tool read-only: inventory (senza segreti), metriche ultima ora, storico check come log, audit del nodo | ✅ | Test unitari sulla redazione; nessun accesso al vault. Log dei container e del journal non raccolti dall'agent: non disponibili |
-| Diagnosi asincrona su problem aperto, in scope; stati pending, done, error | ✅ | Test d'integrazione: Copilot spento (503), permessi, decisioni sugli action plan |
-| Dati operativi incapsulati come dati, non istruzioni; output mai eseguito, solo parsato (C10) | ✅ parziale | Test unitari: un log non può chiudere il blocco dati; l'efficacia contro il modello reale non è misurata |
-| Action plan: approva, rifiuta, modifica finché `proposed`; decisione una sola volta; audit | ✅ | Test d'integrazione e unitari |
-| Audit di ogni richiesta e risposta (hash SHA-256 del prompt e della risposta) | ✅ | Test d'integrazione: l'evento `ai.diagnosis.finished` e `ai.action.decided` |
-| Esecuzione delle azioni approvate | ✅ parziale | Implementata in F8 (§5.11): exec via agent con policy locale `allow_exec`. Test unitari e d'integrazione; run su un nodo reale non ancora provato |
-| Generatore IaC contestuale (FR-72, SHOULD) | ⏳ | Non iniziato |
-| Interfaccia Copilot (problemi aperti, diagnosi, decisioni) | ✅ | `tsc`, ESLint; prova manuale nel browser non fatta |
-| Valutazione qualità delle diagnosi con modelli locali | ⏳ | Non misurata: serve un set di casi con esito atteso |
+| Migration `0014`: `ai_diagnosis` (model prompt and response, action plan in JSON); `ai.use`, `ai.approve` permissions for operator | ✅ | Upgrade and downgrade in the integration suite on TimescaleDB 2.32 |
+| OpenAI-compatible client (`/chat/completions`), https only, bearer key from `JANUS_AI_API_KEY` | ✅ | Unit tests with a fake transport (request, headers, stable error codes). Real endpoint not tried |
+| Read-only tools: inventory (without secrets), last-hour metrics, check history as a log, node audit | ✅ | Unit tests on redaction; no access to the vault. Container and journal logs not collected by the agent: not available |
+| Asynchronous diagnosis on an open problem, in scope; pending, done, error states | ✅ | Integration tests: Copilot off (503), permissions, decisions on the action plans |
+| Operational data encapsulated as data, not instructions; output never executed, only parsed (C10) | ✅ partial | Unit tests: a log cannot close the data block; effectiveness against the real model is not measured |
+| Action plan: approve, reject, edit while `proposed`; decision only once; audit | ✅ | Integration and unit tests |
+| Audit of every request and response (SHA-256 hash of the prompt and of the response) | ✅ | Integration test: the `ai.diagnosis.finished` and `ai.action.decided` events |
+| Execution of approved actions | ✅ partial | Implemented in F8 (§5.11): exec through the agent with local `allow_exec` policy. Unit and integration tests; run on a real node not tried yet |
+| Contextual IaC generator (FR-72, SHOULD) | ⏳ | Not started |
+| Copilot interface (open problems, diagnosis, decisions) | ✅ | `tsc`, ESLint; manual test in the browser not done |
+| Quality evaluation of the diagnoses with local models | ⏳ | Not measured: a set of cases with an expected outcome is needed |
 
-### 5.11 Avanzamento F8
+### 5.11 F8 progress
 
-Ambito di F8 (dallo STATE sotto): exec via agent, workflow, GitOps, SNMP. PTY via agent (FR-83), auto-update
-firmato (FR-84), AD/LDAP esterno (FR-07), OIDC, NTLM e secret manager esterno (FR-86) restano in F8+.
+Scope of F8 (from the STATE below): exec through the agent, workflows, GitOps, SNMP. PTY through the agent (FR-83), signed auto-update
+(FR-84), external AD/LDAP (FR-07), OIDC, NTLM and external secret manager (FR-86) stay in F8+ (the first two and FR-07/FR-86 are now done, see the rows below and §2.1).
 
-| Elemento | Stato | Verifica |
+| Item | Status | Verification |
 |---|---|---|
-| Exec via agent: runner lato server, esecuzione lato agent senza shell, stream con limiti, policy `allow_exec` nel bootstrap | ✅ parziale | `tests/test_exec_unit.py`, `agent/internal/tunnel/exec_test.go`. Nodo reale non provato |
-| Esecuzione delle azioni approvate del Copilot (`actions.execute`): comando diviso senza shell, sintassi di shell rifiutata, ritorno ad `approved` se il run non parte, audit di ogni tentativo | ✅ parziale | Test unitari e d'integrazione in `test_ai_integration.py`. Nodo reale non provato |
-| Workflow (FR-80) | ✅ parziale | Migrazione `0021` (`workflow`, `workflow_run`, `workflow_step_run`, `workflow_approval`). Definizioni JSON (trigger e passi), validate con modelli a parametri chiusi. Passi `exec` (via agent, senza shell), `notify` (audit) e `approval`. Un exec distruttivo, cioè non dichiarato `read_only`, e ogni passo `approval` aspettano una persona; un passo fatto non si ripete dopo un'attesa. Trigger manuale, a intervallo (minimo 60 s) e alert (un problema aperto avvia i workflow del check, entro 30 s). Scope su nodi di exec al salvataggio, all'avvio e all'approvazione. Run interrotti da un riavvio diventano `failed`. Permessi `workflow.manage`, `workflow.run`, `workflow.approve`. Il passo `notify` invia il messaggio a un canale di notifica (obbligatorio, cifrato nel vault come gli altri canali) e lo registra nell'audit; un canale mancante o disabilitato fa fallire il passo con il motivo. **Dal v0.27 (migrazione `0024`):** trigger **webhook** (`POST /workflows/{id}/webhook`, corpo JSON firmato HMAC-SHA256 in `X-Janus-Signature`, segreto sigillato nel vault e mostrato una volta, rotazione, al più un avvio ogni 5 s, il corpo finisce nel contesto del run; i passi distruttivi chiedono comunque approvazione) e **rami condizionali** (`when` su un passo precedente: esito ok/failed/skipped ed eventuale testo nell'output; `on_failure: continue` per tollerare un errore; passo non eseguito = `skipped`). Test d'integrazione su DB reale (`test_workflows_integration.py`). **Non ancora:** editor visuale nella UI (interfaccia minima: elenco, creazione da JSON, run, approvazioni, segreto del webhook), ripresa automatica dopo riavvio |
-| GitOps compose con webhook (FR-81) | ✅ parziale (con interfaccia) | Migrazione `0015` (`gitops_stack`, `gitops_run`; permessi `gitops.manage` solo admin, `gitops.deploy` operator). Repository solo `https://` senza credenziali nell'URL; checkout in `/var/lib/janus-ops/gitops/<id>`: `git fetch` e `reset` a ogni deploy, poi `docker compose -p <nome> -f <file> up -d --remove-orphans`, tutto via agent con `allow_exec`. Webhook firmato HMAC-SHA256 (`X-Hub-Signature-256`, GitHub/Gitea/Forgejo), solo push sul branch, segreto nel vault mostrato una volta. Un deploy per stack alla volta (indice unico parziale). Test unitari e d'integrazione (`test_gitops_*`). Interfaccia web (pagina GitOps: elenco stack, creazione, deploy, storico con output, secret del webhook mostrato una volta). **Non ancora:** repository privati (deploy key), deploy via SSH senza agent, `compose down` alla rimozione dello stack, prova su un nodo reale |
-| SNMP v2c/v3 (FR-82) | ✅ parziale | Check `snmp` (`monitoring/snmp_poll.py`, `checks.py`), capability `snmp` con sicurezza v3 configurabile, credenziali `snmp_v3` (utente, passphrase di autenticazione e privacy, minimo 8 caratteri). Catalogo: `snmp_oids_integration` (seed, permessi, duplicati, verifica, audit). Test: `test_snmp_unit.py` (parametri, classificazione, soglie, autenticazione), `test_snmp_live.py` (agente SNMP locale su loopback: v2c, v3 authPriv SHA-256/AES-128, passphrase errata, community errata, OID inesistente, timeout), `test_snmp_integration.py` (API, vault e un tick reale del motore). Interfaccia aggiornata, non provata a mano nel browser. **Non ancora:** SNMP su host reale (NAS/UPS), MIB con nomi, trap, v1, creazione di template dalla UI (solo API), sorgente `template` per i check (la tabella accetta solo `manual` e `discovery`: la provenienza è nell'audit) |
-| PTY via agent (FR-83) | ✅ parziale | Stream `pty` (`proto/agent-protocol.md`): shell di login su pseudo-terminale, solo con `allow_pty` nella policy locale (scelta all'installazione, checkbox «Allow shell»), frame `RESIZE`, massimo 4 sessioni e 8 ore. Il bastion web accetta `transport=agent` (stesso permesso `ssh.connect`, nessuna credenziale SSH, registrazione e audit come le sessioni SSH, `transport` nel payload). Test: `agent/internal/tunnel/pty_test.go` (rifiuto da policy, dimensione, input/resize/exit su una shell vera), `tests/test_pty_unit.py`, `tests/test_terminal_agent_integration.py` (WebSocket `transport=agent` su DB reale con agent simulato: flusso completo, policy, agent offline, permesso; i test del terminale SSH restano verdi dopo il refactor). **Collaudo (2026-11-17, e2e-debian, centos, docker4):** shell root via browser funzionante (dimensione e `systemctl` ok). Con `allow_pty` l'unità systemd non è più sandboxed: la shell ereditava `ProtectSystem=strict`, `NoNewPrivileges` e `/tmp` privato, cioè un filesystem di sola lettura. **Non ancora:** scelta dell'utente della shell (oggi quello dell'agent), terminale per agent senza capability SSH nel file browser |
-| Auto-update agent firmato (FR-84) | ✅ parziale | Chiave di release ed25519 **fuori dal server** (`janus-ops agent-keygen`, `agent-sign` → `janus-agent-linux-<arch>.sig`); il server conosce solo la chiave pubblica (`JANUS_AGENT_RELEASE_PUBLIC_KEY`, scritta come `update_public_key` nella config dell'agent al bootstrap) e distribuisce. Stream `update`: firma su versione, architettura e SHA-256 verificata dall'agent prima di ricevere i byte, solo versioni più nuove (niente downgrade), checksum, sostituzione atomica e riavvio via systemd; **rollback automatico**: il vecchio binario resta come `.old` finché il nuovo non si connette, e torna al suo posto dopo tre avvii falliti o 3 minuti senza connessione (`rollback_test.go`). Aggiornamento di massa: `POST /agents/update-all` (tre agent alla volta, salta quelli offline o già alla versione firmata, esito per nodo, audit `agent.update_all`), pulsante «Update agents» nell'inventario. Endpoint `POST /agents/{id}/update` (`agents.manage`, audit `agent.update`/`agent.update_failed`), pulsante «Update (signed)». Test: `agent/internal/tunnel/update_test.go` (incluso un vettore di firma prodotto dal lato Python), `tests/test_agent_update_unit.py`. **Collaudo (2026-11-17, e2e-debian, centos, docker4):** update singolo e di massa riusciti (0.3.0→0.3.3), downgrade rifiutato dall'agent (`not_newer`), binario firmato ma corrotto (exec format error): dopo quattro avvii la **rete di sicurezza nell'unità systemd** ripristina il vecchio binario (il rollback dentro l'agent non può scattare se il binario non parte). L'unità sandboxed impediva all'agent di sostituire il proprio binario: ora `ReadWritePaths` include `/usr/local/bin`. La cartella dei binari firmati si monta con `deploy/compose.release.yaml`. **Non ancora:** gli agent già installati senza chiave vanno reinstallati una volta (restano 0.1.0 gli altri nodi); firma in CI |
+| Exec through the agent: server-side runner, agent-side execution without a shell, streams with limits, `allow_exec` policy in the bootstrap | ✅ partial | `tests/test_exec_unit.py`, `agent/internal/tunnel/exec_test.go`. Real node not tried |
+| Execution of the Copilot's approved actions (`actions.execute`): command split without a shell, shell syntax refused, return to `approved` if the run does not start, audit of every attempt | ✅ partial | Unit and integration tests in `test_ai_integration.py`. Real node not tried |
+| Workflows (FR-80) | ✅ partial | Migration `0021` (`workflow`, `workflow_run`, `workflow_step_run`, `workflow_approval`). JSON definitions (trigger and steps), validated with closed-parameter models. `exec` (through the agent, without a shell), `notify` (audit) and `approval` steps. A destructive exec, i.e. one not declared `read_only`, and every `approval` step wait for a person; a completed step is not repeated after a wait. Manual, interval (minimum 60 s) and alert triggers (an open problem starts the workflows of the check, within 30 s). Scope on exec nodes at saving, at start and at approval. Runs interrupted by a restart become `failed`. Permissions `workflow.manage`, `workflow.run`, `workflow.approve`. The `notify` step sends the message to a notification channel (mandatory, encrypted in the vault like the other channels) and records it in the audit; a missing or disabled channel fails the step with the reason. **Since v0.27 (migration `0024`):** **webhook** trigger (`POST /workflows/{id}/webhook`, JSON body signed with HMAC-SHA256 in `X-Janus-Signature`, secret sealed in the vault and shown once, rotation, at most one start every 5 s, the body goes into the run context; destructive steps still ask for approval) and **conditional branches** (`when` on a previous step: ok/failed/skipped outcome and optional text in the output; `on_failure: continue` to tolerate an error; a step not run = `skipped`). Integration tests on a real DB (`test_workflows_integration.py`). **Visual editor (v0.30):** the workflow page edits a definition as a flow of linked cards (trigger, then steps with node/channel pickers, branch badges for `when`, "carry on if it fails", waits-for-a-person markers, move/duplicate/remove), with a JSON tab for the same definition, and an Edit action on existing workflows; the rules (validation in words, normalisation, lenient reading) live in `frontend/lib/workflows.ts` and are tested with `npm test`. No drag-and-drop canvas (React Flow was not added: the UI must work air-gapped with few dependencies). **Not yet:** automatic resume after a restart, live run status drawn on the flow, manual test of the editor in a browser |
+| GitOps compose with webhook (FR-81) | ✅ partial (with interface) | Migration `0015` (`gitops_stack`, `gitops_run`; permissions `gitops.manage` admin only, `gitops.deploy` operator). Repository `https://` only, without credentials in the URL; checkout in `/var/lib/janus-ops/gitops/<id>`: `git fetch` and `reset` at every deploy, then `docker compose -p <name> -f <file> up -d --remove-orphans`, all through the agent with `allow_exec`. Webhook signed with HMAC-SHA256 (`X-Hub-Signature-256`, GitHub/Gitea/Forgejo), push on the branch only, secret in the vault shown once. One deploy per stack at a time (partial unique index). Unit and integration tests (`test_gitops_*`). Web interface (GitOps page: stack list, creation, deploy, history with output, webhook secret shown once). **Not yet:** private repositories (deploy key), deploy over SSH without an agent, `compose down` when a stack is removed, test on a real node |
+| SNMP v2c/v3 (FR-82) | ✅ partial | `snmp` check (`monitoring/snmp_poll.py`, `checks.py`), `snmp` capability with configurable v3 security, `snmp_v3` credentials (user, authentication and privacy passphrase, minimum 8 characters). Catalogue: `snmp_oids_integration` (seed, permissions, duplicates, verification, audit). Tests: `test_snmp_unit.py` (parameters, classification, thresholds, authentication), `test_snmp_live.py` (local SNMP agent on loopback: v2c, v3 authPriv SHA-256/AES-128, wrong passphrase, wrong community, non-existent OID, timeout), `test_snmp_integration.py` (API, vault and a real engine tick). Interface updated, not tried by hand in the browser. **Not yet:** SNMP on a real host (NAS/UPS), MIBs with names, traps, v1, creation of templates from the UI (API only), `template` source for checks (the table accepts only `manual` and `discovery`: the provenance is in the audit) |
+| PTY through the agent (FR-83) | ✅ partial | `pty` stream (`proto/agent-protocol.md`): login shell on a pseudo-terminal, only with `allow_pty` in the local policy (chosen at installation, "Allow shell" checkbox), `RESIZE` frame, at most 4 sessions and 8 hours. The web bastion accepts `transport=agent` (same `ssh.connect` permission, no SSH credential, recording and audit like SSH sessions, `transport` in the payload). Tests: `agent/internal/tunnel/pty_test.go` (refusal by policy, size, input/resize/exit on a real shell), `tests/test_pty_unit.py`, `tests/test_terminal_agent_integration.py` (`transport=agent` WebSocket on a real DB with a simulated agent: full flow, policy, offline agent, permission; the SSH terminal tests stay green after the refactor). **Test on real nodes (2026-11-17, e2e-debian, centos, docker4):** root shell through the browser working (size and `systemctl` ok). With `allow_pty` the systemd unit is no longer sandboxed: the shell inherited `ProtectSystem=strict`, `NoNewPrivileges` and a private `/tmp`, i.e. a read-only file system. **Not yet:** choice of the shell's user (today the agent's), terminal for agents without the SSH capability in the file browser |
+| Signed agent auto-update (FR-84) | ✅ partial | ed25519 release key **outside the server** (`janus-ops agent-keygen`, `agent-sign` → `janus-agent-linux-<arch>.sig`; procedure in `docs/AGENT_RELEASE.md`: the private key is kept off the Janus-Ops host and signing runs from the same image on the release machine); the server knows only the public key (`JANUS_AGENT_RELEASE_PUBLIC_KEY`, written as `update_public_key` in the agent config at bootstrap) and distributes. `update` stream: signature over version, architecture and SHA-256 verified by the agent before receiving the bytes, only newer versions (no downgrade), checksum, atomic replacement and restart through systemd; **automatic rollback**: the old binary stays as `.old` until the new one connects, and goes back in place after three failed starts or 3 minutes without a connection (`rollback_test.go`). Mass update: `POST /agents/update-all` (three agents at a time, skips the offline ones or those already on the signed version, per-node result, audit `agent.update_all`), "Update agents" button in the inventory. Endpoint `POST /agents/{id}/update` (`agents.manage`, audit `agent.update`/`agent.update_failed`), "Update (signed)" button. Tests: `agent/internal/tunnel/update_test.go` (including a signature vector produced by the Python side), `tests/test_agent_update_unit.py`. **Test on real nodes (2026-11-17, e2e-debian, centos, docker4):** single and mass update succeeded (0.3.0→0.3.3), downgrade refused by the agent (`not_newer`), signed but corrupted binary (exec format error): after four starts the **safety net in the systemd unit** restores the old binary (the rollback inside the agent cannot fire if the binary does not start). The sandboxed unit prevented the agent from replacing its own binary: `ReadWritePaths` now includes `/usr/local/bin`. The directory of signed binaries is mounted with `deploy/compose.release.yaml`. All 12 agents of the live stack were reinstalled with the key and updated to the 0.4.x line. **Not yet:** signing in CI |
 
-## 6. Security — Threat model iniziale (STRIDE)
+## 6. Security — Initial threat model (STRIDE)
 
-Trust boundary: Browser ⇄ Server · Agent ⇄ Server · Server ⇄ target (SSH/PVE/SNMP) · Server ⇄ LLM · Server ⇄ Git.
+Trust boundaries: Browser ⇄ Server · Agent ⇄ Server · Server ⇄ target (SSH/PVE/SNMP) · Server ⇄ LLM · Server ⇄ Git.
 
-| Minaccia | Vettore | Mitigazione | Rischio residuo |
+| Threat | Vector | Mitigation | Residual risk |
 |---|---|---|---|
-| S — Agent impersonato | Furto token di enrollment o della chiave | Token monouso a TTL breve (15 min) solo come hash, mai su riga di comando; dopo l'enrollment chiave ed25519 sul nodo (0600) e firma di un nonce per connessione; revoca della chiave; chiave duplicata su altro nodo rifiutata | Basso |
-| S — Sessione utente rubata | XSS, furto cookie | Cookie httpOnly/Secure/SameSite, CSP rigorosa, TOTP | Basso |
-| T — Binario agent alterato | Server o canale compromesso durante update | Firma ed25519 con chiave offline, verifica sull'agent | Medio (se chiave di release compromessa) |
-| T — Manomissione audit | Admin DB | Append-only via grant, hash chain, export esterno | Medio |
-| R — Azioni non attribuibili | Account condivisi, azioni AI | Audit per ogni azione con attore; azioni AI attribuite all'approvatore | Basso |
-| I — Leak segreti | API, log, prompt LLM | Segreti mai serializzati verso client; log strutturati con redazione; tool AI senza accesso al vault | Basso |
-| I — Dati operativi verso host LLM | Log/metriche inviati a host esterni allo stack | Solo modelli self-hosted (A6), TLS verso gli endpoint, endpoint configurabili solo da Admin e auditati | Basso (dati accettati da A6) |
-| S — Login LDAP aggirato | LDAP injection nei filtri, bind anonimo o con password vuota | Escaping dei filtri, rifiuto delle password vuote, bind anonimo disabilitato | Basso |
-| I — Credenziali LDAP esposte | Traffico in chiaro, password dell'account di servizio | LDAP raggiungibile solo sulla rete interna del compose (LDAPS se il traffico esce dall'host), account di servizio read-only da secret | Basso |
-| D — LDAP non disponibile | Container fermo o corrotto | Account break-glass, healthcheck, backup del volume LDAP | Basso |
-| E — Escalation via gestione utenti | Chi ha `users.manage` si assegna admin | Solo admin assegna/toglie admin o modifica un admin; test dedicati | Basso |
-| E — Account `janus-manager` compromesso | È amministratore della directory | Password solo in `.env` (600) e nel container app; mai esposta; rete `backend` interna | Medio (intrinseco) |
-| I — Perdita di `JANUS_SECRET_KEY` | Backup del DB senza la chiave | Seed TOTP illeggibili → reset 2FA da admin; chiave da salvare insieme al DB (README) | Basso |
-| D — Flood dagli agent | Agent compromesso o buggato | Rate limit per agent, dimensione massima batch, backpressure | Basso |
-| E — RCE di massa dal server | Server compromesso → exec su tutta la flotta | Policy locale sull'agent non sovrascrivibile da remoto, RBAC, approvazione per broadcast | **Alto: è intrinseco al prodotto** — documentarlo |
-| E — Errore umano in broadcast | Comando distruttivo inviato a più nodi | Broadcast esplicito per terminale, bordi evidenziati, avviso con il numero di terminali; snippet condivisi solo con `snippets.manage`; audit con testo | Medio |
-| I — Esfiltrazione file via SFTP | Utente con `sftp.transfer` scarica dati sensibili | Permesso dedicato, audit di ogni download con percorso e dimensione, permessi dell'account remoto | Medio (intrinseco alla funzione) |
-| E — Prompt injection via log | Log contenenti istruzioni per l'AI | Tool read-only, nessuna esecuzione senza umano, action plan mostrato per intero | Medio |
-| I — Community SNMP v2c intercettata | Traffico SNMP in chiaro sulla rete | v3 (`authPriv`) come default e consigliato; community nel vault, mai restituita; nessun SET | Medio (intrinseco a v2c, scelta dell'operatore) |
-| S — Dispositivo SNMP falsificato | Risposta contraffatta su UDP | v3 autenticato con SHA-256; il check lavora solo su OID numerici configurati | Basso (v3), Medio (v2c) |
-| I — Passphrase v3 in log o errori | Eccezioni pysnmp con parametri | Errori ridotti a codici stabili; le passphrase non entrano mai in messaggi, log o risposte | Basso |
-| E — Escalation RBAC | Endpoint senza check | Deny-by-default, dipendenza FastAPI obbligatoria per ruolo, test per endpoint | Basso |
+| S — Agent impersonated | Theft of the enrollment token or of the key | Single-use token with a short TTL (15 min) only as a hash, never on a command line; after enrollment an ed25519 key on the node (0600) and signature of a nonce per connection; key revocation; a key duplicated on another node is refused | Low |
+| S — User session stolen | XSS, cookie theft | httpOnly/Secure/SameSite cookies, strict CSP, TOTP | Low |
+| T — Agent binary tampered | Server or channel compromised during an update | ed25519 signature with an offline key, verification on the agent | Medium (if the release key is compromised) |
+| T — Audit tampering | DB admin | Append-only through grants, hash chain, external export | Medium |
+| R — Unattributable actions | Shared accounts, AI actions | Audit for every action with the actor; AI actions attributed to the approver | Low |
+| I — Secret leak | API, logs, LLM prompts | Secrets never serialised to the client; structured logs with redaction; AI tools without access to the vault | Low |
+| I — Operational data to LLM hosts | Logs/metrics sent to hosts outside the stack | Self-hosted models only (A6), TLS to the endpoints, endpoints configurable only by Admin and audited | Low (data accepted by A6) |
+| S — LDAP login bypassed | LDAP injection in the filters, anonymous bind or with an empty password | Filter escaping, refusal of empty passwords, anonymous bind disabled | Low |
+| I — LDAP credentials exposed | Clear-text traffic, service-account password | LDAP reachable only on the internal compose network (LDAPS if the traffic leaves the host), read-only service account from a secret | Low |
+| D — LDAP unavailable | Container stopped or corrupted | Break-glass account, healthcheck, backup of the LDAP volume | Low |
+| E — Escalation through user management | Whoever has `users.manage` makes themselves admin | Only admin assigns/removes admin or edits an admin; dedicated tests | Low |
+| E — `janus-manager` account compromised | It is the directory administrator | Password only in `.env` (600) and in the app container; never exposed; internal `backend` network | Medium (intrinsic) |
+| I — Loss of `JANUS_SECRET_KEY` | DB backup without the key | TOTP seeds unreadable → 2FA reset by an admin; key to be saved together with the DB (README) | Low |
+| D — Flood from agents | Compromised or buggy agent | Per-agent rate limit, maximum batch size, backpressure | Low |
+| E — Mass RCE from the server | Server compromised → exec on the whole fleet | Local policy on the agent that cannot be overridden remotely, RBAC, approval for broadcast | **High: intrinsic to the product** — document it |
+| E — Human error in broadcast | Destructive command sent to several nodes | Explicit per-terminal broadcast, highlighted borders, warning with the number of terminals; shared snippets only with `snippets.manage`; audit with the text | Medium |
+| I — File exfiltration through SFTP | User with `sftp.transfer` downloads sensitive data | Dedicated permission, audit of every download with path and size, permissions of the remote account | Medium (intrinsic to the function) |
+| E — Prompt injection through logs | Logs containing instructions for the AI | Read-only tools, no execution without a human, action plan shown in full | Medium |
+| I — SNMP v2c community intercepted | Clear-text SNMP traffic on the network | v3 (`authPriv`) as default and recommended; community in the vault, never returned; no SET | Medium (intrinsic to v2c, operator's choice) |
+| S — SNMP device spoofed | Forged response over UDP | v3 authenticated with SHA-256; the check works only on configured numeric OIDs | Low (v3), Medium (v2c) |
+| I — v3 passphrase in logs or errors | pysnmp exceptions with parameters | Errors reduced to stable codes; passphrases never enter messages, logs or responses | Low |
+| E — RBAC escalation | Endpoint without a check | Deny-by-default, mandatory FastAPI dependency per role, test per endpoint | Low |
+| T — Forged agent update | Compromised server pushes a malicious binary | The agent verifies an offline ed25519 signature over version, architecture and hash against a key in its own config; no downgrade; automatic rollback | Medium (if the release key is compromised) |
+| I — Master key next to the data | `JANUS_SECRET_KEY` in `.env` on the same host | External secret manager (FR-86): the key lives in OpenBao/Vault Transit; with the static auto-unseal the unseal key is still on the host (documented in `docs/OPENBAO.md`) | Medium (intrinsic to automatic unsealing) |
 
-Requisiti di sicurezza per l'Engineer: versioni dipendenze pinnate (lockfile), SBOM in CI, container non-root,
-nessun segreto in immagini/log, validazione input con Pydantic su ogni boundary.
+Security requirements for the Engineer: pinned dependency versions (lockfile), SBOM in CI, non-root containers,
+no secrets in images/logs, input validation with Pydantic on every boundary.
 
 ---
 
-## 7. Rischi di progetto
+## 7. Project risks
 
-| Rischio | Probabilità | Impatto | Mitigazione |
+| Risk | Probability | Impact | Mitigation |
 |---|---|---|---|
-| Scope creep (8 moduli) | Alta | Alto | Fasi rilasciabili, WON'T espliciti |
-| Complessità tunnel agent (multiplexing, proxy) | Media | Alto | Spike tecnico all'inizio di F2 con proxy reale |
-| ldap3 non più rilasciato (ultima release 2021) | Media | Medio | Versioni bloccate, test su lldap reale in CI, sostituibile dietro `DirectoryBackend` (ADR-008) |
-| Secret manager esterno non disponibile (ADR-011) | Bassa | Alto | Backend `local` di default; health check in `/ready`; messaggi chiari; documentare HA e unseal di OpenBao |
-| Performance ingest Timescale | Bassa (con A2) | Medio | Batch insert, test di carico in F2 |
-| Compatibilità API Proxmox tra versioni | Media | Medio | Test contro PVE 8.x `[VERIFY: versioni target]` |
-| Qualità diagnosi AI con LLM locali | Media | Medio | Prompt e tool deterministici, metriche di valutazione |
+| Scope creep (8 modules) | High | High | Releasable phases, explicit WON'Ts |
+| Complexity of the agent tunnel (multiplexing, proxy) | Medium | High | Technical spike at the start of F2 with a real proxy |
+| ldap3 no longer released (last release 2021) | Medium | Medium | Pinned versions, tests on a real lldap in CI, replaceable behind `DirectoryBackend` (ADR-008) |
+| External secret manager unavailable (ADR-011) | Low | High | `local` backend by default; health check in `/ready`; clear messages; document OpenBao HA and unseal (`docs/OPENBAO.md`) |
+| Timescale ingest performance | Low (with A2) | Medium | Batch insert, load test in F2 |
+| Proxmox API compatibility across versions | Medium | Medium | Tests against PVE 8.x `[VERIFY: target versions]` |
+| Quality of AI diagnosis with local LLMs | Medium | Medium | Deterministic prompts and tools, evaluation metrics |
 
 ---
 
-## 8. Risorse grafiche (`res/`)
+## 8. Graphic resources (`res/`)
 
-`res/` è l'**unica cartella degli asset di design** (v0.3). Dal `janusops-design-kit/` è stato preso il
-mockup; tutto il resto del kit era già identico a `res/` oppure mancava. L'inventario completo è in
+`res/` is the **single design-assets folder** (v0.3). The mockup was taken from the `janusops-design-kit/`;
+everything else in the kit was already identical to `res/` or missing. The complete inventory is in
 [res/README.md](../res/README.md).
 
-### 8.1 Contenuto
+### 8.1 Content
 
-| Percorso | Contenuto | Origine |
+| Path | Content | Origin |
 |---|---|---|
-| `Janus-Ops-logo.png` | Logo master 2048×2048, sfondo trasparente | fornito |
-| `logos/janus-ops-logo-{256,512}.png` | Logo ritagliato sul contenuto, trasparente | generato dal master |
-| `logos/janus-ops-app-icon-512.png` | Icona arrotondata su `#090A0F` con bordo `#10B981` | generato |
-| `favicons/` | `favicon.ico` (16–64), PNG 16/32, `apple-touch-icon.png` 180, `android-chrome` 192/512, `site.webmanifest` | generato |
-| `design-tokens.json`, `globals.css` | Token e CSS base Tailwind v4; aggiunto `text.nav` / `--text-nav` = `#94A3B8` | fornito + v0.3 |
-| `obsidian-graphite-palette-sheet.png` | Palette visuale | fornito |
-| `HexagonHealthWidget.tsx`, `NodeEnvironmentCard.tsx` | Componenti di riferimento | forniti |
-| `mockups/janus-ops-noc-preview.html` | Anteprima dell'app shell, brand corretto in "Janus-Ops" | dal design kit |
+| `Janus-Ops-logo.png` | 2048×2048 master logo, transparent background | provided |
+| `logos/janus-ops-logo-{256,512}.png` | Logo cropped to the content, transparent | generated from the master |
+| `logos/janus-ops-app-icon-512.png` | Rounded icon on `#090A0F` with a `#10B981` border | generated |
+| `favicons/` | `favicon.ico` (16–64), PNG 16/32, `apple-touch-icon.png` 180, `android-chrome` 192/512, `site.webmanifest` | generated |
+| `design-tokens.json`, `globals.css` | Tailwind v4 tokens and base CSS; added `text.nav` / `--text-nav` = `#94A3B8` | provided + v0.3 |
+| `obsidian-graphite-palette-sheet.png` | Visual palette | provided |
+| `HexagonHealthWidget.tsx`, `NodeEnvironmentCard.tsx` | Reference components | provided |
+| `mockups/janus-ops-noc-preview.html` | Preview of the app shell, brand corrected to "Janus-Ops" | from the design kit |
 
-Limiti noti:
-- Il logo è molto dettagliato: a 16×16 è poco leggibile. Un marchio semplificato per le dimensioni piccole è un miglioramento possibile, non bloccante.
-- Il render `janusops-dashboard-final.jpg` citato dal kit non esiste. Nel mockup è sostituito da un segnaposto e il riferimento per il layout NOC resta la §9 di [specs.md](specs.md) più la §8.2 qui sotto.
-- `janusops-design-kit/` è un duplicato di `res/` e non è incluso nel repository.
+Known limits:
+- The logo is very detailed: at 16×16 it is hardly legible. A simplified mark for small sizes is a possible improvement, not blocking.
+- The `janusops-dashboard-final.jpg` render cited by the kit does not exist. In the mockup it is replaced by a placeholder and the reference for the NOC layout remains §9 of [specs.md](specs.md) plus §8.2 below.
+- `janusops-design-kit/` is a duplicate of `res/` and is not included in the repository.
 
-### 8.2 Elementi ricavati dal mockup NOC
+### 8.2 Elements taken from the NOC mockup
 
-- **App shell**: sidebar fissa a sinistra (`w-56`, `--bg-surface`, bordo destro `--border-default`) + area principale con padding 24 px.
-- **Brand in sidebar**: logo 40 px (`logos/janus-ops-logo-256.png`) + wordmark "Janus-" in `--text-primary` e "Ops" in `--accent-primary`, sottotitolo mono 10 px "NOC CONTROL PLANE" in `--text-muted`.
-- **Ordine di navigazione**: Dashboard · Containers · Proxmox VE · Ansible & Workflows · SSH Bastion · Janus AI Copilot. Coincide con i moduli; mancano Inventory, Alerts/Problems, Audit, Settings, da aggiungere.
-- **Voce attiva**: sfondo `--bg-elevated`, testo `--accent-primary`, bordo `--border-default`. **Voce inattiva**: `--text-nav` (`#94A3B8`, aggiunto ai token in v0.3). La voce AI usa sempre `--accent-ai`.
-- **Footer della sidebar**: versione del design system in mono ("Obsidian Graphite v1.0").
-- Il mockup carica Tailwind da CDN: va bene per un'anteprima, non per l'app, che deve funzionare air-gapped (asset e font tutti locali).
+- **App shell**: fixed sidebar on the left (`w-56`, `--bg-surface`, right border `--border-default`) + main area with 24 px padding.
+- **Brand in the sidebar**: 40 px logo (`logos/janus-ops-logo-256.png`) + wordmark "Janus-" in `--text-primary` and "Ops" in `--accent-primary`, 10 px mono subtitle "NOC CONTROL PLANE" in `--text-muted`.
+- **Navigation order**: Dashboard · Containers · Proxmox VE · Ansible & Workflows · SSH Bastion · Janus AI Copilot. It matches the modules; Inventory, Alerts/Problems, Audit, Settings are missing, to be added.
+- **Active item**: background `--bg-elevated`, text `--accent-primary`, border `--border-default`. **Inactive item**: `--text-nav` (`#94A3B8`, added to the tokens in v0.3). The AI item always uses `--accent-ai`.
+- **Sidebar footer**: design-system version in mono ("Obsidian Graphite v1.0").
+- The mockup loads Tailwind from a CDN: fine for a preview, not for the app, which must work air-gapped (all assets and fonts local).
 
-### 8.3 Note per il design system (F0)
+### 8.3 Notes for the design system (F0)
 
-- I token JSON contengono anche `semantic.*.subtleBg` e `brand.primaryHover`, assenti nel CSS: unificare generando il CSS dai token.
-- I componenti di esempio usano colori hex inline (`bg-[#12141D]`): in F0 vanno convertiti in classi basate sulle variabili/tema Tailwind v4.
-- `HexagonHealthWidget` riempie l'esagono interno sempre di rosso (`rgba(239,68,68,0.18)`) anche se lo stato è OK: il fill va derivato dallo stato come lo stroke.
-- Font: Inter (UI) + JetBrains Mono (metriche, tabular-nums), da distribuire self-hosted (ambienti air-gapped).
-- Favicon e icone PWA in `res/favicons/` vanno copiate in `frontend/public/` (o `app/`) in F0 e collegate nei metadata di Next.js `[VERIFY: convenzioni file-based icons della versione scelta]`.
+- The JSON tokens also contain `semantic.*.subtleBg` and `brand.primaryHover`, absent from the CSS: unify by generating the CSS from the tokens.
+- The example components use inline hex colours (`bg-[#12141D]`): in F0 they must be converted into classes based on the Tailwind v4 variables/theme.
+- `HexagonHealthWidget` always fills the inner hexagon in red (`rgba(239,68,68,0.18)`) even if the state is OK: the fill must be derived from the state like the stroke.
+- Fonts: Inter (UI) + JetBrains Mono (metrics, tabular-nums), to be distributed self-hosted (air-gapped environments).
+- Favicon and PWA icons in `res/favicons/` must be copied to `frontend/public/` (or `app/`) in F0 and linked in the Next.js metadata `[VERIFY: file-based icon conventions of the chosen version]`.
 
 ---
 
-## 9. Domande
+## 9. Questions
 
-### 9.1 Risolte
+### 9.1 Resolved
 
-| # | Domanda | Risposta | Effetto |
+| # | Question | Answer | Effect |
 |---|---|---|---|
-| 1 | Scala target | ≤ 500 nodi, ≤ 20 utenti, "per il momento" | A2 confermata |
-| 2 | Autenticazione | LDAP come sidecar Docker, directory nello stack | A5 rivista, ADR-008, FR-03/06/07 |
-| 3 | Agent Windows nell'MVP | No | A4 confermata, Windows in F8+ |
-| 4 | Dati verso l'AI | Tutti i dati operativi; modelli locali su host esterni | A6 rivista, ADR-007, threat model |
-| 5 | Licenza TimescaleDB | Apache 2 (core) + TSL (Community) | C12 verificato |
-| 6 | Licenza Janus-Ops | Apache-2.0 | A8, `LICENSE`, `NOTICE` |
-| 7 | Grafia del brand | Janus-Ops | C15 |
-| 8 | Asset del logo | Master `Janus-Ops-logo.png`; favicon da generare | `res/logos/`, `res/favicons/` |
-| 9 | Cartella asset | `res/`, prendendo dal design kit quello che serve | §8 |
+| 1 | Target scale | ≤ 500 nodes, ≤ 20 users, "for the time being" | A2 confirmed |
+| 2 | Authentication | LDAP as a Docker sidecar, directory in the stack | A5 revised, ADR-008, FR-03/06/07 |
+| 3 | Windows agent in the MVP | No | A4 confirmed, Windows in F8+ |
+| 4 | Data towards the AI | All operational data; local models on external hosts | A6 revised, ADR-007, threat model |
+| 5 | TimescaleDB licence | Apache 2 (core) + TSL (Community) | C12 verified |
+| 6 | Janus-Ops licence | Apache-2.0 | A8, `LICENSE`, `NOTICE` |
+| 7 | Brand spelling | Janus-Ops | C15 |
+| 8 | Logo assets | Master `Janus-Ops-logo.png`; favicon to be generated | `res/logos/`, `res/favicons/` |
+| 9 | Assets folder | `res/`, taking from the design kit what is needed | §8 |
 
-### 9.2 Aperte
+### 9.2 Open
 
-Nessuna domanda bloccante. Restano i punti `[VERIFY]` da chiudere durante le singole fasi.
+No blocking question. The `[VERIFY]` points remain to be closed during the individual phases.
 
 ---
 
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — F7 completata con verifiche parziali (§5.10); F6 completata (verifiche parziali in §5.9); F5 completata; F2 con AC-04 verificato solo su Debian amd64
-  Delivered:   piano v0.15, migrazioni 0001–0011, F0–F5 (F3 allarmi, F4 container, F5 Proxmox); F0–F2: bastion SSH web, SFTP, snippet;
-               agent Go (tunnel WSS, telemetria, buffer), enrollment con chiave ed25519,
-               bootstrap SSH, ingest Timescale idempotente, dashboard NOC e pagina nodo
-  Open:        run Ansible su host reale (jump host incluso); sync SFTP su server reale; clone Git reale (F6); collaudo PBS reale (F5); CSP per l'UI esportata; rotazione KEK; retention delle registrazioni;
-               secret manager esterno (ADR-011, in roadmap F8+);
-               AC-04 su Rocky e arm64; E2E dietro squid (NFR-02); test di carico (NFR-05);
-               continuous aggregates; installazione manuale dell'agent senza SSH;
+  Phase:       Engineer — F0–F7 completed (F7 and F6 with partial checks, §5.10 and §5.9); F8 completed in code with partial checks (§5.11); F2 with AC-04 verified only on Debian amd64
+  Delivered:   plan v0.30, migrations 0001–0024, release 0.4.0; F0–F5 (F3 alerts, F4 containers, F5 Proxmox); F0–F2: web SSH bastion, SFTP, snippets;
+               Go agent (WSS tunnel, telemetry, buffer), enrollment with an ed25519 key,
+               SSH bootstrap, idempotent Timescale ingest, NOC dashboard and node page;
+               F6 Ansible, F7 AI Copilot; F8: exec/PTY through the agent, signed auto-update with rollback and mass rollout,
+               workflows (webhook trigger, conditional branches), GitOps, SNMP, external AD/LDAP (FR-07),
+               external secret manager (FR-86: OpenBao/Vault Transit and KV, OpenBao in the stack with auto-unseal)
+  Open:        Ansible run on a real host (jump host included); SFTP sync on a real server; real Git clone (F6); real PBS test (F5); CSP for the exported UI; retention of the recordings;
+               external AD/LDAP on a real AD; "by reference" credentials (KV, read-only); visual workflow editor and automatic resume after a restart;
+               GitOps private repositories; SNMP templates from the UI, traps, MIBs; OIDC; NTLM proxy; Windows agent;
+               AC-04 on Rocky; E2E behind squid (NFR-02); load test (NFR-05);
+               continuous aggregates; manual agent installation without SSH; manual browser tests of the F8 interfaces;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        F8 in corso (§5.11): exec via agent, azioni approvate, GitOps (API) e SNMP v2c/v3 fatti; poi interfaccia GitOps, workflow, PTY, auto-update
+  Next:        release key off the server (done as a download procedure: see §5.11), then the visual workflow editor
 ```

@@ -1,131 +1,131 @@
-L’architettura di **Janus-Ops** si regge su un principio fondamentale: **un unico Inventory centrale attorno a cui ruotano moduli disaccoppiati**, alimentato da un micro-agent auto-contenuto progettato per sopravvivere anche in reti segmentate, DMZ o dietro proxy HTTP/HTTPS restrittivi.
+The architecture of **Janus-Ops** rests on one fundamental principle: **a single central Inventory around which decoupled modules revolve**, fed by a self-contained micro-agent designed to survive in segmented networks, DMZs, or behind restrictive HTTP/HTTPS proxies.
 
-Di seguito trovi la scomposizione completa in macro-blocchi, con specifiche funzionali dettagliate, tecnologie e protocolli per ciascun componente.
-
----
-
-## 1. Il Micro-Agent: `janus-agent` (Zero-Dependency & Proxy-Ready)
-
-Per evitare problemi di dipendenze Python/pip, librerie condivise (`glibc` mismatch tra CentOS/Debian/Alpine) o blocchi firewall su reti isolate, l'agent non va scritto in Python ma compilato come **singolo binario statico** (o pacchetto bundle) inviato direttamente dal server Janus-Ops via SSH durante il bootstrap.
-
-* **Tecnologia Consigliata:** **Go (Golang)** compilato con `CGO_ENABLED=0` (produce un singolo eseguibile statico da ~12-18 MB per `linux/amd64`, `linux/arm64`, `windows/amd64` senza alcuna dipendenza esterna).
-* **Meccanismo di Deploy (Push dal Server):**
-* Il server Janus-Ops conserva nella directory `/opt/Janus-Ops/agent-bundles/` i binari precompilati per le varie architetture.
-* Al momento dell'aggiunta di un host, il backend usa `asyncssh` per rilevare OS e architettura (`uname -m`), copia il binario via SFTP in `/usr/local/bin/janus-agent`, genera il file di configurazione `/etc/janus-agent/config.yaml` (con token univoco e certificato CA del server) e registra/avvia il servizio `systemd` (o OpenRC/Windows Service).
-* **Auto-Update Air-Gapped:** Quando aggiorni Janus-Ops, il server notifica gli agent connessi che scaricano il nuovo binario direttamente dall'endpoint interno del server Janus-Ops (`/api/v1/agent/binary/{arch}`), senza mai toccare internet.
-
-
-* **Architettura di Rete (Outbound-Only per Proxy Stretti):**
-* L'agent **non apre porte in ascolto** sul nodo gestito. È sempre l'agent a iniziare una connessione persistente verso il server Janus-Ops tramite **gRPC over HTTP/2** o **WebSocket sicuro (`wss://`)** sulla porta `443`.
-* Supporto nativo per `HTTP_PROXY` / `HTTPS_PROXY` (inclusa autenticazione Basic/NTLM e certificati CA aziendali custom) e riconnessione automatica con exponential backoff e buffer locale su disco (SQLite/bbolt) per non perdere metriche in caso di disconnessione temporanea.
-
-
-* **Funzionalità Integrate nell'Agent:**
-* **Telemetria di Sistema (Checkmk-grade):** Raccolta ad alta frequenza (ogni 5-15s) di CPU (per core, steal, iowait), RAM/Swap, Disk I/O, spazio filesystem, stato `systemd` units, porte in ascolto, temperature hardware/SMART e processi top.
-* **Local Docker Proxy (Stile Hawser):** Se abilitato, l'agent parla localmente con `/var/run/docker.sock` e fa da ponte sicuro verso il server Janus-Ops, eliminando la necessità di esporre la porta TCP 2375 o aprire tunnel SSH multipli per gestire container, log e stats.
-* **Remote Command / Task Executor:** Esecuzione controllata di script, health-check custom (stile plugin locali Checkmk) e sessioni PTY (terminale interattivo) incapsulate nello stesso tunnel `wss://` (utile se l'SSH diretto verso il nodo è bloccato dal firewall).
-
-
+Below is the complete breakdown into macro-blocks, with detailed functional specifications, technologies and protocols for each component.
 
 ---
 
-## 2. Core Platform: Inventory Unificato, Auth & Secret Vault
+## 1. The Micro-Agent: `janus-agent` (Zero-Dependency & Proxy-Ready)
 
-È il cervello relazionale che collega ogni indirizzo IP o FQDN a tutte le sue capacità operative.
+To avoid problems with Python/pip dependencies, shared libraries (`glibc` mismatch between CentOS/Debian/Alpine) or firewall blocks on isolated networks, the agent is not written in Python but compiled as a **single static binary** (or bundle) sent directly by the Janus-Ops server over SSH during bootstrap.
 
-* **Tecnologie:** **Python 3.12+**, **FastAPI**, **SQLAlchemy 2.0 (async)**, **PostgreSQL 16 + TimescaleDB**, **Redis**.
-* **Funzionalità:**
-* **Unified Host Inventory:** Ogni record `Node` ha attributi dinamici (Tags, Gruppi, Ambiente `prod/lab/dmz`) e *Capabilities* attivabili: `[x] Janus Agent`, `[x] SSH Target`, `[x] Proxmox Node`, `[x] Docker Host`, `[x] SNMP Device`.
-* **Secret & Credential Vault:** Archivio cifrato (AES-256-GCM / Fernet con master key derivata o integrazione opzionale con **OpenBao / HashiCorp Vault**) per chiavi private SSH, password `sudo`, API Token Proxmox, token registry Docker e credenziali SNMPv3.
-* **RBAC & Audit Log Immutabile:** Gestione ruoli (Admin, Operator, Read-Only Auditor) e tracciamento completo di chi ha aperto una shell SSH, chi ha riavviato un container o lanciato un playbook Ansible (con registrazione opzionale delle sessioni terminale in formato asciinema).
+* **Recommended Technology:** **Go (Golang)** compiled with `CGO_ENABLED=0` (produces a single static executable of ~12-18 MB for `linux/amd64`, `linux/arm64`, `windows/amd64` with no external dependencies).
+* **Deploy Mechanism (Push from the Server):**
+* The Janus-Ops server keeps the precompiled binaries for the various architectures in the `/opt/Janus-Ops/agent-bundles/` directory.
+* When a host is added, the backend uses `asyncssh` to detect the OS and architecture (`uname -m`), copies the binary over SFTP to `/usr/local/bin/janus-agent`, generates the configuration file `/etc/janus-agent/config.yaml` (with a unique token and the server's CA certificate) and registers/starts the `systemd` service (or OpenRC/Windows Service).
+* **Air-Gapped Auto-Update:** When you update Janus-Ops, the server notifies the connected agents, which download the new binary directly from the internal endpoint of the Janus-Ops server (`/api/v1/agent/binary/{arch}`), without ever touching the internet.
+
+
+* **Network Architecture (Outbound-Only for Strict Proxies):**
+* The agent **opens no listening ports** on the managed node. It is always the agent that initiates a persistent connection to the Janus-Ops server through **gRPC over HTTP/2** or a secure **WebSocket (`wss://`)** on port `443`.
+* Native support for `HTTP_PROXY` / `HTTPS_PROXY` (including Basic/NTLM authentication and custom corporate CA certificates) and automatic reconnection with exponential backoff and a local on-disk buffer (SQLite/bbolt) so that no metrics are lost during a temporary disconnection.
+
+
+* **Features Built into the Agent:**
+* **System Telemetry (Checkmk-grade):** High-frequency collection (every 5-15 s) of CPU (per core, steal, iowait), RAM/Swap, Disk I/O, filesystem space, `systemd` unit state, listening ports, hardware temperatures/SMART and top processes.
+* **Local Docker Proxy (Hawser-style):** When enabled, the agent talks locally to `/var/run/docker.sock` and acts as a secure bridge to the Janus-Ops server, removing the need to expose TCP port 2375 or to open multiple SSH tunnels to manage containers, logs and stats.
+* **Remote Command / Task Executor:** Controlled execution of scripts, custom health checks (Checkmk local-plugin style) and PTY sessions (interactive terminal) encapsulated in the same `wss://` tunnel (useful when direct SSH to the node is blocked by the firewall).
 
 
 
 ---
 
-## 3. Modulo Observability & Alerting (Checkmk Engine)
+## 2. Core Platform: Unified Inventory, Auth & Secret Vault
 
-Replica la precisione diagnostica e la densità informativa di Checkmk, superandone la rigidità grafica.
+This is the relational brain that links every IP address or FQDN to all of its operational capabilities.
 
-* **Tecnologie:** **TimescaleDB** (hypertables per serie temporali ad alte prestazioni), **Taskiq / Celery** (scheduler distribuito), **pysnmp** (per NAS, switch, UPS, stampanti), **ECharts** (per grafici esagonali di stato e serie storiche zoomabili).
-
-
-* **Funzionalità:**
-* **Service Discovery Automatico:** Quando aggiungi un host (via agent o SNMP), Janus-Ops rileva automaticamente dischi, interfacce di rete, servizi `systemd` critici, pool ZFS, container Docker e VM Proxmox, proponendo i check da attivare con un clic.
-* **Soglie Multi-Livello & Hysteresis:** Stati `OK`, `WARN`, `CRIT`, `UNKNOWN` con finestre di tolleranza (es. "allerta solo se CPU > 90% per 3 cicli consecutivi") per evitare falsi positivi.
-
-
-* **Gestione Operativa degli Incidenti:** Funzioni stile NOC come *Acknowledge* (presa in carico con commento), *Scheduled Downtime* (manutenzione programmata che silenzia gli alert), *Flapping Detection* e *Parent/Child Dependencies* (se cade uno switch o un nodo Proxmox, sopprime gli alert delle 20 VM figlie segnando solo il nodo padre come `DOWN`).
-* **Notification Router:** Invio alert via Telegram, Webhook, Email, Slack/Discord con regole di escalation.
+* **Technologies:** **Python 3.12+**, **FastAPI**, **SQLAlchemy 2.0 (async)**, **PostgreSQL 16 + TimescaleDB**, **Redis**.
+* **Features:**
+* **Unified Host Inventory:** Every `Node` record has dynamic attributes (Tags, Groups, `prod/lab/dmz` Environment) and activatable *Capabilities*: `[x] Janus Agent`, `[x] SSH Target`, `[x] Proxmox Node`, `[x] Docker Host`, `[x] SNMP Device`.
+* **Secret & Credential Vault:** Encrypted store (AES-256-GCM / Fernet with a derived master key, or optional integration with **OpenBao / HashiCorp Vault**) for SSH private keys, `sudo` passwords, Proxmox API tokens, Docker registry tokens and SNMPv3 credentials.
+* **RBAC & Immutable Audit Log:** Role management (Admin, Operator, Read-Only Auditor) and complete tracking of who opened an SSH shell, who restarted a container or launched an Ansible playbook (with optional recording of terminal sessions in asciinema format).
 
 
 
 ---
 
-## 4. Modulo Container & Stack Manager (Dockhand Engine)
+## 3. Observability & Alerting Module (Checkmk Engine)
 
-Gestione completa del ciclo di vita Docker su singoli host o cluster multi-nodo.
+It replicates the diagnostic precision and information density of Checkmk, while overcoming its graphical rigidity.
 
-* **Tecnologie:** **Docker SDK for Python (`aiodocker`)**, comunicante tramite il tunnel dell'agent `janus-agent` oppure via `ssh://` tunnel nativo.
-* **Funzionalità:**
-* **Vista Multi-Environment:** Dashboard a card per singolo host Docker (conteggio container running/stopped/unhealthy, uso risorse, eventi recenti) e vista aggregata globale di tutti i container dell'infrastruttura.
+* **Technologies:** **TimescaleDB** (hypertables for high-performance time series), **Taskiq / Celery** (distributed scheduler), **pysnmp** (for NAS, switches, UPS, printers), **ECharts** (for hexagonal status charts and zoomable historical series).
 
 
-* **Gestione Container Avanzata:** Start/Stop/Restart/Kill, ispezione JSON completa, live stats (CPU/RAM/Net/Block I/O), streaming dei log in tempo reale con ricerca/filtro regex, e **Exec Shell** interattiva nel browser.
-* **Compose Stacks & GitOps:** Editor YAML integrato (Monaco Editor con validazione schema `docker-compose`), gestione variabili `.env` cifrate, deploy/redeploy di stack, e sincronizzazione diretta da repository Git (GitHub/Gitea self-hosted) con webhook auto-deploy.
-* **Manutenzione & Registry:** Gestione Volumi (con browser file/backup), Reti, Pulizia intelligente (*Prune* selettivo di immagini dangling/volumi orfani) e controllo aggiornamenti immagini sui registry (Docker Hub, GHCR, registry privati).
+* **Features:**
+* **Automatic Service Discovery:** When you add a host (via agent or SNMP), Janus-Ops automatically detects disks, network interfaces, critical `systemd` services, ZFS pools, Docker containers and Proxmox VMs, proposing the checks to enable with one click.
+* **Multi-Level Thresholds & Hysteresis:** `OK`, `WARN`, `CRIT`, `UNKNOWN` states with tolerance windows (e.g. "alert only if CPU > 90% for 3 consecutive cycles") to avoid false positives.
 
 
-
----
-
-## 5. Modulo Virtualizzazione & Cluster (Proxmox VE Manager)
-
-Controllo centralizzato di uno o più cluster Proxmox VE e nodi standalone senza dover saltare tra diverse interfacce web.
-
-* **Tecnologie:** **Proxmoxer** (wrapper Python asincrono sulle API REST ufficiali Proxmox), **noVNC / xterm.js** (per console grafiche e seriali).
-* **Funzionalità:**
-* **Cluster & Node Overview:** Stato quorum, carico nodi, utilizzo storage condivisi (NFS, Ceph, ZFS local), temperatura e stato dischi.
-* **Ciclo di Vita VM & LXC:** Creazione rapida da template Cloud-Init, Start, Shutdown, Reboot, Snapshot, Clone, Migrazione live tra nodi del cluster e ridimensionamento risorse al volo.
-* **Console Integrata:** Accesso diretto alla console seriale LXC/VM tramite `xterm.js` o console grafica VNC/SPICE direttamente dentro una tab di Janus-Ops.
-* **Backup & Replication Audit:** Monitoraggio dedicato sullo stato dei job `vzdump` / Proxmox Backup Server (PBS) — esattamente come mostrato nella tua dashboard Checkmk — con evidenza immediata di backup mancanti, falliti o troppo vecchi.
-
-
+* **Operational Incident Management:** NOC-style functions such as *Acknowledge* (taking ownership with a comment), *Scheduled Downtime* (planned maintenance that silences alerts), *Flapping Detection* and *Parent/Child Dependencies* (if a switch or a Proxmox node goes down, it suppresses the alerts of the 20 child VMs, marking only the parent node as `DOWN`).
+* **Notification Router:** Alert delivery via Telegram, Webhook, Email, Slack/Discord with escalation rules.
 
 
 
 ---
 
-## 6. Modulo SSH Connection Manager & Bastion Terminal
+## 4. Container & Stack Manager Module (Dockhand Engine)
 
-Un sostituto web-based di MobaXterm / Termius integrato nell'inventory.
+Complete management of the Docker lifecycle on single hosts or multi-node clusters.
 
-* **Tecnologie:** **AsyncSSH** (backend), **xterm.js** + WebSockets (frontend).
-* **Funzionalità:**
-* **Accesso 1-Click & Multi-Tab:** Apertura istantanea di sessioni SSH su qualsiasi nodo dell'inventory (usando le credenziali salvate nel Vault, senza mai esporre chiavi private al browser) in tab affiancate o split-screen.
-* **SFTP File Browser Integrato:** Pannello laterale per navigare il filesystem remoto, caricare/scaricare file drag-and-drop e modificare file di configurazione (`/etc/...`) direttamente con l'editor del portale.
-* **Command Broadcast & Snippet Library:** Possibilità di inviare lo stesso comando contemporaneamente a 5 terminali aperti (es. durante un aggiornamento manuale) e libreria condivisa di comandi rapidi parametrizzati.
-* **ProxyJump / Bastion Trasparente:** Se un host è raggiungibile solo tramite un jump host o tramite il tunnel inverso di `janus-agent`, Janus-Ops instrada la sessione in automatico.
+* **Technologies:** **Docker SDK for Python (`aiodocker`)**, communicating through the `janus-agent` tunnel or through a native `ssh://` tunnel.
+* **Features:**
+* **Multi-Environment View:** Per-Docker-host card dashboard (count of running/stopped/unhealthy containers, resource usage, recent events) and a global aggregated view of all the containers in the infrastructure.
+
+
+* **Advanced Container Management:** Start/Stop/Restart/Kill, full JSON inspection, live stats (CPU/RAM/Net/Block I/O), real-time log streaming with regex search/filter, and an interactive **Exec Shell** in the browser.
+* **Compose Stacks & GitOps:** Built-in YAML editor (Monaco Editor with `docker-compose` schema validation), encrypted `.env` variable management, stack deploy/redeploy, and direct synchronisation from Git repositories (GitHub/self-hosted Gitea) with auto-deploy webhooks.
+* **Maintenance & Registry:** Volume management (with file/backup browser), Networks, smart cleanup (selective *Prune* of dangling images/orphaned volumes) and image update checks against registries (Docker Hub, GHCR, private registries).
 
 
 
 ---
 
-## 7. Modulo Automazione: Ansible & Visual Workflow Engine
+## 5. Virtualisation & Cluster Module (Proxmox VE Manager)
 
-Il motore operativo che trasforma gli eventi di monitoraggio o le richieste dell'utente in azioni concrete.
+Centralised control of one or more Proxmox VE clusters and standalone nodes, without jumping between different web interfaces.
 
-* **Tecnologie:** **ansible-runner** (per esecuzione asincrona di playbook con streaming degli eventi JSON), **React Flow** (frontend per il builder visuale a nodi), **Temporal** o **Celery Canvas** (orchestrazione workflow).
-* **Funzionalità:**
+* **Technologies:** **Proxmoxer** (asynchronous Python wrapper over the official Proxmox REST APIs), **noVNC / xterm.js** (for graphical and serial consoles).
+* **Features:**
+* **Cluster & Node Overview:** Quorum status, node load, shared storage usage (NFS, Ceph, local ZFS), temperature and disk status.
+* **VM & LXC Lifecycle:** Quick creation from Cloud-Init templates, Start, Shutdown, Reboot, Snapshot, Clone, live migration between cluster nodes and on-the-fly resource resizing.
+* **Integrated Console:** Direct access to the LXC/VM serial console through `xterm.js`, or to the VNC/SPICE graphical console, right inside a Janus-Ops tab.
+* **Backup & Replication Audit:** Dedicated monitoring of the state of `vzdump` / Proxmox Backup Server (PBS) jobs — exactly as shown in your Checkmk dashboard — with immediate evidence of missing, failed or too-old backups.
+
+
+
+
+
+---
+
+## 6. SSH Connection Manager & Bastion Terminal Module
+
+A web-based replacement for MobaXterm / Termius, integrated into the inventory.
+
+* **Technologies:** **AsyncSSH** (backend), **xterm.js** + WebSockets (frontend).
+* **Features:**
+* **1-Click Access & Multi-Tab:** Instant opening of SSH sessions on any node in the inventory (using the credentials saved in the Vault, never exposing private keys to the browser) in side-by-side tabs or split-screen.
+* **Integrated SFTP File Browser:** Side panel to browse the remote filesystem, upload/download files by drag-and-drop and edit configuration files (`/etc/...`) directly with the portal's editor.
+* **Command Broadcast & Snippet Library:** The ability to send the same command simultaneously to 5 open terminals (e.g. during a manual update) and a shared library of parametrised quick commands.
+* **Transparent ProxyJump / Bastion:** If a host is reachable only through a jump host or through the reverse tunnel of `janus-agent`, Janus-Ops routes the session automatically.
+
+
+
+---
+
+## 7. Automation Module: Ansible & Visual Workflow Engine
+
+The operational engine that turns monitoring events or user requests into concrete actions.
+
+* **Technologies:** **ansible-runner** (for asynchronous playbook execution with JSON event streaming), **React Flow** (frontend for the visual node builder), **Temporal** or **Celery Canvas** (workflow orchestration).
+* **Features:**
 * **Ansible Control Center:**
-* Generazione dinamica dell'inventory Ansible direttamente dal database di Janus-Ops (gruppi, tag e variabili host sempre sincronizzati).
-* Catalogo Playbook (importati da Git o creati nell'editor), form dinamici generati dalle variabili (`survey`), esecuzione con output live formattato per singolo task/host e storico esecuzioni.
+* Dynamic generation of the Ansible inventory directly from the Janus-Ops database (groups, tags and host variables always in sync).
+* Playbook catalogue (imported from Git or created in the editor), dynamic forms generated from variables (`survey`), execution with live output formatted per task/host, and execution history.
 
 
 * **Visual Workflow Manager (Event-Driven & Scheduled):**
-* Editor a nodi stile n8n/Node-RED progettato per operazioni sistemistiche.
-* **Trigger:** Cron schedule, Webhook, Pulsante manuale, oppure **Alert di Monitoring** (es. *Se il disco `/var/log` su un nodo supera il 90%*).
-* **Nodi Azione:** Esegui comando SSH, Lancia Playbook Ansible, Riavvia Container Docker, Crea Snapshot Proxmox, Chiedi analisi all'AI, Attendi approvazione umana (Human-in-the-loop), Invia notifica Telegram.
+* Node-based editor in the style of n8n/Node-RED, designed for system administration operations.
+* **Triggers:** Cron schedule, Webhook, manual button, or **Monitoring Alert** (e.g. *If the `/var/log` disk on a node exceeds 90%*).
+* **Action Nodes:** Run an SSH command, launch an Ansible playbook, restart a Docker container, create a Proxmox snapshot, ask the AI for analysis, wait for human approval (human-in-the-loop), send a Telegram notification.
 
 
 
@@ -133,41 +133,34 @@ Il motore operativo che trasforma gli eventi di monitoraggio o le richieste dell
 
 ---
 
-## 8. Modulo Janus AI Copilot (Troubleshooting & Infrastructure-as-Code)
+## 8. Janus AI Copilot Module (Troubleshooting & Infrastructure-as-Code)
 
-Un assistente operativo contestuale che conosce la topologia reale della tua infrastruttura.
+A contextual operations assistant that knows the real topology of your infrastructure.
 
-* **Tecnologie:** **LiteLLM / OpenAI-compatible SDK** (connesso ai tuoi endpoint locali Ollama / vLLM / SGLang o API cloud), **Tool Calling / MCP (Model Context Protocol)** interno in sola lettura di default.
-* **Funzionalità:**
-* **Root Cause Analysis (RCA) su Alert:** Cliccando *"Diagnose"* su un servizio `CRIT` nella dashboard, l'AI raccoglie automaticamente gli ultimi log di sistema (`journalctl`), i log del container, le metriche recenti e le ultime modifiche registrate nell'audit log, restituendo una diagnosi precisa e il comando/playbook consigliato per risolvere.
+* **Technologies:** **LiteLLM / OpenAI-compatible SDK** (connected to your local Ollama / vLLM / SGLang endpoints or to cloud APIs), internal **Tool Calling / MCP (Model Context Protocol)**, read-only by default.
+* **Features:**
+* **Root Cause Analysis (RCA) on Alerts:** By clicking *"Diagnose"* on a `CRIT` service in the dashboard, the AI automatically gathers the latest system logs (`journalctl`), the container logs, the recent metrics and the latest changes recorded in the audit log, returning a precise diagnosis and the recommended command/playbook to fix it.
 
 
-* **Generatore IaC Contestuale:** Generazione assistita di `docker-compose.yml`, playbook Ansible, unit `systemd` o filtri regex, già calibrati sugli IP, percorsi storage e convenzioni del tuo inventory.
-* **Safe Execution Guardrails:** L'AI **non esegue mai** comandi distruttivi in autonomia; genera un *Action Plan* (es. un playbook o una sequenza di comandi) che l'amministratore può rivedere, modificare e approvare con un clic.
+* **Contextual IaC Generator:** Assisted generation of `docker-compose.yml`, Ansible playbooks, `systemd` units or regex filters, already calibrated to the IPs, storage paths and conventions of your inventory.
+* **Safe Execution Guardrails:** The AI **never runs** destructive commands on its own; it generates an *Action Plan* (e.g. a playbook or a sequence of commands) that the administrator can review, edit and approve with one click.
 
 
 
 ---
 
-## 9. Frontend Architecture (Mix Checkmk + Dockhand)
+## 9. Frontend Architecture (Checkmk + Dockhand Mix)
 
-* **Tecnologie:** **Next.js 15 (App Router)**, **TypeScript**, **Tailwind CSS**, **Shadcn UI**, **TanStack Query + Zustand** (gestione stato real-time via WebSocket), **ECharts** (grafici NOC), **Monaco Editor** (YAML/JSON/Bash), **xterm.js** (terminale), **React Flow** (workflow).
-* **Struttura UI:**
-* **Command Palette Globale (`Ctrl+K`)**: Navigazione istantanea ("vai a pve01", "apri ssh su docker2", "lancia backup check", "chiedi all'AI perché nginx è down").
-
-
-* **NOC Dashboard Ibrida:**
-* In alto: Grafici esagonali Checkmk-style (Host & Service stats) + Feed eventi real-time.
+* **Technologies:** **Next.js 15 (App Router)**, **TypeScript**, **Tailwind CSS**, **Shadcn UI**, **TanStack Query + Zustand** (real-time state management over WebSocket), **ECharts** (NOC charts), **Monaco Editor** (YAML/JSON/Bash), **xterm.js** (terminal), **React Flow** (workflow).
+* **UI Structure:**
+* **Global Command Palette (`Ctrl+K`)**: Instant navigation ("go to pve01", "open ssh on docker2", "run backup check", "ask the AI why nginx is down").
 
 
-* Al centro: Griglia di Node Cards stile Dockhand con barre CPU/RAM, stato container/VM e pulsanti rapidi (`SSH`, `Ansible`, `AI`).
+* **Hybrid NOC Dashboard:**
+* At the top: Checkmk-style hexagonal charts (Host & Service stats) + real-time event feed.
 
 
-* In basso: Tabella densa degli *Unhandled Problems* con badge ad alto contrasto (`CRIT`, `WARN`, `DOWN`) e tasto rapido di diagnosi AI.
+* In the middle: Dockhand-style grid of Node Cards with CPU/RAM bars, container/VM status and quick buttons (`SSH`, `Ansible`, `AI`).
 
 
-
-
-
-
- 
+* At the bottom: A dense table of *Unhandled Problems* with high-contrast badges (`CRIT`, `WARN`, `DOWN`) and a quick AI-diagnosis button.
