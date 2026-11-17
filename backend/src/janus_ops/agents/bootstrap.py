@@ -5,6 +5,7 @@ terminals. Root or passwordless sudo is required. The one-time enrollment token 
 the config file (mode 0600), never on a command line where `ps` would show it.
 """
 
+import asyncio
 import json
 import re
 import secrets
@@ -219,24 +220,53 @@ async def install(conn: asyncssh.SSHClientConnection, plan: Plan) -> None:
     if not TMP_DIR.match(tmp):
         raise BootstrapError("upload_failed", "unexpected temporary directory")
     try:
+        files = {"config.yaml": render_config(plan), "janus-agent.service": UNIT}
+        if plan.ca_pem:
+            files["ca.pem"] = plan.ca_pem
         try:
-            async with conn.start_sftp_client() as sftp:
-                await sftp.put(str(binary), f"{tmp}/janus-agent")
-                files = {"config.yaml": render_config(plan), "janus-agent.service": UNIT}
-                if plan.ca_pem:
-                    files["ca.pem"] = plan.ca_pem
-                private = asyncssh.SFTPAttrs(permissions=0o600)
-                for name, content in files.items():
-                    async with sftp.open(f"{tmp}/{name}", "w", private) as f:
-                        await f.write(content)
-        except (OSError, asyncssh.Error) as exc:
-            raise BootstrapError("upload_failed", type(exc).__name__) from None
+            await _upload_sftp(conn, binary, tmp, files)
+        except (OSError, asyncssh.Error):
+            # no SFTP subsystem (Synology DSM disables it by default): stream the files over
+            # plain exec channels instead
+            try:
+                await _upload_exec(conn, binary, tmp, files)
+            except (OSError, asyncssh.Error) as exc:
+                raise BootstrapError("upload_failed", type(exc).__name__) from None
         plan.steps.append("uploaded")
         script = INSTALL.format(tmp=shlex.quote(tmp))
         await _run(conn, f"{prefix}sh -c {shlex.quote(script)}", "install_failed")
         plan.steps.append("service started")
     finally:
         await _run(conn, f"rm -rf {shlex.quote(tmp)}", "cleanup_failed", check=False)
+
+
+async def _upload_sftp(
+    conn: asyncssh.SSHClientConnection, binary: Path, tmp: str, files: dict[str, str]
+) -> None:
+    async with conn.start_sftp_client() as sftp:
+        await sftp.put(str(binary), f"{tmp}/janus-agent")
+        private = asyncssh.SFTPAttrs(permissions=0o600)
+        for name, content in files.items():
+            async with sftp.open(f"{tmp}/{name}", "w", private) as f:
+                await f.write(content)
+
+
+async def _upload_exec(
+    conn: asyncssh.SSHClientConnection, binary: Path, tmp: str, files: dict[str, str]
+) -> None:
+    """Fallback without SFTP: `cat > file` fed from stdin, files created with mode 0600. The
+    token is in the config text, which goes through stdin and never on a command line."""
+    payloads: dict[str, bytes] = {"janus-agent": await asyncio.to_thread(binary.read_bytes)}
+    payloads.update({name: content.encode() for name, content in files.items()})
+    for name, data in payloads.items():
+        res = await conn.run(
+            f"umask 077; cat > {shlex.quote(f'{tmp}/{name}')}",
+            input=data,
+            check=False,
+            encoding=None,
+        )
+        if res.exit_status != 0:
+            raise asyncssh.Error(1, "exec upload failed")
 
 
 async def uninstall(conn: asyncssh.SSHClientConnection) -> None:
