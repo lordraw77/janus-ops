@@ -257,8 +257,9 @@ export type Resource<T> = {
   reload: () => void;
 };
 
-/** GET `path` on mount and on every reload(); ignores responses of stale requests. */
-export function useResource<T>(path: string): Resource<T> {
+/** GET `path` on mount and on every reload(); ignores responses of stale requests.
+ * A null path reads nothing (there is nothing to ask for yet): data and error stay null. */
+export function useResource<T>(path: string | null): Resource<T> {
   const [version, setVersion] = useState(0);
   const [state, setState] = useState<{ data: T | null; error: string | null }>({
     data: null,
@@ -266,6 +267,7 @@ export function useResource<T>(path: string): Resource<T> {
   });
 
   useEffect(() => {
+    if (path === null) return;
     let cancelled = false;
     void api<T>(path).then((r) => {
       if (cancelled) return;
@@ -277,5 +279,5 @@ export function useResource<T>(path: string): Resource<T> {
   }, [path, version]);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
-  return { ...state, reload };
+  return { ...(path === null ? { data: null, error: null } : state), reload };
 }

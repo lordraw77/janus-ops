@@ -240,8 +240,8 @@ function Terminals({
               </option>
             ))}
           </select>
-          <Button variant="primary" disabled={!pick} onClick={() => pick && open(pick)}>
-            <SquareTerminal className="h-3.5 w-3.5" aria-hidden /> Open
+          <Button variant="primary" disabled={!pick} onClick={() => pick && open(pick)} title="Open a terminal over SSH, with the node's credential">
+            <SquareTerminal className="h-3.5 w-3.5" aria-hidden /> Open SSH
           </Button>
           <select
             value={pickAgent}
@@ -257,7 +257,7 @@ function Terminals({
             ))}
           </select>
           <Button disabled={!pickAgent} onClick={() => pickAgent && open(pickAgent, "agent")} title="Interactive shell through the agent; the node's policy must allow it">
-            <SquareTerminal className="h-3.5 w-3.5" aria-hidden /> Open
+            <SquareTerminal className="h-3.5 w-3.5" aria-hidden /> Open via agent
           </Button>
         </div>
       </div>

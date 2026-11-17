@@ -164,7 +164,7 @@ export function GitOpsView() {
   const [secret, setSecret] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const runs = useResource<Run[]>(selected ? `/gitops/stacks/${selected}/runs` : "/gitops/none");
+  const runs = useResource<Run[]>(selected ? `/gitops/stacks/${selected}/runs` : null);
   const stack = (stacks.data ?? []).find((s) => s.id === selected) ?? null;
 
   async function act(path: string, method: string, body?: unknown): Promise<unknown> {
