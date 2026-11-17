@@ -97,6 +97,9 @@ func TestUpdateInstallsASignedNewerBinary(t *testing.T) {
 	if b, _ := os.ReadFile(exe); string(b) != "#!/bin/sh\necho new agent\n" {
 		t.Fatalf("binary not replaced: %q", b)
 	}
+	if b, _ := os.ReadFile(exe + ".old"); string(b) != "old" {
+		t.Fatalf("previous binary not kept: %q", b)
+	}
 	select {
 	case <-exited:
 	case <-time.After(3 * time.Second):

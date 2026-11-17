@@ -98,6 +98,7 @@ type mux struct {
 	updateKey []byte // ed25519 release public key, nil = refused
 	version   string
 	exePath   string
+	stateDir  string
 	exit      func(int)
 	updating  atomic.Bool
 }

@@ -49,16 +49,23 @@ type Agent struct {
 	fresh    chan struct{}
 	// Now is the clock; replaced in tests.
 	Now func() time.Time
+	// self-update rollback (FR-84); replaced in tests
+	exePath string
+	exit    func(int)
+	guard   *updateGuard
 }
 
 func New(cfg *config.Config, id *identity.Identity, buf *buffer.Buffer, col *collect.Collector, version string, log *slog.Logger) *Agent {
 	a := &Agent{Cfg: cfg, ID: id, Buf: buf, Col: col, Version: version, Log: log, fresh: make(chan struct{}, 1), Now: time.Now}
 	a.interval.Store(int64(time.Duration(cfg.IntervalS) * time.Second))
+	a.exit = os.Exit
+	a.exePath, _ = os.Executable()
 	return a
 }
 
 // Run collects and ships telemetry until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
+	a.guard = a.guardPendingUpdate()
 	go a.collectLoop(ctx)
 	backoff := time.Second
 	for ctx.Err() == nil {
@@ -267,6 +274,7 @@ func (a *Agent) session(ctx context.Context) error {
 	if welcome.IntervalS >= 5 && welcome.IntervalS <= 15 {
 		a.interval.Store(int64(time.Duration(welcome.IntervalS) * time.Second))
 	}
+	a.guard.confirm()
 	a.Log.Info("connected", "server", a.Cfg.ServerURL, "enrolled", welcome.Enrolled, "buffered", a.Buf.Len())
 
 	sctx, cancel := context.WithCancel(ctx)
@@ -284,7 +292,7 @@ func (a *Agent) session(ctx context.Context) error {
 
 func (a *Agent) readLoop(ctx context.Context, c *websocket.Conn, acks chan<- uint64) error {
 	m := newMux(c, a.Cfg.Policy, a.Cfg.DockerSocket, a.Log)
-	m.configureUpdate(a.Cfg.UpdatePublicKey, a.Version)
+	m.configureUpdate(a.Cfg.UpdatePublicKey, a.Version, a.Cfg.StateDir)
 	defer m.closeAll()
 	for {
 		kind, raw, err := c.Read(ctx)

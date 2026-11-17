@@ -110,7 +110,7 @@ func (u *updateSink) install() {
 		u.finish("failed:install")
 		return
 	}
-	if err := os.Rename(u.tmp, u.dst); err != nil {
+	if err := installBinary(u.tmp, u.dst, u.m.stateDir, u.version); err != nil {
 		u.finish("failed:install")
 		return
 	}
@@ -183,8 +183,9 @@ func (m *mux) startUpdate(ctx context.Context, id uint32, req openRequest) error
 // testUpdateHook lets tests redirect the executable path and the exit.
 var testUpdateHook func(*mux)
 
-func (m *mux) configureUpdate(publicKeyB64, version string) {
+func (m *mux) configureUpdate(publicKeyB64, version, stateDir string) {
 	m.version = version
+	m.stateDir = stateDir
 	m.exit = os.Exit
 	if exe, err := os.Executable(); err == nil {
 		m.exePath = exe
