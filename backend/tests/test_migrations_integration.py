@@ -171,7 +171,17 @@ def test_hypertables_and_policies(migrated: None) -> None:
         ("metric_point", "policy_retention"),
         ("check_result", "policy_compression"),
         ("check_result", "policy_retention"),
+        # migration 0025: the metric aggregates
+        ("metric_1m", "policy_refresh_continuous_aggregate"),
+        ("metric_1m", "policy_retention"),
+        ("metric_1h", "policy_refresh_continuous_aggregate"),
+        ("metric_1h", "policy_retention"),
     }
+    views = run_sql(
+        "SELECT view_name, materialized_only FROM timescaledb_information.continuous_aggregates"
+    )
+    # not real-time: see the docstring of the migration
+    assert {(r[0], r[1]) for r in views} == {("metric_1m", True), ("metric_1h", True)}
 
 
 def test_audit_event_is_append_only(migrated: None) -> None:

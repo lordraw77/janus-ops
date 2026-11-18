@@ -22,13 +22,18 @@ from janus_ops.auth.sessions import Session
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 
-RANGES: dict[str, tuple[timedelta, timedelta]] = {
-    # range -> bucket: 120-180 points per series
-    "1h": (timedelta(hours=1), timedelta(seconds=30)),
-    "6h": (timedelta(hours=6), timedelta(minutes=2)),
-    "24h": (timedelta(hours=24), timedelta(minutes=10)),
-    "7d": (timedelta(days=7), timedelta(hours=1)),
+# range -> (span, bucket, source): 120-180 points per series. The source is the raw points up to a
+# few hours (cheap), then the continuous aggregates of migration 0025.
+RANGES: dict[str, tuple[timedelta, timedelta, str | None]] = {
+    "1h": (timedelta(hours=1), timedelta(seconds=30), None),
+    "6h": (timedelta(hours=6), timedelta(minutes=2), "metric_1m"),
+    "24h": (timedelta(hours=24), timedelta(minutes=10), "metric_1m"),
+    "7d": (timedelta(days=7), timedelta(hours=1), "metric_1h"),
+    "30d": (timedelta(days=30), timedelta(hours=6), "metric_1h"),
+    "90d": (timedelta(days=90), timedelta(hours=12), "metric_1h"),
 }
+# width of one bucket of each aggregate: the raw points are read from the end of the last one
+AGGREGATE_BUCKET = {"metric_1m": "1 minute", "metric_1h": "1 hour"}
 LATEST = [
     "cpu.usage_pct",
     "cpu.count",
@@ -70,40 +75,75 @@ async def node_chart(
     node_id: uuid.UUID,
     session: Reader,
     name: Annotated[list[str], Query(max_length=20)],
-    range: Literal["1h", "6h", "24h", "7d"] = "1h",
+    range: Literal["1h", "6h", "24h", "7d", "30d", "90d"] = "1h",
 ) -> Chart:
     await node_scope.require_node(request, session, node_id)
     if not name or any(not NAME.match(n) for n in name):
         raise HTTPException(422, "invalid_metric")
-    span, bucket = RANGES[range]
+    span, bucket, source = RANGES[range]
     async with request.app.state.engine.connect() as conn:
         if not await conn.scalar(text("SELECT 1 FROM node WHERE id = :id"), {"id": node_id}):
             raise HTTPException(404, "not_found")
+        chosen = (
+            await conn.execute(
+                text(
+                    "SELECT id, name, labels, unit FROM metric_series"
+                    " WHERE node_id = :node AND name = ANY(:names)"
+                ),
+                {"node": node_id, "names": name},
+            )
+        ).all()
         rows = await conn.execute(
-            text(
-                "SELECT s.id, s.name, s.labels, s.unit,"
-                " time_bucket(CAST(:bucket AS interval), p.time) AS bucket,"
-                " avg(p.value) AS v, max(p.value) AS mx"
-                " FROM metric_series s JOIN metric_point p ON p.series_id = s.id"
-                " WHERE s.node_id = :node AND s.name = ANY(:names)"
-                " AND p.time > now() - CAST(:span AS interval)"
-                " GROUP BY s.id, bucket ORDER BY s.name, s.labels::text, bucket"
-            ),
-            {"node": node_id, "names": name, "span": span, "bucket": bucket},
+            text(_chart_sql(source)),
+            {"ids": [c.id for c in chosen], "span": span, "bucket": bucket},
         )
-        by_id: dict[int, Series] = {}
+        by_id: dict[int, Series] = {
+            c.id: Series(name=c.name, labels=c.labels, unit=c.unit, points=[])
+            for c in sorted(chosen, key=lambda c: (c.name, str(c.labels)))
+        }
         for r in rows:
-            series = by_id.get(r.id)
-            if series is None:
-                series = by_id[r.id] = Series(name=r.name, labels=r.labels, unit=r.unit, points=[])
-            series.points.append(
+            by_id[r.id].points.append(
                 Point(t=int(r.bucket.timestamp() * 1000), v=round(r.v, 3), max=round(r.mx, 3))
             )
     return Chart(
         node_id=node_id,
         range=range,
         bucket_s=int(bucket.total_seconds()),
-        series=list(by_id.values()),
+        series=[x for x in by_id.values() if x.points],
+    )
+
+
+def _chart_sql(source: str | None) -> str:
+    """The points of the chosen series (`:ids`), in buckets. From a continuous aggregate: its
+    materialised buckets plus the raw points newer than the last of them, only of these series (a
+    real-time aggregate would aggregate the raw points of every series first). Before the first
+    refresh the aggregate is empty and the whole range comes from the raw points, as before."""
+    if source is None:
+        return (
+            "SELECT p.series_id AS id, time_bucket(CAST(:bucket AS interval), p.time) AS bucket,"
+            " avg(p.value) AS v, max(p.value) AS mx"
+            " FROM metric_point p WHERE p.series_id = ANY(:ids)"
+            " AND p.time > now() - CAST(:span AS interval) GROUP BY 1, 2 ORDER BY 1, 2"
+        )
+    width = AGGREGATE_BUCKET[source]
+    return (
+        f"WITH edge AS (SELECT coalesce(max(m.bucket) + INTERVAL '{width}',"  # noqa: S608 - constants
+        "   '-infinity'::timestamptz) AS t"
+        f"   FROM {source} m WHERE m.series_id = ANY(:ids)"
+        "   AND m.bucket > now() - CAST(:span AS interval)),"
+        " parts AS ("
+        f"  SELECT m.series_id, m.bucket, m.avg, m.max, m.n FROM {source} m, edge"
+        "   WHERE m.series_id = ANY(:ids)"
+        "   AND m.bucket > now() - CAST(:span AS interval) AND m.bucket < edge.t"
+        "  UNION ALL"
+        f"  SELECT p.series_id, time_bucket(INTERVAL '{width}', p.time),"
+        "   avg(p.value), max(p.value), count(*)"
+        "   FROM metric_point p, edge WHERE p.series_id = ANY(:ids)"
+        "   AND p.time >= edge.t AND p.time > now() - CAST(:span AS interval)"
+        "   GROUP BY 1, 2)"
+        " SELECT x.series_id AS id, time_bucket(CAST(:bucket AS interval), x.bucket) AS bucket,"
+        " sum(x.avg * x.n) / sum(x.n) AS v, max(x.max) AS mx"
+        " FROM parts x GROUP BY 1, 2 ORDER BY 1, 2"
     )
 
 
@@ -233,27 +273,31 @@ async def dashboard(request: Request, session: Reader) -> Dashboard:
             )
         )
         visible = [r.id for r in nodes]
+        # the newest point of each series, by its index: one lookup per series instead of
+        # sorting every point of the last minutes of every series
         latest_rows = await conn.execute(
             text(
-                "SELECT DISTINCT ON (p.series_id) s.node_id, s.name, s.labels, p.value"
-                " FROM metric_series s JOIN metric_point p ON p.series_id = s.id"
-                " WHERE s.name = ANY(:names) AND p.time > now() - CAST(:fresh AS interval)"
-                " ORDER BY p.series_id, p.time DESC"
+                "SELECT s.node_id, s.name, s.labels, last.value FROM metric_series s"
+                " CROSS JOIN LATERAL (SELECT p.value FROM metric_point p"
+                "  WHERE p.series_id = s.id AND p.time > now() - CAST(:fresh AS interval)"
+                "  ORDER BY p.time DESC LIMIT 1) last"
+                " WHERE s.name = ANY(:names)"
             ),
             {"names": LATEST, "fresh": FRESH},
         )
         values: dict[str, dict[str, list[tuple[dict[str, str], float]]]] = {}
         for r in latest_rows:
             values.setdefault(str(r.node_id), {}).setdefault(r.name, []).append((r.labels, r.value))
+        # sparklines from the 1-minute aggregate (plus the raw points newer than its last bucket)
+        cpu_node = {
+            r.id: r.node_id
+            for r in await conn.execute(
+                text("SELECT id, node_id FROM metric_series WHERE name = 'cpu.usage_pct'")
+            )
+        }
         spark_rows = await conn.execute(
-            text(
-                "SELECT s.node_id, time_bucket(CAST(:bucket AS interval), p.time) AS bucket,"
-                " avg(p.value) AS v"
-                " FROM metric_series s JOIN metric_point p ON p.series_id = s.id"
-                " WHERE s.name = 'cpu.usage_pct' AND p.time > now() - CAST(:span AS interval)"
-                " GROUP BY s.node_id, bucket"
-            ),
-            {"bucket": SPARK_BUCKET, "span": SPARK_RANGE},
+            text(_chart_sql("metric_1m")),
+            {"ids": list(cpu_node), "span": SPARK_RANGE, "bucket": SPARK_BUCKET},
         )
         slots = int(SPARK_RANGE / SPARK_BUCKET)
         # time_bucket aligns on whole minutes: the last slot is the current minute
@@ -262,7 +306,7 @@ async def dashboard(request: Request, session: Reader) -> Dashboard:
         for r in spark_rows:
             idx = int((r.bucket - start) / SPARK_BUCKET)
             if 0 <= idx < slots:
-                sparks.setdefault(str(r.node_id), [None] * slots)[idx] = round(r.v, 1)
+                sparks.setdefault(str(cpu_node[r.id]), [None] * slots)[idx] = round(r.v, 1)
         # host state = hard state of the node's connectivity check (FR-30, FR-32)
         host_checks = {
             str(r.node_id): r

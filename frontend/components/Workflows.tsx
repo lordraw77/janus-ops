@@ -1,5 +1,6 @@
 "use client";
 
+import { Redo2, Undo2 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Alert, Button, Field, Modal, TextInput } from "@/components/ui";
@@ -19,6 +20,7 @@ import {
   problems,
 } from "@/lib/workflows";
 import { useAuth } from "@/lib/auth";
+import { canRedo, canUndo, fresh, push, redo, undo } from "@/lib/history";
 
 const WorkflowGraph = dynamic(() => import("@/components/WorkflowGraph").then((m) => m.WorkflowGraph), {
   ssr: false,
@@ -122,7 +124,11 @@ function WorkflowDialog({
   const start = useMemo(() => (initial ? (parseDefinition(JSON.stringify(initial.definition)) ?? EMPTY_DEFINITION) : EMPTY_DEFINITION), [initial]);
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [def, setDef] = useState<Definition>(start);
+  const [hist, setHist] = useState(() => fresh(start));
+  const def = hist.present;
+  const setDef = (next: Definition) => setHist((h) => push(h, next, Date.now()));
+  const stepBack = () => setHist((h) => undo(h));
+  const stepForward = () => setHist((h) => redo(h));
   const [mode, setMode] = useState<"graph" | "form" | "json">("graph");
   const [json, setJson] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +150,23 @@ function WorkflowDialog({
     setError(null);
     setMode(next);
   }
+
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y anywhere in the dialog, also after a click on the canvas (focus is then on
+  // the page, not in the form); a text field keeps its own undo
+  useEffect(() => {
+    if (mode === "json") return;
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable=true]")) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) setHist((h) => undo(h));
+      else if ((k === "z" && e.shiftKey) || k === "y") setHist((h) => redo(h));
+      else return;
+      e.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -195,6 +218,16 @@ function WorkflowDialog({
               {m === "graph" ? "Graph" : m === "form" ? "Form" : "JSON"}
             </button>
           ))}
+          {mode !== "json" && (
+            <span className="ml-2 flex items-center">
+              <button type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo(hist)} onClick={stepBack} className="rounded p-1 text-fg-muted hover:bg-elevated hover:text-fg disabled:cursor-not-allowed disabled:opacity-30">
+                <Undo2 className="h-3.5 w-3.5" aria-hidden />
+              </button>
+              <button type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!canRedo(hist)} onClick={stepForward} className="rounded p-1 text-fg-muted hover:bg-elevated hover:text-fg disabled:cursor-not-allowed disabled:opacity-30">
+                <Redo2 className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </span>
+          )}
           <span className="ml-2 text-[11px] text-fg-muted">A destructive command and every approval step wait for a person.</span>
         </div>
         <div className="max-h-[68vh] overflow-y-auto pr-1">

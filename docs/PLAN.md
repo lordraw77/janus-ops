@@ -144,6 +144,8 @@
 > content in KV v2 (`openbao-kv`), `janus-ops secrets status|migrate|prune`, readiness that checks the secret
 > manager. ADR-011 implemented and tested against real OpenBao 2.4.1 and Vault 1.20.
 >
+> **v0.35** — **continuous aggregates and the 500-node load test** (NFR-05): see the F1 row of the metrics and `docs/SIZING.md`.
+> **v0.34** — **Ctrl+K palette (pages, nodes, SSH, run a check, ask the AI); undo/redo in the workflow editor (Ctrl+Z, Ctrl+Shift+Z or Y; typing in a field is one step; 100 steps; `lib/history.ts`, 8 tests) and a browser test of a notification step; Copilot and Ansible tried in the browser on the live stack**: the Copilot with the real NVIDIA model, Ansible with a real dry run on a node (see FR-05 and the F7/F6 rows). Release **0.6.0** (graph workflow editor) published on Docker Hub; the live stack runs on the published image.
 > **v0.33** — **graph workflow editor**: nodes and branches on a canvas (React Flow), drag to reorder and connect, side panel,
 > read-only graph with run status; `ui` positions stored with each step; see §5.11.
 >
@@ -565,7 +567,7 @@ Rationale for the order: F1 gives immediate value without an agent and builds th
 | Audit viewer (API + UI, filters, chain verification) | ✅ | AC-03 |
 | Inventory: nodes, tags, groups (Ansible variables), dependencies, validated capabilities | ✅ | AC-01; tests on capability/credential rules, cycles, filters, audit |
 | Credential vault (envelope encryption, write-only secrets) | ✅ | Test: row-bound encryption, rotation, no secret in API/DB/audit; fingerprint equal to `ssh-keygen` |
-| `Ctrl+K` command palette | ⏳ | FR-05 |
+| `Ctrl+K` command palette | ✅ | `Ctrl+K` (or `Cmd+K`, or the Search button in the sidebar) opens a palette over every console page: pages the user may see, nodes, "Open SSH on …" and "Browse files on …" (only with the permission and an enabled SSH capability). Ranking is pure and tested (`lib/palette.ts`, 6 tests); browser test 6/6. Actions too: "Run check … on …" (needs `monitoring.manage`, schedules the check now) and "Ask the AI about <node> · <check>" (needs `ai.use`, opens the Copilot with that problem selected; nothing is sent to the model until Diagnose is pressed). Found by a test: a hyphen now separates words, so `debian` finds `e2e-debian` |
 
 ### 5.3 F2 progress
 
@@ -580,7 +582,7 @@ Rationale for the order: F1 gives immediate value without an agent and builds th
 | NOC dashboard (FR-24): host hexagon, node cards with CPU/RAM/disk and sparkline, "needs attention" | ✅ | API tests; screenshot. "Needs attention" uses fixed thresholds until F3 brings checks, problems and notifications |
 | Node page: agent, actions, 1h/6h/24h/7d charts, ports, processes, systemd | ✅ | API tests of the charts; screenshot |
 | AC-04 on Debian **and Rocky**, amd64 **and arm64** | ⚠️ | Verified on Debian 13 amd64; Rocky and arm64 not tried yet |
-| 1m/1h continuous aggregates, 500-node load test (NFR-05) | ⏳ | Postponed: charts up to 7 days read the raw data with `time_bucket` |
+| 1m/1h continuous aggregates, 500-node load test (NFR-05) | ✅ | Migration `0025`: `metric_1m` (14 days) and `metric_1h` (400 days), not real-time (a real-time view was 1 s instead of 2 ms with 17,500 series); charts of 6 h or more read them plus the raw tail of their own series, 30 and 90 day ranges added; dashboard sparklines and `latest` rewritten. Load test on a throwaway TimescaleDB: **500 agents x 200 series = 10k points/s for 3 minutes, p99 131 ms, no errors**; it found the connection pool (5+10) starving at that rate: `JANUS_DB_POOL_SIZE`/`JANUS_DB_MAX_OVERFLOW`. A 3.3 GB working set on the test host (swap, rotational disk) gave multi-second tails: see `docs/SIZING.md`. The web socket layer and compression ratio were not measured |
 
 Decisions (Security):
 - **Agent as root with systemd hardening**: root is needed to read the sockets of all the processes (listening ports) and to query systemd; `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`, `RestrictAddressFamilies` and writing only to `/etc/janus-agent` (token removal) and `/var/lib/janus-agent`.
@@ -732,7 +734,7 @@ Common rules:
 | Jump host: one hop, key only, `ProxyCommand` with the jump host's key | ✅ | Unit tests: refusals (not pinned, with a password, chained), inventory and known_hosts with the jump host. Not tried on two real hosts |
 | Survey: `<name>.survey.json` next to the playbook (text, integer, boolean, choice); values frozen in `job_run.survey_values`, passed with `-e @file` 0600 | ✅ | Migration `0013`; unit tests on parsing, defaults and types; integration tests: API refusals and values saved in the run |
 | SFTP source (read-only, `sftp://` with a credential from the vault, TOFU host key saved in the source) | ⚠️ | Unit tests on the URLs; integration tests on the refusals (credential, URL, type). SCP not implemented. Real sync against an SFTP server not tried |
-| UI: sources, upload, editor with versions and diff, run start with node selection, history with log | ✅ | `tsc`, ESLint, static build; manual test in the browser not done |
+| UI: sources, upload, editor with versions and diff, run start with node selection, history with log | ✅ | `tsc`, ESLint, static build; browser test against the live stack: new editor source, new file, edit and save a version, dry run on a real node (`succeeded`, exit 0), clean up |
 | Dedicated integration tests in the suite | ✅ | `tests/test_ansible_integration.py`, `tests/test_ansible_*_unit.py`; full suite with TimescaleDB 2.32 and lldap through `scripts/integration-test.sh` |
 
 ---
@@ -742,7 +744,7 @@ Common rules:
 | Item | Status | Verification |
 |---|---|---|
 | Migration `0014`: `ai_diagnosis` (model prompt and response, action plan in JSON); `ai.use`, `ai.approve` permissions for operator | ✅ | Upgrade and downgrade in the integration suite on TimescaleDB 2.32 |
-| OpenAI-compatible client (`/chat/completions`), https only, bearer key from `JANUS_AI_API_KEY` | ✅ | Unit tests with a fake transport (request, headers, stable error codes). Real endpoint not tried |
+| OpenAI-compatible client (`/chat/completions`), https only, bearer key from `JANUS_AI_API_KEY` | ✅ | Unit tests with a fake transport (request, headers, stable error codes). **Tried against the real NVIDIA endpoint** (`nvidia/nemotron-3-ultra-550b-a55b`, 2026-11-18): a diagnosis of a real open problem came back with a summary and four read-only action proposals |
 | Read-only tools: inventory (without secrets), last-hour metrics, check history as a log, node audit | ✅ | Unit tests on redaction; no access to the vault. Container and journal logs not collected by the agent: not available |
 | Asynchronous diagnosis on an open problem, in scope; pending, done, error states | ✅ | Integration tests: Copilot off (503), permissions, decisions on the action plans |
 | Operational data encapsulated as data, not instructions; output never executed, only parsed (C10) | ✅ partial | Unit tests: a log cannot close the data block; effectiveness against the real model is not measured |
@@ -750,7 +752,7 @@ Common rules:
 | Audit of every request and response (SHA-256 hash of the prompt and of the response) | ✅ | Integration test: the `ai.diagnosis.finished` and `ai.action.decided` events |
 | Execution of approved actions | ✅ partial | Implemented in F8 (§5.11): exec through the agent with local `allow_exec` policy. Unit and integration tests; run on a real node not tried yet |
 | Contextual IaC generator (FR-72, SHOULD) | ⏳ | Not started |
-| Copilot interface (open problems, diagnosis, decisions) | ✅ | `tsc`, ESLint; manual test in the browser not done |
+| Copilot interface (open problems, diagnosis, decisions) | ✅ | `tsc`, ESLint; browser test against the live stack: select a problem, Diagnose, wait for the model, read the summary, the proposals and "what was sent" (the proposals were not executed) |
 | Quality evaluation of the diagnoses with local models | ⏳ | Not measured: a set of cases with an expected outcome is needed |
 
 ### 5.11 F8 progress

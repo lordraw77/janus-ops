@@ -26,6 +26,16 @@ class Settings(BaseSettings):
         description="Directory with the exported web UI; unset = API only",
     )
     db_connect_timeout_s: float = Field(default=5.0, gt=0, le=60)
+    db_pool_size: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Connections kept open to the database. 500 agents at 10 s with 200 series"
+        " each (the NFR-05 estimate, ~10k points/s) starve a pool of 5",
+    )
+    db_max_overflow: int = Field(
+        default=20, ge=0, le=100, description="Extra connections in a burst"
+    )
     forwarded_allow_ips: str = Field(
         default="127.0.0.1",
         description="Proxies trusted for X-Forwarded-* headers (uvicorn syntax)",

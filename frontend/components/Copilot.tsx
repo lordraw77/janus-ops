@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Alert, Button, Card, Field, Select, TextInput } from "@/components/ui";
@@ -25,7 +26,9 @@ export function CopilotConsole() {
   const { can } = useAuth();
   const status = useLoad<AiStatus>("/ai/status");
   const problems = useLoad<OpenProblem[]>("/problems?status=open&limit=100");
-  const [problemId, setProblemId] = useState<string | null>(null);
+  // the palette (Ctrl+K) links here with ?problem=<id>: that problem is already selected; nothing is sent until Diagnose
+  const wanted = useSearchParams().get("problem");
+  const [problemId, setProblemId] = useState<string | null>(wanted);
   const [diagnosisId, setDiagnosisId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);

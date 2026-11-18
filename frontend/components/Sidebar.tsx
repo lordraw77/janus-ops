@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   type LucideIcon,
+  Search,
   ScrollText,
   Server,
   Settings,
@@ -23,6 +24,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { OPEN_PALETTE } from "@/components/CommandPalette";
 import { RoleBadge } from "@/components/ui";
 import { type Permission, useAuth } from "@/lib/auth";
 
@@ -33,27 +35,30 @@ type NavItem = {
   /** permission: any of these grants the entry */
   target: { href: string; permission?: Permission | Permission[] } | { phase: string };
   ai?: boolean;
+  /** extra words the command palette (Ctrl+K) also matches */
+  keywords?: string;
 };
 
 // Order follows the mockup (res/mockups/janus-ops-noc-preview.html) + the modules it lacked
-const NAV: NavItem[] = [
+export const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, target: { href: "/" } },
   { label: "Inventory", icon: Server, target: { href: "/inventory/", permission: "inventory.read" } },
   { label: "Credentials", icon: KeyRound, target: { href: "/credentials/", permission: "inventory.read" } },
   { label: "Problems", icon: TriangleAlert, target: { href: "/problems/", permission: "inventory.read" } },
   { label: "Containers", icon: Container, target: { href: "/containers/", permission: "inventory.read" } },
   { label: "Proxmox VE", icon: Boxes, target: { href: "/proxmox/", permission: "inventory.read" } },
-  { label: "Ansible", icon: Workflow, target: { href: "/ansible/", permission: "ansible.read" } },
+  { label: "Ansible", icon: Workflow, keywords: "playbook", target: { href: "/ansible/", permission: "ansible.read" } },
   { label: "Workflows", icon: GitBranch, target: { href: "/workflows/", permission: "inventory.read" } },
   { label: "GitOps", icon: GitFork, target: { href: "/gitops/", permission: "inventory.read" } },
   {
     label: "SSH Bastion",
     icon: SquareTerminal,
+    keywords: "terminal shell sftp files",
     target: { href: "/terminal/", permission: ["ssh.connect", "sftp.transfer", "audit.read"] },
   },
-  { label: "Janus AI Copilot", icon: Sparkles, target: { href: "/ai/", permission: "ai.use" }, ai: true },
+  { label: "Janus AI Copilot", icon: Sparkles, keywords: "ask diagnose ai", target: { href: "/ai/", permission: "ai.use" }, ai: true },
   { label: "Users & roles", icon: Users, target: { href: "/admin/users/", permission: "users.read" } },
-  { label: "Audit log", icon: ScrollText, target: { href: "/audit/", permission: "audit.read" } },
+  { label: "Audit log", icon: ScrollText, keywords: "history who did", target: { href: "/audit/", permission: "audit.read" } },
   { label: "Notifications", icon: Bell, target: { href: "/notifications/", permission: "notifications.manage" } },
   { label: "Settings", icon: Settings, target: { phase: "F0" } },
 ];
@@ -80,6 +85,17 @@ export function Sidebar() {
             <div className="font-mono text-[10px] text-fg-muted">NOC CONTROL PLANE</div>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new Event(OPEN_PALETTE))}
+          className="mb-3 flex w-full items-center justify-between rounded border border-line px-2.5 py-1.5 text-xs text-fg-muted hover:text-fg"
+        >
+          <span className="flex items-center gap-2">
+            <Search className="h-3.5 w-3.5" aria-hidden /> Search…
+          </span>
+          <kbd className="font-mono text-[10px]">Ctrl K</kbd>
+        </button>
 
         <nav aria-label="Main" className="space-y-1 text-xs">
           {NAV.map(({ label, icon: Icon, target, ai }) => {

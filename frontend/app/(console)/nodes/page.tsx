@@ -21,7 +21,7 @@ import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { EnvBadge } from "@/components/EnvBadge";
 
-const RANGES = ["1h", "6h", "24h", "7d"] as const;
+const RANGES = ["1h", "6h", "24h", "7d", "30d", "90d"] as const;
 type Range = (typeof RANGES)[number];
 const CHART_POLL_MS = 30_000;
 

@@ -237,6 +237,7 @@ Variables read by the `janus-ops` process:
 | `JANUS_HOST` / `JANUS_PORT` | `0.0.0.0` / `8000` | Listen address and port |
 | `JANUS_STATIC_DIR` | `/app/static` | Exported web UI; unset it to run the API only |
 | `JANUS_DB_CONNECT_TIMEOUT_S` | `5` | Database connect timeout, seconds |
+| `JANUS_DB_POOL_SIZE` / `JANUS_DB_MAX_OVERFLOW` | `20` / `20` | Database connections kept open / extra in a burst. Size for the fleet: 500 agents sending 200 series every 10 s need the defaults, a pool of 5 starves |
 | `JANUS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies trusted for `X-Forwarded-*` headers |
 | `JANUS_LDAP_URL` | — | `ldap://host:port` or `ldaps://host:port`; unset = LDAP sign-in off |
 | `JANUS_LDAP_BASE_DN` | — | Directory base DN (required with LDAP) |
