@@ -4,7 +4,10 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Alert, Button, Field, Modal, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
+import dynamic from "next/dynamic";
+
 import { WorkflowEditor } from "@/components/WorkflowEditor";
+import { TriggerFields } from "@/components/WorkflowTrigger";
 import {
   type ChannelOption,
   type CheckOption,
@@ -16,6 +19,11 @@ import {
   problems,
 } from "@/lib/workflows";
 import { useAuth } from "@/lib/auth";
+
+const WorkflowGraph = dynamic(() => import("@/components/WorkflowGraph").then((m) => m.WorkflowGraph), {
+  ssr: false,
+  loading: () => <p className="p-4 text-xs text-fg-muted">Loading the graph…</p>,
+});
 
 type WorkflowRow = {
   id: string;
@@ -115,7 +123,7 @@ function WorkflowDialog({
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [def, setDef] = useState<Definition>(start);
-  const [mode, setMode] = useState<"visual" | "json">("visual");
+  const [mode, setMode] = useState<"graph" | "form" | "json">("graph");
   const [json, setJson] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -125,12 +133,16 @@ function WorkflowDialog({
     setError(null);
     setMode("json");
   }
-  function toVisual() {
-    const parsed = parseDefinition(json);
-    if (!parsed) return setError("The JSON is not a workflow definition (it needs a trigger and a list of steps).");
-    setDef(parsed);
+  function toTab(next: "graph" | "form" | "json") {
+    if (next === mode) return;
+    if (next === "json") return toJson();
+    if (mode === "json") {
+      const parsed = parseDefinition(json);
+      if (!parsed) return setError("The JSON is not a workflow definition (it needs a trigger and a list of steps).");
+      setDef(parsed);
+    }
     setError(null);
-    setMode("visual");
+    setMode(next);
   }
 
   async function submit(e: FormEvent) {
@@ -159,7 +171,7 @@ function WorkflowDialog({
   }
 
   return (
-    <Modal title={initial ? `Edit ${initial.name}` : "New workflow"} onClose={onClose} wide>
+    <Modal title={initial ? `Edit ${initial.name}` : "New workflow"} onClose={onClose} huge>
       <form onSubmit={(e) => void submit(e)} className="space-y-3">
         {error && <Alert>{error}</Alert>}
         <div className="grid gap-2 sm:grid-cols-2">
@@ -171,16 +183,35 @@ function WorkflowDialog({
           </Field>
         </div>
         <div className="flex items-center gap-1 text-xs" role="tablist">
-          <button type="button" role="tab" aria-selected={mode === "visual"} onClick={() => (mode === "json" ? toVisual() : undefined)} className={`rounded px-2 py-1 ${mode === "visual" ? "bg-elevated font-semibold text-primary" : "text-fg-muted hover:text-fg"}`}>
-            Visual
-          </button>
-          <button type="button" role="tab" aria-selected={mode === "json"} onClick={() => (mode === "visual" ? toJson() : undefined)} className={`rounded px-2 py-1 ${mode === "json" ? "bg-elevated font-semibold text-primary" : "text-fg-muted hover:text-fg"}`}>
-            JSON
-          </button>
+          {(["graph", "form", "json"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={mode === m}
+              onClick={() => toTab(m)}
+              className={`rounded px-2 py-1 ${mode === m ? "bg-elevated font-semibold text-primary" : "text-fg-muted hover:text-fg"}`}
+            >
+              {m === "graph" ? "Graph" : m === "form" ? "Form" : "JSON"}
+            </button>
+          ))}
           <span className="ml-2 text-[11px] text-fg-muted">A destructive command and every approval step wait for a person.</span>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto pr-1">
-          {mode === "visual" ? (
+        <div className="max-h-[68vh] overflow-y-auto pr-1">
+          {mode === "graph" && (
+            <div className="space-y-3">
+              <TriggerFields trigger={def.trigger} onChange={(trigger) => setDef({ ...def, trigger })} checks={checks.data ?? []} />
+              <WorkflowGraph
+                value={def}
+                onChange={setDef}
+                nodes={nodes.data ?? []}
+                channels={channels.data ?? []}
+                channelsReadable={!channels.error}
+                height={480}
+              />
+            </div>
+          )}
+          {mode === "form" && (
             <WorkflowEditor
               value={def}
               onChange={setDef}
@@ -189,8 +220,9 @@ function WorkflowDialog({
               checks={checks.data ?? []}
               channelsReadable={!channels.error}
             />
-          ) : (
-            <Field label="Definition (JSON)" hint="A trigger and the steps; the Visual tab edits the same thing.">
+          )}
+          {mode === "json" && (
+            <Field label="Definition (JSON)" hint="A trigger and the steps; the Graph and Form tabs edit the same thing.">
               <textarea
                 value={json}
                 onChange={(e) => setJson(e.target.value)}
@@ -213,7 +245,7 @@ function WorkflowDialog({
 }
 
 
-function RunPanel({ runId, onChanged }: { runId: string; onChanged: () => void }) {
+function RunPanel({ runId, definition, onChanged }: { runId: string; definition: Definition | null; onChanged: () => void }) {
   const { can } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
@@ -259,6 +291,16 @@ function RunPanel({ runId, onChanged }: { runId: string; onChanged: () => void }
         )}
       </div>
       {run.error && <div className="text-xs text-crit">{run.error}</div>}
+      {definition && (
+        // the flow as it was drawn, each step coloured by how this run went
+        <WorkflowGraph
+          key={runId}
+          readOnly
+          value={definition}
+          statuses={Object.fromEntries(run.steps.map((s) => [s.step_id, s.status]))}
+          height={Math.min(440, 150 + 120 * definition.steps.length)}
+        />
+      )}
       <table className="w-full text-left text-xs">
         <thead className="text-fg-muted">
           <tr>
@@ -434,7 +476,7 @@ export function WorkflowsView() {
                   </button>
                 ))}
               </div>
-              {runId && <RunPanel runId={runId} onChanged={() => runs.reload()} />}
+              {runId && <RunPanel runId={runId} definition={parseDefinition(JSON.stringify(current.definition))} onChanged={() => runs.reload()} />}
             </>
           )}
         </div>

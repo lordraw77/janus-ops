@@ -1,9 +1,11 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Bell, Clock, Copy, GitBranch, Plus, ShieldCheck, Terminal, Trash2, Zap } from "lucide-react";
+import { ArrowDown, ArrowUp, Bell, Clock, Copy, GitBranch, Plus, ShieldCheck, Terminal, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 
-import { Button, Field, Select, TextInput } from "@/components/ui";
+import { Button, Select, TextInput } from "@/components/ui";
+import { StepFields } from "@/components/WorkflowStepFields";
+import { TriggerFields } from "@/components/WorkflowTrigger";
 import {
   type Action,
   type ChannelOption,
@@ -13,7 +15,6 @@ import {
   type Outcome,
   type Step,
   type Trigger,
-  type TriggerType,
   defaultParams,
   freeId,
   problems,
@@ -120,46 +121,7 @@ export function WorkflowEditor({
   return (
     <div className="space-y-0">
       {/* trigger */}
-      <div className="rounded border border-primary/50 bg-elevated p-3">
-        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-primary">
-          <Zap className="h-3.5 w-3.5" aria-hidden /> When this starts
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Field label="Trigger">
-            <Select value={t.type} onChange={(e) => setTrigger({ type: e.target.value as TriggerType })}>
-              <option value="manual">By hand (Run now)</option>
-              <option value="interval">Every so often</option>
-              <option value="alert">When a check raises a problem</option>
-              <option value="webhook">When a signed webhook is received</option>
-            </Select>
-          </Field>
-          {t.type === "interval" && (
-            <Field label="Every (seconds)" hint="At least 60.">
-              <TextInput type="number" min={60} max={86400} value={t.interval_s ?? ""} onChange={(e) => setTrigger({ ...t, interval_s: Number(e.target.value) })} />
-            </Field>
-          )}
-          {t.type === "alert" && (
-            <Field label="Check" hint="Empty = any check.">
-              <Select value={t.check_id ?? ""} onChange={(e) => setTrigger({ type: "alert", check_id: e.target.value || undefined })}>
-                <option value="">Any check</option>
-                {checks.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.node_name} · {c.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-        </div>
-        {t.type === "webhook" && (
-          <p className="mt-2 text-[11px] text-fg-muted">
-            A POST signed with HMAC-SHA256 starts a run; its JSON body is kept in the run. The secret is shown once, when you save.
-          </p>
-        )}
-        {t.type === "alert" && (
-          <p className="mt-2 text-[11px] text-fg-muted">The run starts within 30 seconds of the problem opening.</p>
-        )}
-      </div>
+      <TriggerFields trigger={value.trigger} onChange={setTrigger} checks={checks} />
 
       {/* steps */}
       {value.steps.map((s, i) => {
@@ -202,65 +164,14 @@ export function WorkflowEditor({
                 </span>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-[8rem_1fr]">
-                <Field label="Step id">
-                  <TextInput value={s.id} maxLength={32} onChange={(e) => rename(i, e.target.value)} className="font-mono" />
-                </Field>
-                <div className="space-y-2">
-                  {s.action === "exec" && (
-                    <>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Field label="Node" hint="Its agent must allow commands.">
-                          <Select value={String(s.params.node_id ?? "")} onChange={(e) => setParams(i, { node_id: e.target.value })}>
-                            <option value="">Choose a node…</option>
-                            {nodes.map((n) => (
-                              <option key={n.id} value={n.id}>
-                                {n.name} ({n.address})
-                              </option>
-                            ))}
-                          </Select>
-                        </Field>
-                        <Field label="Timeout (seconds)">
-                          <TextInput type="number" min={1} max={300} value={Number(s.params.timeout_s ?? 60)} onChange={(e) => setParams(i, { timeout_s: Number(e.target.value) })} />
-                        </Field>
-                      </div>
-                      <Field label="Command" hint="Run without a shell: no pipes, redirects or variables.">
-                        <TextInput value={String(s.params.command ?? "")} maxLength={1000} onChange={(e) => setParams(i, { command: e.target.value })} className="font-mono" placeholder="systemctl restart nginx" />
-                      </Field>
-                      <label className="flex items-center gap-2 text-xs text-fg-secondary">
-                        <input type="checkbox" checked={Boolean(s.params.read_only)} onChange={(e) => setParams(i, { read_only: e.target.checked })} />
-                        This command only reads (it does not wait for approval)
-                      </label>
-                    </>
-                  )}
-                  {s.action === "notify" && (
-                    <>
-                      <Field label="Channel">
-                        {channelsReadable ? (
-                          <Select value={String(s.params.channel_id ?? "")} onChange={(e) => setParams(i, { channel_id: e.target.value })}>
-                            <option value="">Choose a channel…</option>
-                            {channels.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.name} ({c.kind}){c.enabled ? "" : " — disabled"}
-                              </option>
-                            ))}
-                          </Select>
-                        ) : (
-                          <TextInput value={String(s.params.channel_id ?? "")} onChange={(e) => setParams(i, { channel_id: e.target.value })} placeholder="channel id" className="font-mono" />
-                        )}
-                      </Field>
-                      <Field label="Message">
-                        <TextInput value={String(s.params.message ?? "")} maxLength={500} onChange={(e) => setParams(i, { message: e.target.value })} />
-                      </Field>
-                    </>
-                  )}
-                  {s.action === "approval" && (
-                    <Field label="What the approver sees">
-                      <TextInput value={String(s.params.reason ?? "")} maxLength={500} onChange={(e) => setParams(i, { reason: e.target.value })} />
-                    </Field>
-                  )}
-                </div>
-              </div>
+              <StepFields
+                step={s}
+                nodes={nodes}
+                channels={channels}
+                channelsReadable={channelsReadable}
+                onParams={(patch) => setParams(i, patch)}
+                onRename={(id) => rename(i, id)}
+              />
 
               {/* branching */}
               <div className="mt-2 space-y-2 border-t border-line pt-2">

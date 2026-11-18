@@ -1,7 +1,8 @@
 """Workflow definitions: triggers, steps and what each action needs (FR-80).
 
 A definition is JSON: a trigger and an ordered list of steps. Each step has an id, an action
-(exec, notify or approval) and its parameters. A step may carry a `when` condition on an earlier
+(exec, notify or approval) and its parameters (and, for the visual editor, the position it is drawn
+at). A step may carry a `when` condition on an earlier
 step (its outcome and, optionally, a text its output contains): when it is not met the step is
 skipped. A step with `on_failure: continue` does not fail the run, so later steps can branch on
 its failure. The rules that matter for safety live here:
@@ -62,11 +63,21 @@ class WhenIn(BaseModel):
     contains: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class UiPos(BaseModel):
+    """Where the visual editor drew the step. Layout only: it never changes what a run does."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(ge=-100000, le=100000)
+    y: float = Field(ge=-100000, le=100000)
+
+
 class StepIn(BaseModel):
     id: str = Field(min_length=1, max_length=32)
     action: Action
     when: WhenIn | None = None
     on_failure: Literal["fail", "continue"] = "fail"
+    ui: UiPos | None = None
     params: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("id")

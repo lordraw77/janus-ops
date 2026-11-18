@@ -190,3 +190,14 @@ def test_the_webhook_signature() -> None:
     assert not verify_signature("other", body, good)
     assert not verify_signature("s3cret", b"{}", good)
     assert not verify_signature("s3cret", body, "")
+
+
+def test_the_position_drawn_by_the_visual_editor_is_kept_and_bounded() -> None:
+    step = {"id": "a", "action": "approval", "params": {}, "ui": {"x": 12.5, "y": -40}}
+    kept = DefinitionIn.model_validate(_wf(step)).normal()
+    assert kept["steps"][0]["ui"] == {"x": 12.5, "y": -40}
+    plain = DefinitionIn.model_validate(_wf(_approval("a"))).normal()
+    assert "ui" not in plain["steps"][0]  # a step drawn by hand keeps no empty extras
+    for bad in ({"x": 1}, {"x": 1, "y": 2, "z": 3}, {"x": 10**7, "y": 0}, {"x": "left", "y": 0}):
+        with pytest.raises(ValidationError):
+            DefinitionIn.model_validate(_wf({**step, "ui": bad}))

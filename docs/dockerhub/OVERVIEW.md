@@ -34,7 +34,7 @@ self-hosted TLS, and a Go agent that only opens outbound connections.
 | Containers | Docker hosts and Compose stacks through the agent or SSH: logs, stats, actions, shell |
 | Proxmox VE | Clusters, VM/LXC lifecycle, snapshots, backup audit, consoles |
 | Ansible | Playbook catalogue (Git, upload, editor, network mount, SFTP), surveys, live runs, history |
-| Workflows | Visual editor, manual / interval / alert / signed-webhook triggers, conditional branches, approvals |
+| Workflows | Graph editor (drag steps, connect branches), manual / interval / alert / signed-webhook triggers, conditional branches, approvals, run status drawn on the flow |
 | GitOps | Compose stacks deployed from Git with a signed webhook |
 | AI Copilot | Diagnosis of problems on your own OpenAI-compatible endpoint, action plans you approve |
 | Secret manager | Optional OpenBao / HashiCorp Vault for the master key (Transit) or the secrets themselves (KV) |

@@ -8,12 +8,15 @@ export type Trigger = { type: TriggerType; interval_s?: number; check_id?: strin
 export type Action = "exec" | "notify" | "approval";
 export type Outcome = "ok" | "failed" | "skipped";
 export type When = { step: string; outcome: Outcome; contains?: string };
+export type Pos = { x: number; y: number };
 export type Step = {
   id: string;
   action: Action;
   params: Record<string, unknown>;
   when?: When;
   on_failure?: "fail" | "continue";
+  /** where the graph editor draws the step: layout only, it never changes what a run does */
+  ui?: Pos;
 };
 export type Definition = { trigger: Trigger; steps: Step[] };
 
@@ -37,6 +40,21 @@ export function defaultParams(action: Action): Record<string, unknown> {
 export function freeId(steps: Step[]): string {
   const used = new Set(steps.map((s) => s.id));
   for (let n = steps.length + 1; ; n++) if (!used.has(`s${n}`)) return `s${n}`;
+}
+
+/** The ids of the steps that have a problem (the graph editor outlines them). */
+export function problemSteps(def: Definition): Set<string> {
+  const bad = new Set<string>();
+  const seen = new Set<string>();
+  def.steps.forEach((s, i) => {
+    let wrong = !ID_RE.test(s.id) || seen.has(s.id);
+    seen.add(s.id);
+    if (s.action === "exec") wrong ||= !s.params.node_id || !String(s.params.command ?? "").trim();
+    if (s.action === "notify") wrong ||= !s.params.channel_id || !String(s.params.message ?? "").trim();
+    if (s.when && !def.steps.slice(0, i).some((p) => p.id === s.when?.step)) wrong = true;
+    if (wrong) bad.add(s.id);
+  });
+  return bad;
 }
 
 /** Problems that would make the API refuse the definition, in words. */
@@ -79,6 +97,7 @@ export function normalize(def: Definition): Definition {
             ? { channel_id: p.channel_id, message: String(p.message ?? "").trim() }
             : { reason: String(p.reason ?? "") };
       const step: Step = { id: s.id, action: s.action, params };
+      if (s.ui && Number.isFinite(s.ui.x) && Number.isFinite(s.ui.y)) step.ui = { x: Math.round(s.ui.x), y: Math.round(s.ui.y) };
       if (s.when) step.when = { step: s.when.step, outcome: s.when.outcome, ...(s.when.contains?.trim() ? { contains: s.when.contains.trim() } : {}) };
       if (s.action !== "approval" && s.on_failure === "continue") step.on_failure = "continue"; // an approval cannot fail
       return step;
