@@ -144,7 +144,7 @@
 > content in KV v2 (`openbao-kv`), `janus-ops secrets status|migrate|prune`, readiness that checks the secret
 > manager. ADR-011 implemented and tested against real OpenBao 2.4.1 and Vault 1.20.
 >
-> **v0.35** — **continuous aggregates and the 500-node load test** (NFR-05): see the F1 row of the metrics and `docs/SIZING.md`.
+> **v0.35** — **continuous aggregates and the 500-node load test** (NFR-05): see the F1 row of the metrics and `docs/SIZING.md`. Release **0.7.0** published (the live stack runs on it): migration `0025` on the real database materialised the history of 16M points in about 2 minutes in the background; charts of 1 h to 90 d answer in 50-100 ms.
 > **v0.34** — **Ctrl+K palette (pages, nodes, SSH, run a check, ask the AI); undo/redo in the workflow editor (Ctrl+Z, Ctrl+Shift+Z or Y; typing in a field is one step; 100 steps; `lib/history.ts`, 8 tests) and a browser test of a notification step; Copilot and Ansible tried in the browser on the live stack**: the Copilot with the real NVIDIA model, Ansible with a real dry run on a node (see FR-05 and the F7/F6 rows). Release **0.6.0** (graph workflow editor) published on Docker Hub; the live stack runs on the published image.
 > **v0.33** — **graph workflow editor**: nodes and branches on a canvas (React Flow), drag to reorder and connect, side panel,
 > read-only graph with run status; `ui` positions stored with each step; see §5.11.
