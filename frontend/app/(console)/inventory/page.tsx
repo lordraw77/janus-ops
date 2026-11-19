@@ -14,6 +14,7 @@ import {
 } from "@/components/ServicesEditor";
 import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
+import { isOlder } from "@/lib/version";
 import { RequirePermission, useAuth } from "@/lib/auth";
 import { ENV_COLORS, type EnvColor, type Environment, useEnvironments } from "@/lib/environments";
 import {
@@ -370,6 +371,10 @@ function NodesTab({ groups }: { groups: Group[] }) {
   }, [nodes, q, env, cap]);
 
   const canUpdateAgents = can("agents.manage");
+  // the signed agent is the one of the server's own version: an agent below it can be updated
+  const server = useResource<{ version: string }>("/health");
+  const target = server.data?.version ?? null;
+  const outdated = (nodes ?? []).filter((n) => n.agent && !n.agent.revoked && isOlder(n.agent.version, target)).length;
   const [rollout, setRollout] = useState<string | null>(null);
 
   async function updateFleet() {
@@ -396,8 +401,19 @@ function NodesTab({ groups }: { groups: Group[] }) {
       actions={
         <div className="flex gap-2">
           {canUpdateAgents && (
-            <Button onClick={() => void updateFleet()} title="Signed self-update of all connected agents">
-              <Download className="h-3.5 w-3.5" aria-hidden /> Update agents
+            <Button
+              onClick={() => void updateFleet()}
+              title={
+                outdated > 0
+                  ? `Signed self-update of the connected agents below ${target}`
+                  : target
+                    ? `Every agent is on ${target} or newer`
+                    : "Signed self-update of all connected agents"
+              }
+              disabled={target !== null && outdated === 0}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />{" "}
+              {outdated > 0 ? `Update agents to ${target} (${outdated})` : target ? `Agents up to date (${target})` : "Update agents"}
             </Button>
           )}
           {manage && (
@@ -481,7 +497,16 @@ function NodesTab({ groups }: { groups: Group[] }) {
                   </td>
                   <td className="py-2 pr-3 font-mono text-[11px]">
                     {n.agent ? (
-                      <span className={n.agent.revoked ? "text-fg-muted line-through" : "text-fg-secondary"}>
+                      <span
+                        className={
+                          n.agent.revoked
+                            ? "text-fg-muted line-through"
+                            : isOlder(n.agent.version, target)
+                              ? "font-semibold text-warn"
+                              : "text-fg-secondary"
+                        }
+                        title={!n.agent.revoked && isOlder(n.agent.version, target) ? `Update available: ${target}` : undefined}
+                      >
                         {n.agent.version ?? "?"}
                         {n.agent.arch ? ` · ${n.agent.arch}` : ""}
                         {n.agent.revoked ? " · revoked" : ""}
