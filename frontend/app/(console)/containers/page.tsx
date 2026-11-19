@@ -5,6 +5,8 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CloudDownload,
+  SearchCheck,
   ExternalLink,
   FileText,
   Layers,
@@ -367,6 +369,9 @@ type RowProps = {
   onAct: (action: string) => void;
   onDialog: (kind: DialogKind) => void;
   onStack: (name: string) => void;
+  /** Per-host view only: image check result and trigger. */
+  upd?: string;
+  onCheck?: () => void;
 };
 
 /** One container row; shared by the per-host table and the all-hosts table. */
@@ -382,6 +387,8 @@ function ContainerRow({
   onAct,
   onDialog,
   onStack,
+  upd,
+  onCheck,
 }: RowProps) {
   const running = c.state === "running";
   const health = c.health ? HEALTH_DOT[c.health] : undefined;
@@ -401,11 +408,25 @@ function ContainerRow({
       >
         {c.name}
       </td>
-      <td
-        className="max-w-44 truncate px-2 py-2 text-fg-secondary"
-        title={c.image}
-      >
-        {c.image}
+      <td className="px-2 py-2 text-fg-secondary" title={c.image}>
+        <div className="flex max-w-52 items-center gap-1.5">
+          <span className="min-w-0 truncate">{c.image}</span>
+          {upd === "update_available" && (
+            <span className="shrink-0 rounded border border-warn/40 bg-warn/15 px-1 py-0.5 font-semibold text-warn">
+              update
+            </span>
+          )}
+          {upd === "up_to_date" && (
+            <span className="shrink-0 text-ok" title="Image is up to date">
+              ✓
+            </span>
+          )}
+          {upd?.startsWith("error") && (
+            <span className="shrink-0 text-danger" title={upd}>
+              ?
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-2 py-2">
         <span
@@ -511,7 +532,7 @@ function ContainerRow({
           <span className="text-fg-muted">–</span>
         )}
       </td>
-      <td className="px-2 py-2">
+      <td className="sticky right-0 bg-surface px-2 py-2 shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.5)]">
         <div className="flex justify-end gap-0.5">
           <IconButton
             title={`Logs of ${c.name}`}
@@ -533,6 +554,24 @@ function ContainerRow({
               onClick={() => onDialog("stats")}
             >
               <Activity className="h-3.5 w-3.5" aria-hidden />
+            </IconButton>
+          )}
+          {manage && onCheck && (
+            <IconButton
+              title={`Check for a newer image of ${c.name}`}
+              onClick={onCheck}
+              disabled={busy}
+            >
+              <SearchCheck className="h-3.5 w-3.5" aria-hidden />
+            </IconButton>
+          )}
+          {manage && (
+            <IconButton
+              title={`Update ${c.name} (pull image and recreate)`}
+              onClick={() => onAct("update")}
+              disabled={busy}
+            >
+              <CloudDownload className="h-3.5 w-3.5" aria-hidden />
             </IconButton>
           )}
           {manage && running && (
@@ -610,6 +649,7 @@ function HostView({ host }: { host: Host }) {
     kind: "ok" | "error";
     text: string;
   } | null>(null);
+  const [updates, setUpdates] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState("");
@@ -659,26 +699,128 @@ function HostView({ host }: { host: Host }) {
       !window.confirm(`${action} ${c.name}?`)
     )
       return;
+    if (
+      action === "update" &&
+      !window.confirm(`Pull the image and recreate ${c.name}?`)
+    )
+      return;
     setBusy(c.name);
     const r =
       action === "remove"
         ? await api(`/containers/${host.node_id}/c/${c.name}`, {
             method: "DELETE",
           })
-        : await api(`/containers/${host.node_id}/c/${c.name}/${action}`, {
-            method: "POST",
-          });
+        : await api<{ result?: string }>(
+            `/containers/${host.node_id}/c/${c.name}/${action}`,
+            { method: "POST" },
+          );
     setBusy(null);
+    if (action === "update")
+      setUpdates((u) => {
+        const { [c.name]: _, ...rest } = u;
+        return rest;
+      });
     setNotice(
       r.ok
-        ? { kind: "ok", text: `${c.name}: ${action} done.` }
+        ? {
+            kind: "ok",
+            text: `${c.name}: ${
+              action === "update"
+                ? ((r.data as { result?: string } | undefined)?.result ===
+                  "up_to_date"
+                    ? "already up to date"
+                    : "updated")
+                : `${action} done`
+            }.`,
+          }
         : { kind: "error", text: message(r.code) },
     );
     reload();
   }
 
+  async function check(c: Container) {
+    setBusy(c.name);
+    const r = await api<{ result: string }>(
+      `/containers/${host.node_id}/c/${c.name}/check`,
+    );
+    setBusy(null);
+    if (!r.ok) {
+      setUpdates((u) => ({ ...u, [c.name]: `error: ${message(r.code)}` }));
+      setNotice({ kind: "error", text: `${c.name}: ${message(r.code)}` });
+      return;
+    }
+    setUpdates((u) => ({ ...u, [c.name]: r.data.result }));
+    setNotice({
+      kind: "ok",
+      text: `${c.name}: ${r.data.result === "update_available" ? "a newer image is available" : "image is up to date"}.`,
+    });
+  }
+
+  async function checkAll() {
+    setBusy("*");
+    const r = await api<Record<string, string>>(
+      `/containers/${host.node_id}/check`,
+    );
+    setBusy(null);
+    if (!r.ok) {
+      setNotice({ kind: "error", text: message(r.code) });
+      return;
+    }
+    setUpdates(r.data);
+    const vals = Object.values(r.data);
+    const n = vals.filter((v) => v === "update_available").length;
+    const e = vals.filter((v) => v.startsWith("error")).length;
+    setNotice({
+      kind: "ok",
+      text: `Check all: ${n} update(s) available, ${vals.length - n - e} up to date${e ? `, ${e} not checkable` : ""}.`,
+    });
+  }
+
+  async function updateAll() {
+    const targets = (containers.data ?? []).filter(
+      (c) => !stackFilter || stackFilter === "~" ? true : c.project === stackFilter,
+    );
+    if (
+      !window.confirm(
+        `Pull images and recreate ${targets.length} container(s) on ${host.node_name}?`,
+      )
+    )
+      return;
+    setBusy("*");
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const c of targets) {
+      const r = await api<{ result: string }>(
+        `/containers/${host.node_id}/c/${c.name}/update`,
+        { method: "POST" },
+      );
+      if (!r.ok) failed.push(`${c.name}: ${message(r.code)}`);
+      else if (r.data.result === "updated") done.push(c.name);
+    }
+    setBusy(null);
+    setUpdates({});
+    setNotice(
+      failed.length
+        ? {
+            kind: "error",
+            text: `Updated ${done.length}; failed: ${failed.join("; ")}`,
+          }
+        : {
+            kind: "ok",
+            text: `Update all: ${done.length} updated, ${targets.length - done.length} already up to date.`,
+          },
+    );
+    reload();
+  }
+
   async function stackAct(name: string, action: string) {
-    if (!window.confirm(`${action} every container of the stack ${name}?`))
+    if (
+      !window.confirm(
+        action === "update"
+          ? `Pull images and recreate every container of the stack ${name}?`
+          : `${action} every container of the stack ${name}?`,
+      )
+    )
       return;
     setBusy(name);
     const r = await api<{ results: Record<string, string> }>(
@@ -697,7 +839,13 @@ function HostView({ host }: { host: Host }) {
               kind: "error",
               text: `${name}: ${failed.map(([k, v]) => `${k}: ${v}`).join("; ")}`,
             }
-          : { kind: "ok", text: `${name}: ${action} done.` },
+          : {
+              kind: "ok",
+              text:
+                action === "update"
+                  ? `${name}: ${Object.values(r.data.results).filter((v) => v === "updated").length} updated, rest up to date.`
+                  : `${name}: ${action} done.`,
+            },
       );
     }
     reload();
@@ -844,6 +992,16 @@ function HostView({ host }: { host: Host }) {
             ))}
             <option value="~">No stack</option>
           </select>
+          {manage && (
+            <Button onClick={() => void checkAll()} disabled={busy === "*"}>
+              <SearchCheck className="h-3 w-3" aria-hidden /> Check all
+            </Button>
+          )}
+          {manage && (
+            <Button onClick={() => void updateAll()} disabled={busy === "*"}>
+              <CloudDownload className="h-3 w-3" aria-hidden /> Update all
+            </Button>
+          )}
           <Button onClick={reload}>
             <RefreshCw className="h-3 w-3" aria-hidden /> Refresh
           </Button>
@@ -859,7 +1017,7 @@ function HostView({ host }: { host: Host }) {
           </span>
           {manage && (
             <span className="ml-auto flex gap-1">
-              {(["start", "restart", "stop"] as const).map((a) => (
+              {(["update", "start", "restart", "stop"] as const).map((a) => (
                 <Button
                   key={a}
                   onClick={() => void stackAct(stackInfo.name, a)}
@@ -927,6 +1085,8 @@ function HostView({ host }: { host: Host }) {
                   onAct={(a) => void act(c, a)}
                   onDialog={(kind) => setDialog({ kind, c })}
                   onStack={setStackFilter}
+                  upd={updates[c.name]}
+                  onCheck={() => void check(c)}
                 />
               ))}
             </tbody>
@@ -1021,6 +1181,11 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
     if (
       (action === "stop" || action === "kill") &&
       !window.confirm(`${action} ${c.name} on ${h.node_name}?`)
+    )
+      return;
+    if (
+      action === "update" &&
+      !window.confirm(`Pull the image and recreate ${c.name} on ${h.node_name}?`)
     )
       return;
     setBusy(`${h.node_id}/${c.name}`);

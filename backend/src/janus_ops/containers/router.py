@@ -7,6 +7,7 @@ import logging
 import time
 import uuid
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket
 from fastapi.responses import PlainTextResponse
@@ -317,6 +318,179 @@ async def logs(
     except DockerError as exc:
         raise _http_error(exc) from None
     return b"".join(parts).decode(errors="replace")
+
+
+async def _update_one(opener: Any, ref: str) -> str:
+    """Pull the image of a container and recreate it when the image changed.
+
+    Returns "updated" or "up_to_date". The new container is created under a temporary
+    name first; on failure the old one is put back.
+    """
+    old = await docker.call(opener, "GET", path("containers", ref, "json"))
+    cfg = old.get("Config") or {}
+    image = cfg.get("Image") or ""
+    if not image or image.startswith("sha256:"):
+        raise DockerError("no_registry_image", 0, image)
+    name = (old.get("Name") or "").lstrip("/")
+    pulled = await docker.call(opener, "POST", "/images/create", {"fromImage": image})
+    if isinstance(pulled, str) and '"errorDetail"' in pulled:
+        last = [ln for ln in pulled.splitlines() if '"errorDetail"' in ln][-1]
+        raise DockerError("pull_failed", 0, last[:300])
+    fresh = await docker.call(opener, "GET", f"/images/{quote(image, safe='/:@')}/json")
+    if fresh.get("Id") == old.get("Image"):
+        return "up_to_date"
+    was_running = (old.get("State") or {}).get("Running", False)
+    nets = (old.get("NetworkSettings") or {}).get("Networks") or {}
+    short = old["Id"][:12]
+    endpoints = {
+        n: {
+            "Aliases": [a for a in (e.get("Aliases") or []) if a != short],
+            "IPAMConfig": e.get("IPAMConfig"),
+            "Links": e.get("Links"),
+        }
+        for n, e in nets.items()
+    }
+    body = {
+        **cfg,
+        "HostConfig": old.get("HostConfig") or {},
+        "NetworkingConfig": {"EndpointsConfig": endpoints},
+    }
+    tmp = f"{name}-janus-new"
+    created = await docker.call(opener, "POST", "/containers/create", {"name": tmp}, body)
+    new_id = created["Id"]
+    backup = f"{name}-janus-old"
+    try:
+        if was_running:
+            await docker.call(opener, "POST", path("containers", old["Id"], "stop"))
+        await docker.call(opener, "POST", path("containers", old["Id"], "rename"), {"name": backup})
+        await docker.call(opener, "POST", path("containers", new_id, "rename"), {"name": name})
+        if was_running:
+            await docker.call(opener, "POST", path("containers", new_id, "start"))
+    except DockerError:
+        with contextlib.suppress(DockerError):
+            await docker.call(opener, "DELETE", path("containers", new_id), {"force": True})
+            await docker.call(
+                opener, "POST", path("containers", old["Id"], "rename"), {"name": name}
+            )
+            if was_running:
+                await docker.call(opener, "POST", path("containers", old["Id"], "start"))
+        raise
+    with contextlib.suppress(DockerError):
+        await docker.call(opener, "DELETE", path("containers", old["Id"]), {"force": True})
+    return "updated"
+
+
+async def _check_one(opener: Any, ref: str) -> str:
+    """Compare the registry digest of the container's image with the local one (no pull).
+
+    Returns "up_to_date" or "update_available"; raises DockerError otherwise.
+    """
+    old = await docker.call(opener, "GET", path("containers", ref, "json"))
+    image = (old.get("Config") or {}).get("Image") or ""
+    if not image or image.startswith("sha256:"):
+        raise DockerError("no_registry_image", 0, image)
+    quoted = quote(image, safe="/:@")
+    remote = await docker.call(opener, "GET", f"/distribution/{quoted}/json")
+    digest = ((remote or {}).get("Descriptor") or {}).get("digest")
+    local = await docker.call(opener, "GET", f"/images/{quote(old['Image'], safe=':')}/json")
+    if not digest:
+        raise DockerError("registry_unavailable")
+    known = [d.split("@")[-1] for d in (local.get("RepoDigests") or [])]
+    return "up_to_date" if digest in known else "update_available"
+
+
+@router.get("/{node_id}/c/{container}/check")
+async def container_check(
+    request: Request, node_id: uuid.UUID, container: str, session: Manager
+) -> dict[str, str]:
+    """Is a newer image available for this container?"""
+    _, opener = await _opener(request, node_id, session)
+    try:
+        result = await _check_one(opener, check_name(container))
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    return {"result": result}
+
+
+@router.get("/{node_id}/check")
+async def check_all(request: Request, node_id: uuid.UUID, session: Manager) -> dict[str, str]:
+    """Check every container of the host for a newer image; value is the result or an error."""
+    _, opener = await _opener(request, node_id, session)
+    try:
+        rows = await docker.call(opener, "GET", "/containers/json", {"all": True})
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    gate = asyncio.Semaphore(LIVE_PARALLEL)
+    results: dict[str, str] = {}
+
+    async def one(c: dict[str, Any]) -> None:
+        cname = (c.get("Names") or ["/?"])[0].lstrip("/")
+        async with gate:
+            try:
+                results[cname] = await _check_one(opener, c["Id"])
+            except DockerError as exc:
+                results[cname] = f"error: {exc.detail or exc.code}"
+
+    await asyncio.gather(*(one(c) for c in rows))
+    return results
+
+
+@router.post("/{node_id}/c/{container}/update")
+async def container_update(
+    request: Request, node_id: uuid.UUID, container: str, session: Manager
+) -> dict[str, str]:
+    """Pull the image and recreate the container with the same configuration."""
+    host, opener = await _opener(request, node_id, session)
+    name = check_name(container)
+    try:
+        result = await _update_one(opener, name)
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    await record(
+        request,
+        session,
+        "containers.update",
+        "container",
+        f"{host.node_name}/{name}",
+        {"result": result},
+    )
+    return {"result": result}
+
+
+@router.post("/{node_id}/stacks/{project}/update")
+async def stack_update(
+    request: Request, node_id: uuid.UUID, project: str, session: Manager
+) -> dict[str, Any]:
+    """Update every container of a Compose project (pull + recreate where the image changed)."""
+    host, opener = await _opener(request, node_id, session)
+    name = check_name(project)
+    try:
+        rows = await docker.call(
+            opener,
+            "GET",
+            "/containers/json",
+            {"all": True, "filters": json.dumps({"label": [f"{PROJECT}={name}"]})},
+        )
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    if not rows:
+        raise HTTPException(404, "not_found")
+    results: dict[str, str] = {}
+    for c in rows:
+        cname = (c.get("Names") or ["/?"])[0].lstrip("/")
+        try:
+            results[cname] = await _update_one(opener, c["Id"])
+        except DockerError as exc:
+            results[cname] = f"error: {exc.detail or exc.code}"
+    await record(
+        request,
+        session,
+        "containers.stack_update",
+        "stack",
+        f"{host.node_name}/{name}",
+        {"containers": results},
+    )
+    return {"results": results}
 
 
 @router.post("/{node_id}/c/{container}/{action}", status_code=204)
