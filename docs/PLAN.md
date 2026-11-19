@@ -145,6 +145,9 @@
 > when the node changes (a new port), the stored value and the checks made from it follow, and the
 > change is audited. Needs an agent newer than 0.7.0.
 >
+> **0.8.0 released** (agent signed): migrations `0026` and `0027` applied on the live stack, checked with a
+> Rocky Linux 9 + PostgreSQL 13 test server (discovery, macros found by the agent, probes).
+>
 > **v0.29** — **service probes** (migration `0027`, F8): a check kind `probe` that reads one named
 > measurement of a service through a connector in the server (`monitoring/probes/`): PostgreSQL
 > (connections, long transactions, locks, cache hit, replication lag, wraparound: one fixed read-only
