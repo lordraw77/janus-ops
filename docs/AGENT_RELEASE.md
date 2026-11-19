@@ -17,7 +17,7 @@ machine (or CI) when releases happen from somewhere else.
 
 ## One time: create the key
 
-    docker run --rm -v "$PWD:/out" lordraw/janus-ops:0.8.2 \
+    docker run --rm -v "$PWD:/out" lordraw/janus-ops:0.8.3 \
       agent-keygen --private-key /out/release.pem
 
 It prints the public key. Put it in `deploy/.env` as `JANUS_AGENT_RELEASE_PUBLIC_KEY`, then reinstall each

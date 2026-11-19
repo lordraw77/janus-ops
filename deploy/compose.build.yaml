@@ -5,4 +5,4 @@ services:
     build:
       context: ..
       args:
-        VERSION: ${JANUS_VERSION:-0.8.2}
+        VERSION: ${JANUS_VERSION:-0.8.3}
