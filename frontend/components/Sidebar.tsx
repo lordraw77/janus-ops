@@ -62,7 +62,7 @@ export const NAV: NavItem[] = [
   { label: "Users & roles", icon: Users, target: { href: "/admin/users/", permission: "users.read" } },
   { label: "Audit log", icon: ScrollText, keywords: "history who did", target: { href: "/audit/", permission: "audit.read" } },
   { label: "Notifications", icon: Bell, target: { href: "/notifications/", permission: "notifications.manage" } },
-  { label: "Settings", icon: Settings, target: { phase: "F0" } },
+  { label: "Settings", icon: Settings, target: { href: "/settings/", permission: "inventory.read" } },
 ];
 
 function isActive(pathname: string, href: string): boolean {
