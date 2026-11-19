@@ -16,7 +16,8 @@ import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { isOlder } from "@/lib/version";
 import { RequirePermission, useAuth } from "@/lib/auth";
-import { ENV_COLORS, type EnvColor, type Environment, useEnvironments } from "@/lib/environments";
+import { PRESET_COLORS, envHex, envStyle } from "@/lib/envColor";
+import { type Environment, useEnvironments } from "@/lib/environments";
 import {
   CAPABILITIES,
   type CapabilityKind,
@@ -761,12 +762,11 @@ function TagsTab() {
   );
 }
 
-const COLOR_LABEL: Record<EnvColor, string> = { crit: "Red", warn: "Amber", ok: "Green", primary: "Blue", muted: "Grey" };
-
 function EnvironmentDialog({ env, onClose, onSaved }: { env: Environment | null; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(env?.name ?? "");
   const [label, setLabel] = useState(env?.label ?? "");
-  const [color, setColor] = useState<EnvColor | "">(env?.color ?? "");
+  // always #rrggbb in the form: an old preset name is shown as its colour
+  const [color, setColor] = useState<string>(envHex(env?.color) ?? "");
   const [position, setPosition] = useState(String(env?.position ?? 100));
   const [error, setError] = useState<string | null>(null);
 
@@ -793,16 +793,51 @@ function EnvironmentDialog({ env, onClose, onSaved }: { env: Environment | null;
           <TextInput required value={label} onChange={(e) => setLabel(e.target.value)} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Badge colour">
-            <select value={color} onChange={(e) => setColor(e.target.value as EnvColor | "")} className={SELECT}>
-              <option value="">Neutral</option>
-              {ENV_COLORS.map((c) => (
-                <option key={c} value={c}>
-                  {COLOR_LABEL[c]}
-                </option>
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-fg-secondary">Badge colour</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setColor("")}
+                aria-pressed={color === ""}
+                title="Neutral"
+                className={`h-6 rounded border px-1.5 text-[10px] text-fg-muted ${color === "" ? "border-fg" : "border-line"}`}
+              >
+                none
+              </button>
+              {PRESET_COLORS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setColor(c.value)}
+                  aria-pressed={color === c.value}
+                  aria-label={c.label}
+                  title={c.label}
+                  style={{ backgroundColor: c.value }}
+                  className={`h-6 w-6 rounded border-2 ${color === c.value ? "border-fg" : "border-transparent"}`}
+                />
               ))}
-            </select>
-          </Field>
+              <label className="flex items-center gap-1 text-[10px] text-fg-muted" title="Any colour">
+                custom
+                <input
+                  type="color"
+                  value={color || "#64748b"}
+                  onChange={(e) => setColor(e.target.value)}
+                  className="h-6 w-8 cursor-pointer rounded border border-line bg-canvas p-0"
+                />
+              </label>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-fg-muted">
+              Preview
+              <span
+                style={envStyle(color)}
+                className={`inline-block rounded border px-1.5 font-mono text-[10px] uppercase ${color ? "" : "border-line text-fg-muted"}`}
+              >
+                {name || env?.name || "env"}
+              </span>
+              <span className="font-mono">{color || "neutral"}</span>
+            </div>
+          </div>
           <Field label="Order" hint="Lower comes first">
             <TextInput type="number" min={0} max={10000} value={position} onChange={(e) => setPosition(e.target.value)} />
           </Field>

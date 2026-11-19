@@ -1,6 +1,6 @@
 """/api/v1/environments: the list of environments nodes belong to (prod, staging, ...)."""
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -15,7 +15,9 @@ router = APIRouter(prefix="/environments", tags=["inventory"])
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 Manager = Annotated[Session, Depends(require_permission("environments.manage"))]
 
-Color = Literal["ok", "warn", "crit", "primary", "muted"]
+# a preset (ok, warn, crit, primary, muted: kept for the environments made before custom colours) or
+# any colour as #rrggbb
+Color = Annotated[str, Field(pattern=r"^(ok|warn|crit|primary|muted|#[0-9a-fA-F]{6})$")]
 NAME = r"^[a-z][a-z0-9-]{0,31}$"
 
 
