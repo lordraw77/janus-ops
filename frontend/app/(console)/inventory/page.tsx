@@ -144,7 +144,7 @@ function NodeDialog({
   }
 
   return (
-    <Modal title={node ? `Edit ${node.name}` : "New node"} onClose={onClose}>
+    <Modal title={node ? `Edit ${node.name}` : "New node"} onClose={onClose} wide>
       <form onSubmit={submit} className="max-h-[75vh] space-y-3 overflow-y-auto pr-1">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Name">
@@ -878,7 +878,7 @@ function Inventory() {
   const [tab, setTab] = useState<"nodes" | "groups" | "tags" | "environments">("nodes");
   const groups = useResource<Group[]>("/groups");
   return (
-    <div className="max-w-7xl space-y-4">
+    <div className="space-y-4">
       <h1 className="text-lg font-semibold">Inventory</h1>
       <div role="tablist" className="flex gap-1 border-b border-line text-xs">
         {(["nodes", "groups", "tags", "environments"] as const)
