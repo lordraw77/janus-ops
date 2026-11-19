@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from janus_ops.agents import exec as node_exec
 from janus_ops.agents.hub import AgentHub
-from janus_ops.monitoring import fritz, snmp_poll
+from janus_ops.monitoring import fritz, probes, snmp_poll
 from janus_ops.monitoring.checks import (
     Check,
     FritzParams,
@@ -37,6 +37,7 @@ from janus_ops.monitoring.checks import (
     SnmpParams,
     clip,
     evaluate,
+    evaluate_probe,
     evaluate_snmp,
     grade_service,
 )
@@ -198,6 +199,8 @@ class Engine:
             result = await self._snmp(check)
         elif check.kind == "fritzbox":
             result = await self._fritzbox(check)
+        elif check.kind == "probe":
+            result = await evaluate_probe(probes.Ctx(self.db, self.vault, self.proxmox), check)
         else:
             async with self.db.connect() as conn:
                 result = await evaluate(conn, check, online, row.last_seen_at, self.proxmox)

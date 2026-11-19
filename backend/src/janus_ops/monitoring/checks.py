@@ -9,6 +9,8 @@ Kinds:
 - http:    the server gets an expected HTTP status (no agent needed); latency thresholds
 - backup:  the Proxmox cluster behind the node has no guest without a recent backup (FR-53):
            failed or missing = CRIT, stale or not in any job = WARN. Needs the PVE access.
+- probe:   one named measurement of a service (PostgreSQL, Apache status, Proxmox), read by a
+           connector in the server (monitoring/probes); the number is compared with the thresholds.
 - snmp:    one numeric OID read by SNMP GET from the server (FR-82, no agent needed); the
            value times `scale` is compared with the thresholds. Needs the node's SNMP capability.
 """
@@ -25,11 +27,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops.agents.ingest import LABEL_KEY, NAME
+from janus_ops.monitoring import probes
 from janus_ops.monitoring.snmp_poll import Reading
 from janus_ops.proxmox.access import ProxmoxAccess
 from janus_ops.proxmox.backup_audit import collect as collect_backups
@@ -37,7 +40,17 @@ from janus_ops.proxmox.client import PveError
 
 State = Literal["ok", "warn", "crit", "unknown"]
 Kind = Literal[
-    "host", "metric", "systemd", "service", "port", "tcp", "http", "backup", "snmp", "fritzbox"
+    "host",
+    "metric",
+    "systemd",
+    "service",
+    "port",
+    "tcp",
+    "http",
+    "backup",
+    "snmp",
+    "fritzbox",
+    "probe",
 ]
 FACTS_STALE = timedelta(minutes=3)
 METRIC_STALE = timedelta(minutes=5)
@@ -108,6 +121,30 @@ class FritzParams(_Params):
     item: Literal["wan_link", "wan_connection", "uptime", "traffic"]
 
 
+class ProbeParams(_Params):
+    # a name of the probe catalog (monitoring/probes): `postgres.connections_used_pct`
+    probe: str = Field(max_length=64)
+    # the probe's arguments (its catalog entry says which): the URL of an Apache status page…
+    args: dict[str, str | bool] = Field(default_factory=dict, max_length=4)
+    timeout_s: float = Field(default=10, gt=0, le=60)
+
+    @model_validator(mode="after")
+    def _known(self) -> "ProbeParams":
+        probe = probes.CATALOG.get(self.probe)
+        if probe is None:
+            raise ValueError("unknown probe")
+        unknown = set(self.args) - set(probe.args)
+        if unknown:
+            raise ValueError(f"the probe has no argument {sorted(unknown)[0]}")
+        for name, required in probe.args.items():
+            if required and not self.args.get(name):
+                raise ValueError(f"the probe needs {name}")
+        url = self.args.get("url")
+        if url is not None and not re.fullmatch(r"https?://\S{1,2000}", str(url)):
+            raise ValueError("url must be http or https")
+        return self
+
+
 class BackupParams(_Params):
     # longer than the schedule of the jobs when set; default: each guest's own job period
     max_age_h: int | None = Field(default=None, ge=1, le=24 * 90)
@@ -124,9 +161,10 @@ PARAMS: dict[str, type[_Params]] = {
     "backup": BackupParams,
     "snmp": SnmpParams,
     "fritzbox": FritzParams,
+    "probe": ProbeParams,
 }
 # kinds whose value can be compared with thresholds
-THRESHOLDS = {"metric", "tcp", "http", "snmp"}
+THRESHOLDS = {"metric", "tcp", "http", "snmp", "probe"}
 # kinds that need the agent
 NEEDS_AGENT = {"host", "metric", "systemd", "port"}
 
@@ -337,6 +375,8 @@ async def _backup(c: Check, proxmox: ProxmoxAccess | None) -> Result:
     return Result("crit" if bad else "warn", f"{head}: {shown}", {"attention": bad + attention})
 
 
+PROBE_ERRORS = probes.base.ERRORS
+
 # SNMP read error code -> the state and the text shown for it
 SNMP_ERRORS: dict[str, tuple[State, str]] = {
     "no_snmp_capability": ("unknown", "the node has no enabled SNMP capability"),
@@ -369,6 +409,25 @@ def evaluate_snmp(c: Check, reading: Reading) -> Result:
     limits = f" (warn {op} {_fmt(c.warn) if c.warn is not None else '-'},"
     limits += f" crit {op} {_fmt(c.crit) if c.crit is not None else '-'})"
     return Result(state, f"{p.oid} = {_fmt(value)}{limits}", {"value": value})
+
+
+async def evaluate_probe(ctx: probes.Ctx, c: Check) -> Result:
+    """One probe read by its connector. A service that cannot be read is an UNKNOWN or CRIT result
+    (see probes.base.ERRORS), never an exception."""
+    p = ProbeParams.model_validate(c.params)
+    probe = probes.CATALOG[p.probe]
+    try:
+        value, summary = await probes.read(ctx, probe, c.node_id, c.address, p.args, p.timeout_s)
+    except probes.ProbeError as exc:
+        state, why = PROBE_ERRORS.get(exc.code, ("unknown", "the probe failed"))
+        extra = f" ({exc.detail})" if exc.detail else ""
+        return Result(state, f"{probe.name}: {why}{extra}")
+    state = grade(value, c.comparison, c.warn, c.crit)
+    if c.comparison is not None:
+        op = ">" if c.comparison == "gt" else "<"
+        limits = f" (warn {op} {_fmt(c.warn) if c.warn is not None else '-'},"
+        summary += f"{limits} crit {op} {_fmt(c.crit) if c.crit is not None else '-'})"
+    return Result(state, summary, {"value": value})
 
 
 def grade_service(unit: str, output: str) -> Result:

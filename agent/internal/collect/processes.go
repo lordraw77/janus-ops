@@ -294,6 +294,16 @@ func (c *Collector) Facts(elapsed time.Duration) proto.FactsData {
 			d.FailedUnits = units
 		}
 	}
+	d.Units = []string{}
+	if c.RunningUnits != nil {
+		if units, err := c.RunningUnits(); err == nil {
+			d.Units = units
+		}
+	}
+	if len(d.Units) > 300 {
+		d.Units = d.Units[:300]
+	}
+	d.Services = c.Services()
 	d.Listening = c.Listening()
 	d.TopCPU, d.TopMem = c.TopProcesses(10, elapsed)
 	return d

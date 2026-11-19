@@ -76,6 +76,9 @@ agent → server, every 60 s, the latest *facts* (not buffered, only the newest 
 ```json
 {"t": "facts", "ts": 1763112000000, "data": {
   "uptime_s": 86400, "failed_units": ["foo.service"],
+  "units": ["sshd.service", "postgresql.service"],
+  "services": [{"name": "postgresql", "process": "postgres", "cmd": "/usr/bin/postgres -D /var/lib/pgsql/data",
+                "config": {"port": "5432", "data_dir": "/var/lib/pgsql/data", "max_connections": "100"}}],
   "listening": [{"proto": "tcp", "addr": "0.0.0.0", "port": 22, "process": "sshd"}],
   "top_cpu": [{"pid": 1830, "name": "kvm 101 (web01)", "cmd": "/usr/bin/kvm -id 101 …",
                "user": "root", "cpu_pct": 50.5, "rss_bytes": 15538626560}],
@@ -87,6 +90,13 @@ agent → server, every 60 s, the latest *facts* (not buffered, only the newest 
 (60 s). `name` is the kernel command name, completed from the command line when the kernel cut
 it at 15 characters; QEMU/KVM guests are named `kvm <vmid> (<name>)`. `cmd` (at most 256
 characters) and `user` are optional; kernel threads have no `cmd`.
+
+`units` are the running systemd services. `services` is the service discovery: the well-known
+services found running (catalog fixed in the agent: `postgresql`, `httpd`), with their command
+line and a few settings read from their configuration (port, data directory, listen ports…). It
+is read only and fixed in code: the processes looked for, the files read and the keys kept are an
+allow-list, and no secret is ever read. Both fields are optional: an agent that predates them
+sends neither, and the server treats the node as having no discovery data.
 
 ## Metric catalogue (v1)
 

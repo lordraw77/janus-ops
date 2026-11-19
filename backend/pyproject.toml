@@ -83,3 +83,8 @@ plugins = ["pydantic.mypy"]
 # pysnmp ships no type stubs (FR-82): its objects are typed as Any at the boundary
 module = ["pysnmp", "pysnmp.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# asyncpg ships no type stubs: the PostgreSQL probes (monitoring/probes/postgres.py) use it directly
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true

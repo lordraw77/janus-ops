@@ -35,6 +35,11 @@ export async function api<T = unknown>(
 
 const MESSAGES: Record<string, string> = {
   network_error: "The Janus-Ops API is not reachable.",
+  built_in: "A built-in template is read only: duplicate it to change it.",
+  name_taken: "This name is already used.",
+  no_snmp_capability: "The node has no SNMP access configured.",
+  no_postgres_capability: "The node has no PostgreSQL access configured: add the capability with its credential.",
+  no_fritzbox_capability: "The node has no FRITZ!Box access configured.",
   invalid_input: "Some fields are not valid.",
   invalid_credentials: "Invalid username or password.",
   no_role: "Your account is not a member of any Janus-Ops role group. Ask an administrator.",
@@ -242,6 +247,8 @@ export function message(code: string, retryAfter?: number): string {
     credential_not_used: "No credential is used by capability",
     invalid_config: "Invalid setting",
     unknown_environment: "Unknown environment",
+    invalid_macro: "A macro value does not fit",
+    unknown_macro: "This template has no macro",
     pve_error: "Proxmox",
     pve_forbidden: "Proxmox permission",
     pve_console_failed: "Proxmox console",

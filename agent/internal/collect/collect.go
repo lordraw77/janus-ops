@@ -24,6 +24,10 @@ type Collector struct {
 	FS func(path string) (FSStat, error)
 	// FailedUnits lists failed systemd units; replaced in tests.
 	FailedUnits func() ([]string, error)
+	// RunningUnits lists the running systemd services; replaced in tests.
+	RunningUnits func() ([]string, error)
+	// Root is prepended to the configuration files read for service discovery ("/" normally).
+	Root string
 
 	last      time.Time
 	cpu       cpuTimes
@@ -33,7 +37,7 @@ type Collector struct {
 }
 
 func New(proc, sys string) *Collector {
-	return &Collector{Proc: proc, Sys: sys, FS: statfs, FailedUnits: systemdFailed}
+	return &Collector{Proc: proc, Sys: sys, FS: statfs, FailedUnits: systemdFailed, RunningUnits: systemdRunning, Root: "/"}
 }
 
 type points struct{ list []proto.Point }

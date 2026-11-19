@@ -7,6 +7,7 @@ import { type FormEvent, Suspense, useEffect, useState } from "react";
 
 import { ChecksCard } from "@/components/Checks";
 import { LineChart, type LineSeries } from "@/components/LineChart";
+import { TemplateSuggestions } from "@/components/TemplateSuggestions";
 import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
 import {
   AGENT_STATUS,
@@ -400,6 +401,8 @@ function Facts({ agent }: { agent: AgentDetail }) {
 function NodeView({ id }: { id: string }) {
   const { can } = useAuth();
   const agent = useResource<AgentDetail>(`/agents/${id}`);
+  // bumped when a template is applied: the checks list is read again
+  const [checksRev, setChecksRev] = useState(0);
   const a = agent.data;
   if (agent.error) return <Alert>{agent.error}</Alert>;
   if (!a) return <p className="text-sm text-fg-muted">Loading…</p>;
@@ -423,7 +426,10 @@ function NodeView({ id }: { id: string }) {
         </div>
       </div>
       <AgentCard agent={a} reload={agent.reload} />
-      <ChecksCard nodeId={a.node_id} nodeName={a.node_name} />
+      {a.enrolled_at && (
+        <TemplateSuggestions nodeId={a.node_id} hasFacts={!!a.facts} onApplied={() => setChecksRev((n) => n + 1)} />
+      )}
+      <ChecksCard key={checksRev} nodeId={a.node_id} nodeName={a.node_name} />
       {a.enrolled_at && <Charts nodeId={a.node_id} />}
       <Facts agent={a} />
     </div>

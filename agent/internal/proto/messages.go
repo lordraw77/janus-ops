@@ -105,12 +105,24 @@ type Listener struct {
 	Process string `json:"process,omitempty"`
 }
 
+// Service is a well-known service found running, with the few settings of it that monitoring
+// templates use (see internal/collect/services.go for what is read).
+type Service struct {
+	Name    string            `json:"name"`
+	Process string            `json:"process"`
+	Cmd     string            `json:"cmd,omitempty"`
+	Config  map[string]string `json:"config,omitempty"`
+}
+
 type FactsData struct {
-	UptimeS     float64    `json:"uptime_s"`
-	FailedUnits []string   `json:"failed_units"`
-	Listening   []Listener `json:"listening"`
-	TopCPU      []Process  `json:"top_cpu"`
-	TopMem      []Process  `json:"top_mem"`
+	UptimeS     float64  `json:"uptime_s"`
+	FailedUnits []string `json:"failed_units"`
+	// Units are the running systemd services; Services the catalog services found (discovery).
+	Units     []string   `json:"units"`
+	Services  []Service  `json:"services"`
+	Listening []Listener `json:"listening"`
+	TopCPU    []Process  `json:"top_cpu"`
+	TopMem    []Process  `json:"top_mem"`
 }
 
 type Facts struct {

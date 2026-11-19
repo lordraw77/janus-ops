@@ -1,0 +1,22 @@
+{
+  "slug": "web-endpoint",
+  "version": 1,
+  "name": "Web endpoint (HTTP)",
+  "category": "web",
+  "description": "The server fetches a URL of the node and expects a good status. No agent needed.",
+  "requires": null,
+  "macros": [
+    {"name": "SCHEME", "default": "http", "description": "http or https"},
+    {"name": "PORT", "default": 80, "description": "TCP port"},
+    {"name": "PATH", "default": "/", "description": "URL path"},
+    {"name": "STATUS", "default": "200-399", "description": "Accepted HTTP status codes"},
+    {"name": "VERIFY_TLS", "default": true, "description": "Verify the TLS certificate"}
+  ],
+  "items": [
+    {"name": "TCP port {$PORT}", "kind": "tcp", "params": {"port": "{$PORT}"}},
+    {"name": "HTTP {$PATH}", "kind": "http",
+     "params": {"url": "{$SCHEME}://{$NODE_ADDRESS}:{$PORT}{$PATH}", "expect_status": "{$STATUS}",
+                "verify_tls": "{$VERIFY_TLS}"},
+     "check_cycles": 2}
+  ]
+}

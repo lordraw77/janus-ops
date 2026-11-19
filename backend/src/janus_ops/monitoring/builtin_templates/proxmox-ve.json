@@ -1,0 +1,146 @@
+{
+  "slug": "proxmox-ve",
+  "version": 2,
+  "name": "Proxmox VE (cluster)",
+  "category": "proxmox",
+  "description": "Web interface up, no guest without a recent backup, and the cluster's health: nodes, quorum, CPU, memory and storage. Needs the Proxmox access of the node.",
+  "requires": "proxmox",
+  "macros": [
+    {
+      "name": "UI_PORT",
+      "default": 8006,
+      "description": "Web interface port"
+    },
+    {
+      "name": "VERIFY_TLS",
+      "default": false,
+      "description": "Verify the TLS certificate (self-signed by default)"
+    },
+    {
+      "name": "CPU_WARN",
+      "default": 85,
+      "description": "Busiest node CPU, warning %"
+    },
+    {
+      "name": "CPU_CRIT",
+      "default": 95,
+      "description": "Busiest node CPU, critical %"
+    },
+    {
+      "name": "MEM_WARN",
+      "default": 85,
+      "description": "Fullest node memory, warning %"
+    },
+    {
+      "name": "MEM_CRIT",
+      "default": 95,
+      "description": "Fullest node memory, critical %"
+    },
+    {
+      "name": "STORAGE_WARN",
+      "default": 80,
+      "description": "Fullest storage, warning %"
+    },
+    {
+      "name": "STORAGE_CRIT",
+      "default": 90,
+      "description": "Fullest storage, critical %"
+    }
+  ],
+  "detect": {
+    "processes": [
+      "pvedaemon",
+      "pveproxy"
+    ],
+    "ports": [
+      8006
+    ],
+    "units": [
+      "pveproxy*",
+      "pve-cluster*"
+    ]
+  },
+  "items": [
+    {
+      "name": "Web interface port {$UI_PORT}",
+      "kind": "tcp",
+      "params": {
+        "port": "{$UI_PORT}"
+      }
+    },
+    {
+      "name": "Web interface",
+      "kind": "http",
+      "params": {
+        "url": "https://{$NODE_ADDRESS}:{$UI_PORT}/",
+        "verify_tls": "{$VERIFY_TLS}"
+      },
+      "check_cycles": 2
+    },
+    {
+      "name": "Guest backups",
+      "kind": "backup",
+      "interval_s": 3600
+    },
+    {
+      "name": "Nodes offline",
+      "kind": "probe",
+      "params": {
+        "probe": "proxmox.nodes_offline"
+      },
+      "interval_s": 60,
+      "check_cycles": 2,
+      "comparison": "gt",
+      "warn": null,
+      "crit": 0
+    },
+    {
+      "name": "Cluster quorum",
+      "kind": "probe",
+      "params": {
+        "probe": "proxmox.quorate"
+      },
+      "interval_s": 60,
+      "check_cycles": 1,
+      "comparison": "lt",
+      "warn": null,
+      "crit": 1
+    },
+    {
+      "name": "Node CPU (busiest)",
+      "kind": "probe",
+      "params": {
+        "probe": "proxmox.node_cpu_max_pct"
+      },
+      "interval_s": 60,
+      "check_cycles": 3,
+      "comparison": "gt",
+      "warn": "{$CPU_WARN}",
+      "crit": "{$CPU_CRIT}"
+    },
+    {
+      "name": "Node memory (fullest)",
+      "kind": "probe",
+      "params": {
+        "probe": "proxmox.node_mem_max_pct"
+      },
+      "interval_s": 60,
+      "check_cycles": 3,
+      "comparison": "gt",
+      "warn": "{$MEM_WARN}",
+      "crit": "{$MEM_CRIT}"
+    },
+    {
+      "name": "Storage used (fullest)",
+      "kind": "probe",
+      "params": {
+        "probe": "proxmox.storage_max_pct"
+      },
+      "interval_s": 300,
+      "check_cycles": 2,
+      "comparison": "gt",
+      "warn": "{$STORAGE_WARN}",
+      "crit": "{$STORAGE_CRIT}"
+    }
+  ]
+}

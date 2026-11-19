@@ -47,6 +47,7 @@ const DEFAULT_CONFIG: Record<CapabilityKind, Record<string, string | boolean>> =
   docker: { via: "agent" },
   snmp: { version: "v2c", port: "161", security_level: "authPriv", auth_protocol: "SHA256", priv_protocol: "AES128" },
   fritzbox: { port: "49000" },
+  postgres: { port: "5432", database: "postgres", sslmode: "prefer" },
 };
 
 function initialCaps(node: InventoryNode | null): Record<CapabilityKind, CapState> {
@@ -306,6 +307,27 @@ function NodeDialog({
                             </Field>
                           </>
                         )}
+                      </>
+                    )}
+                    {kind === "postgres" && (
+                      <>
+                        <Field label="Port">
+                          <TextInput inputMode="numeric" value={String(c.config.port)} onChange={(e) => setConfig(kind, "port", e.target.value)} />
+                        </Field>
+                        <Field label="Database">
+                          <TextInput value={String(c.config.database)} onChange={(e) => setConfig(kind, "database", e.target.value)} />
+                        </Field>
+                        <Field label="Encryption">
+                          <select value={String(c.config.sslmode)} onChange={(e) => setConfig(kind, "sslmode", e.target.value)} className={SELECT}>
+                            <option value="prefer">prefer (encrypt when the server can)</option>
+                            <option value="require">require (never plain text)</option>
+                            <option value="disable">disable</option>
+                          </select>
+                        </Field>
+                        <p className="col-span-2 text-[11px] text-fg-muted">
+                          The server connects to read statistics only. Give the role pg_monitor and nothing else:{" "}
+                          <span className="font-mono">GRANT pg_monitor TO janus_monitor;</span>
+                        </p>
                       </>
                     )}
                     {kind === "agent" && (

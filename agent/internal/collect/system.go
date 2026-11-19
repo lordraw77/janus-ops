@@ -123,6 +123,21 @@ func systemdFailed() ([]string, error) {
 	return ParseFailedUnits(string(out)), nil
 }
 
+func systemdRunning() ([]string, error) {
+	if _, err := os.Stat("/run/systemd/system"); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(
+		ctx, "systemctl", "list-units", "--type=service", "--state=running", "--no-legend", "--plain", "--no-pager",
+	).Output()
+	if err != nil {
+		return nil, err
+	}
+	return ParseFailedUnits(string(out)), nil
+}
+
 // ParseFailedUnits reads `systemctl list-units --state=failed --no-legend --plain`.
 func ParseFailedUnits(out string) []string {
 	units := []string{}

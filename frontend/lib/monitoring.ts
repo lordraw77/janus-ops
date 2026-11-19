@@ -1,7 +1,17 @@
 /** Alerting API types (backend: janus_ops.monitoring). */
 
 export type CheckState = "ok" | "warn" | "crit" | "unknown";
-export type CheckKind = "host" | "metric" | "systemd" | "service" | "port" | "tcp" | "http" | "backup" | "snmp" | "fritzbox";
+export type CheckKind = "host" | "metric" | "systemd" | "service" | "port" | "tcp" | "http" | "backup" | "snmp" | "fritzbox" | "probe";
+
+/** One entry of the probe catalog (GET /probes). */
+export type ProbeInfo = {
+  name: string;
+  connector: string;
+  unit: string;
+  description: string;
+  requires: string | null;
+  args: Record<string, boolean>;
+};
 
 export type CheckDef = {
   node_id?: string;
@@ -118,6 +128,7 @@ export const KIND_LABEL: Record<CheckKind, string> = {
   snmp: "SNMP OID (from server)",
   service: "Systemd service (via agent)",
   fritzbox: "FRITZ!Box (TR-064, from server)",
+  probe: "Service probe (PostgreSQL, Apache, Proxmox)",
 };
 
 export const CHANNEL_LABEL: Record<ChannelKind, string> = {
@@ -159,6 +170,8 @@ export function describeCheck(c: CheckDef): string {
       return `${p.unit} is active`;
     case "fritzbox":
       return `FRITZ!Box ${p.item ?? "item"}`;
+    case "probe":
+      return `${p.probe}${limits}`;
     case "snmp":
       return `${p.oid}${p.scale && p.scale !== 1 ? ` × ${p.scale}` : ""}${limits}`;
     default:

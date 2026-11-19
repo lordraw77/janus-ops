@@ -19,7 +19,7 @@ from typing import Any, Literal
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import APIRouter, WebSocket
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.websockets import WebSocketDisconnect, WebSocketState
@@ -28,6 +28,7 @@ from janus_ops import audit
 from janus_ops.agents.hub import AgentHub, Link
 from janus_ops.agents.ingest import BadMessage, SeriesCache, parse_samples, store
 from janus_ops.agents.mux import Mux
+from janus_ops.monitoring.template_discovery import refresh_node
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["agents"])
@@ -92,10 +93,28 @@ class Listener(BaseModel):
     process: str = Field(default="", max_length=256)
 
 
+class Service(BaseModel):
+    """A well-known service the agent found (service discovery, see monitoring/template_auto.py)."""
+
+    model_config = ConfigDict(extra="ignore")
+    name: str = Field(max_length=64)
+    process: str = Field(default="", max_length=256)
+    cmd: str = Field(default="", max_length=1024)
+    config: dict[str, str] = Field(default_factory=dict, max_length=32)
+
+    @field_validator("config")
+    @classmethod
+    def _bounded(cls, value: dict[str, str]) -> dict[str, str]:
+        return {k[:64]: v[:512] for k, v in value.items()}
+
+
 class Facts(BaseModel):
     model_config = ConfigDict(extra="ignore")
     uptime_s: float = 0
     failed_units: list[str] = Field(default_factory=list, max_length=500)
+    # absent from an agent that predates the service discovery: the server tells it from "none"
+    units: list[str] | None = Field(default=None, max_length=500)
+    services: list[Service] | None = Field(default=None, max_length=50)
     listening: list[Listener] = Field(default_factory=list, max_length=2000)
     top_cpu: list[Process] = Field(default_factory=list, max_length=20)
     top_mem: list[Process] = Field(default_factory=list, max_length=20)
@@ -403,6 +422,11 @@ async def _serve(
                         "UPDATE agent SET facts = CAST(:f AS jsonb), facts_at = now(),"
                         " last_seen_at = now() WHERE node_id = :id"
                     ),
-                    {"f": facts.model_dump_json(), "id": node_id},
+                    {"f": facts.model_dump_json(exclude_none=True), "id": node_id},
                 )
+            # macros the discovery set follow the node; a failure here must not drop the agent
+            try:
+                await refresh_node(engine, node_id, facts.model_dump(exclude_none=True))
+            except Exception:
+                log.exception("template macro refresh failed", extra={"node_id": str(node_id)})
         # other types: newer agents may send messages this server predates

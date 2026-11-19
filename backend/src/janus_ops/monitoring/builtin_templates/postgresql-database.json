@@ -1,0 +1,187 @@
+{
+  "slug": "postgresql-database",
+  "version": 1,
+  "name": "PostgreSQL (database)",
+  "category": "database",
+  "description": "Connections, long transactions, locks, cache hit ratio, replication lag and transaction id wraparound, read by the server. Needs the postgres capability (a role with pg_monitor).",
+  "requires": "postgres",
+  "macros": [
+    {
+      "name": "CONN_WARN",
+      "default": 80,
+      "description": "Connections used, warning %"
+    },
+    {
+      "name": "CONN_CRIT",
+      "default": 90,
+      "description": "Connections used, critical %"
+    },
+    {
+      "name": "IDLE_TX_WARN",
+      "default": 5,
+      "description": "Sessions idle in a transaction, warning"
+    },
+    {
+      "name": "IDLE_TX_CRIT",
+      "default": 20,
+      "description": "Sessions idle in a transaction, critical"
+    },
+    {
+      "name": "LONG_TX_WARN",
+      "default": 3600,
+      "description": "Oldest transaction, warning (s)"
+    },
+    {
+      "name": "LONG_TX_CRIT",
+      "default": 14400,
+      "description": "Oldest transaction, critical (s)"
+    },
+    {
+      "name": "LOCKS_WARN",
+      "default": 5,
+      "description": "Sessions waiting for a lock, warning"
+    },
+    {
+      "name": "LOCKS_CRIT",
+      "default": 20,
+      "description": "Sessions waiting for a lock, critical"
+    },
+    {
+      "name": "CACHE_WARN",
+      "default": 95,
+      "description": "Cache hit ratio, warning below %"
+    },
+    {
+      "name": "CACHE_CRIT",
+      "default": 90,
+      "description": "Cache hit ratio, critical below %"
+    },
+    {
+      "name": "LAG_WARN",
+      "default": 60,
+      "description": "Replication lag, warning (s)"
+    },
+    {
+      "name": "LAG_CRIT",
+      "default": 300,
+      "description": "Replication lag, critical (s)"
+    },
+    {
+      "name": "XID_WARN",
+      "default": 50,
+      "description": "Transaction id wraparound, warning %"
+    },
+    {
+      "name": "XID_CRIT",
+      "default": 75,
+      "description": "Transaction id wraparound, critical %"
+    }
+  ],
+  "detect": {
+    "processes": [
+      "postgres",
+      "postmaster"
+    ],
+    "ports": [
+      5432
+    ],
+    "units": [
+      "postgresql*"
+    ]
+  },
+  "items": [
+    {
+      "name": "Connections used",
+      "kind": "probe",
+      "params": {
+        "probe": "postgres.connections_used_pct"
+      },
+      "interval_s": 60,
+      "check_cycles": 3,
+      "comparison": "gt",
+      "warn": "{$CONN_WARN}",
+      "crit": "{$CONN_CRIT}"
+    },
+    {
+      "name": "Sessions idle in transaction",
+      "kind": "probe",
+      "params": {
+        "probe": "postgres.idle_in_transaction"
+      },
+      "interval_s": 60,
+      "check_cycles": 3,
+      "comparison": "gt",
+      "warn": "{$IDLE_TX_WARN}",
+      "crit": "{$IDLE_TX_CRIT}"
+    },
+    {
+      "name": "Oldest transaction",
+      "kind": "probe",
+      "params": {
+        "probe": "postgres.longest_transaction_s"
+      },
+      "interval_s": 300,
+      "check_cycles": 2,
+      "comparison": "gt",
+      "warn": "{$LONG_TX_WARN}",
+      "crit": "{$LONG_TX_CRIT}"
+    },
+    {
+      "name": "Sessions waiting for a lock",
+      "kind": "probe",
+      "params": {
+        "probe": "postgres.lock_waits"
+      },
+      "interval_s": 60,
+      "check_cycles": 3,
+      "comparison": "gt",
+      "warn": "{$LOCKS_WARN}",
+      "crit": "{$LOCKS_CRIT}"
+    },
+    {
+      "name": "Cache hit ratio",
+      "kind": "probe",
+      "params": {
+        "probe": "postgres.cache_hit_pct"
+      },
+      "interval_s": 300,
+      "check_cycles": 3,
+      "comparison": "lt",
+      "warn": "{$CACHE_WARN}",
+      "crit": "{$CACHE_CRIT}"
+    },
+    {
+      "name": "Replication lag",
+      "kind": "probe",
+      "params": {
+        "probe": "postgres.replication_lag_s"
+      },
+      "interval_s": 60,
+      "check_cycles": 2,
+      "comparison": "gt",
+      "warn": "{$LAG_WARN}",
+      "crit": "{$LAG_CRIT}"
+    },
+    {
+      "name": "Transaction id wraparound",
+      "kind": "probe",
+      "params": {
+        "probe": "postgres.xid_wraparound_pct"
+      },
+      "interval_s": 3600,
+      "check_cycles": 1,
+      "comparison": "gt",
+      "warn": "{$XID_WARN}",
+      "crit": "{$XID_CRIT}"
+    },
+    {
+      "name": "Database size",
+      "kind": "probe",
+      "params": {
+        "probe": "postgres.database_size_bytes"
+      },
+      "interval_s": 3600,
+      "check_cycles": 1
+    }
+  ]
+}

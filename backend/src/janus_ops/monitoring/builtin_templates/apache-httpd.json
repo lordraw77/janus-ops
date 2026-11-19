@@ -1,0 +1,93 @@
+{
+  "slug": "apache-httpd",
+  "version": 2,
+  "name": "Apache httpd (service)",
+  "category": "web",
+  "description": "The Apache service is active, listening on its ports and answering over HTTP.",
+  "requires": "agent",
+  "macros": [
+    {
+      "name": "HTTPD_UNIT",
+      "default": "httpd",
+      "description": "systemd unit (httpd, or apache2 on Debian)",
+      "auto": {
+        "from": "unit",
+        "pattern": [
+          "httpd*",
+          "apache2*"
+        ]
+      }
+    },
+    {
+      "name": "HTTP_PORT",
+      "default": 80,
+      "description": "HTTP port",
+      "auto": {
+        "from": "config",
+        "service": "httpd",
+        "key": "http_ports",
+        "pick": "min"
+      }
+    },
+    {
+      "name": "HTTPS_PORT",
+      "default": 443,
+      "description": "HTTPS port",
+      "auto": {
+        "from": "config",
+        "service": "httpd",
+        "key": "https_ports",
+        "pick": "min"
+      }
+    }
+  ],
+  "detect": {
+    "processes": [
+      "httpd",
+      "apache2"
+    ],
+    "ports": [
+      80,
+      443
+    ],
+    "units": [
+      "httpd*",
+      "apache2*"
+    ]
+  },
+  "items": [
+    {
+      "name": "Apache service",
+      "kind": "service",
+      "params": {
+        "unit": "{$HTTPD_UNIT}"
+      },
+      "check_cycles": 2
+    },
+    {
+      "name": "Apache listening on {$HTTP_PORT}",
+      "kind": "port",
+      "params": {
+        "port": "{$HTTP_PORT}"
+      },
+      "check_cycles": 2
+    },
+    {
+      "name": "Apache listening on {$HTTPS_PORT}",
+      "kind": "port",
+      "params": {
+        "port": "{$HTTPS_PORT}"
+      },
+      "check_cycles": 2
+    },
+    {
+      "name": "Apache answers HTTP",
+      "kind": "http",
+      "params": {
+        "url": "http://{$NODE_ADDRESS}:{$HTTP_PORT}/",
+        "expect_status": "200-499"
+      },
+      "check_cycles": 2
+    }
+  ]
+}

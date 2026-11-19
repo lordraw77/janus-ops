@@ -1,0 +1,62 @@
+{
+  "slug": "postgresql",
+  "version": 2,
+  "name": "PostgreSQL (service)",
+  "category": "database",
+  "description": "The PostgreSQL service is active and listening. The unit and the port are found by the agent. Query-level checks come with the database connector.",
+  "requires": "agent",
+  "macros": [
+    {
+      "name": "PG_UNIT",
+      "default": "postgresql",
+      "description": "systemd unit of the server",
+      "auto": {
+        "from": "unit",
+        "pattern": "postgresql*"
+      }
+    },
+    {
+      "name": "PG_PORT",
+      "default": 5432,
+      "description": "TCP port it listens on",
+      "auto": {
+        "from": "listening_port",
+        "process": [
+          "postgres",
+          "postmaster"
+        ],
+        "pick": "min"
+      }
+    }
+  ],
+  "detect": {
+    "processes": [
+      "postgres",
+      "postmaster"
+    ],
+    "ports": [
+      5432
+    ],
+    "units": [
+      "postgresql*"
+    ]
+  },
+  "items": [
+    {
+      "name": "PostgreSQL service",
+      "kind": "service",
+      "params": {
+        "unit": "{$PG_UNIT}"
+      },
+      "check_cycles": 2
+    },
+    {
+      "name": "PostgreSQL listening on {$PG_PORT}",
+      "kind": "port",
+      "params": {
+        "port": "{$PG_PORT}"
+      },
+      "check_cycles": 2
+    }
+  ]
+}

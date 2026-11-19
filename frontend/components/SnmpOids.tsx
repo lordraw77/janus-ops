@@ -3,7 +3,7 @@
 import { type FormEvent, useState } from "react";
 
 import { Alert, Button, Field, Modal, Select, TextInput } from "@/components/ui";
-import { SnmpTemplatesDialog } from "@/components/SnmpTemplates";
+import { TemplateApplyDialog } from "@/components/TemplateApply";
 import { api, message, useResource } from "@/lib/api";
 
 /** One catalog entry, as the API returns it. */
@@ -361,7 +361,8 @@ export function SnmpOidCatalog({ onClose, onChanged }: { onClose: () => void; on
         </form>
       </div>
       {templatesOpen && (
-        <SnmpTemplatesDialog
+        <TemplateApplyDialog
+          requires="snmp"
           onClose={() => setTemplatesOpen(false)}
           onApplied={() => {
             onChanged();

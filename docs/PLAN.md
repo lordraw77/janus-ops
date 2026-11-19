@@ -133,6 +133,28 @@
 > UPS; applying one creates the checks on the node, one check per instance for table entries
 > (disks, pools), and skips checks that already exist.
 >
+> **v0.28** — **check templates** (migration `0026`, F8): `snmp_template` becomes `check_template`, a
+> bundle of checks of any kind with `{$MACROS}` (node values, `NODE_ADDRESS`/`NODE_NAME` built in), a
+> required capability and `detect` rules. Built-in templates are JSON files in
+> `monitoring/builtin_templates/` synced by slug and version (Linux, web endpoint, PostgreSQL, Apache,
+> Proxmox VE; the SNMP ones are migrated). Templates page with editor, preview, nodes using each
+> template and update marker. **Service discovery**: the agent reports its running systemd services and
+> the catalog services it found (PostgreSQL, Apache: command line and a few settings read from their
+> configuration, fixed allow-list, read only, no secret); a template's `detect` rules suggest it on the
+> node's page, and a macro with an `auto` rule takes its value from there (a typed value always wins);
+> when the node changes (a new port), the stored value and the checks made from it follow, and the
+> change is audited. Needs an agent newer than 0.7.0.
+>
+> **v0.29** — **service probes** (migration `0027`, F8): a check kind `probe` that reads one named
+> measurement of a service through a connector in the server (`monitoring/probes/`): PostgreSQL
+> (connections, long transactions, locks, cache hit, replication lag, wraparound: one fixed read-only
+> query per snapshot, `postgres` capability with a `postgres_password` credential, role `pg_monitor`),
+> Apache httpd (`mod_status` busy workers and traffic) and Proxmox VE (nodes offline, quorum, CPU,
+> memory, storage). A snapshot is shared by the probes of one service for 15 s. The catalog is code:
+> a template or a check only names the probe, it never carries SQL or a command. New built-in
+> templates `postgresql-database` and `apache-httpd-status`; `proxmox-ve` v2. Limit: Apache restricts
+> `server-status` to localhost by default, so the Janus-Ops server must be allowed to read it.
+>
 > **v0.27** — **workflows: webhook trigger and conditional branches** (migration `0024`): a signed
 > `POST /workflows/{id}/webhook` starts a run (secret sealed in the vault, shown once, rotation, rate limit);
 > steps may carry a `when` condition on an earlier step and `on_failure: continue`; skipped steps are recorded.

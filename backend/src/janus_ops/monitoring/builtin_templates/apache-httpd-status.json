@@ -1,0 +1,91 @@
+{
+  "slug": "apache-httpd-status",
+  "version": 1,
+  "name": "Apache httpd (server-status)",
+  "category": "web",
+  "description": "Busy workers and traffic from mod_status, fetched by the server. Apache must let the Janus-Ops server read /server-status (Require ip).",
+  "requires": null,
+  "macros": [
+    {
+      "name": "HTTP_PORT",
+      "default": 80,
+      "description": "Port of the status page",
+      "auto": {
+        "from": "config",
+        "service": "httpd",
+        "key": "http_ports",
+        "pick": "min"
+      }
+    },
+    {
+      "name": "STATUS_PATH",
+      "default": "/server-status?auto",
+      "description": "Path of the machine readable status page"
+    },
+    {
+      "name": "BUSY_WARN",
+      "default": 80,
+      "description": "Busy workers, warning %"
+    },
+    {
+      "name": "BUSY_CRIT",
+      "default": 95,
+      "description": "Busy workers, critical %"
+    }
+  ],
+  "detect": {
+    "processes": [
+      "httpd",
+      "apache2"
+    ],
+    "ports": [
+      80,
+      443
+    ],
+    "units": [
+      "httpd*",
+      "apache2*"
+    ]
+  },
+  "items": [
+    {
+      "name": "Workers busy",
+      "kind": "probe",
+      "params": {
+        "probe": "httpd.busy_workers_pct",
+        "args": {
+          "url": "http://{$NODE_ADDRESS}:{$HTTP_PORT}{$STATUS_PATH}"
+        }
+      },
+      "interval_s": 60,
+      "check_cycles": 3,
+      "comparison": "gt",
+      "warn": "{$BUSY_WARN}",
+      "crit": "{$BUSY_CRIT}"
+    },
+    {
+      "name": "Busy workers",
+      "kind": "probe",
+      "params": {
+        "probe": "httpd.busy_workers",
+        "args": {
+          "url": "http://{$NODE_ADDRESS}:{$HTTP_PORT}{$STATUS_PATH}"
+        }
+      },
+      "interval_s": 60,
+      "check_cycles": 1
+    },
+    {
+      "name": "Requests per second",
+      "kind": "probe",
+      "params": {
+        "probe": "httpd.requests_per_s",
+        "args": {
+          "url": "http://{$NODE_ADDRESS}:{$HTTP_PORT}{$STATUS_PATH}"
+        }
+      },
+      "interval_s": 60,
+      "check_cycles": 1
+    }
+  ]
+}

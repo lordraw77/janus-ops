@@ -14,6 +14,7 @@ from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
+from janus_ops.monitoring import probes
 from janus_ops.monitoring.checks import PARAMS, THRESHOLDS, Kind
 from janus_ops.monitoring.notify import Message, SendError, channel_secret_id, deliver
 from janus_ops.vault import VaultUnavailable
@@ -147,6 +148,22 @@ async def _require_capability(conn: Any, node_id: uuid.UUID, kind: str) -> None:
         raise HTTPException(422, f"no_{kind}_capability")
 
 
+@router.get("/probes")
+async def list_probes(_: Reader) -> list[dict[str, Any]]:
+    """The probe catalog: what a `probe` check can measure, and what it needs."""
+    return [
+        {
+            "name": p.name,
+            "connector": p.connector,
+            "unit": p.unit,
+            "description": p.description,
+            "requires": p.requires,
+            "args": p.args,
+        }
+        for p in probes.CATALOG.values()
+    ]
+
+
 @router.post("/checks", status_code=201, response_model=CheckOut)
 async def create_check(request: Request, body: CheckIn, session: Manager) -> CheckOut:
     if body.node_id is None:
@@ -158,6 +175,10 @@ async def create_check(request: Request, body: CheckIn, session: Manager) -> Che
             node = await _node_name(conn, body.node_id)
             if body.kind in ("snmp", "fritzbox"):
                 await _require_capability(conn, body.node_id, body.kind)
+            if body.kind == "probe":
+                needs = probes.CATALOG[body.params["probe"]].requires
+                if needs:
+                    await _require_capability(conn, body.node_id, needs)
             await conn.execute(
                 text(
                     "INSERT INTO service_check (id, node_id, name, kind, params, comparison,"

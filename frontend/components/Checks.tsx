@@ -14,6 +14,7 @@ import {
   type CheckKind,
   DOWNTIME_PRESETS,
   KIND_LABEL,
+  type ProbeInfo,
   type Suggestion,
   describeCheck,
 } from "@/lib/monitoring";
@@ -42,13 +43,17 @@ export function CheckEditor({
   const [kind, setKind] = useState<CheckKind>(check?.kind ?? "metric");
   const [error, setError] = useState<string | null>(null);
   const p = (check?.params ?? {}) as Record<string, unknown>;
-  const thresholds = kind === "metric" || kind === "tcp" || kind === "http" || kind === "snmp";
+  const thresholds = kind === "metric" || kind === "tcp" || kind === "http" || kind === "snmp" || kind === "probe";
   // SNMP: the OID comes from the catalog (with an instance for table columns) or is typed
   const catalog = useOidCatalog();
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [picked, setPicked] = useState<OidEntry | null>(null);
   const [oidText, setOidText] = useState(String(p.oid ?? ""));
   const [instance, setInstance] = useState("1");
+  // a probe is picked from the catalog; its arguments follow from it
+  const probes = useResource<ProbeInfo[]>(kind === "probe" ? "/probes" : null);
+  const [probe, setProbe] = useState(String(p.probe ?? "postgres.connections_used_pct"));
+  const probeArgs = (p.args ?? {}) as Record<string, unknown>;
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -64,6 +69,16 @@ export function CheckEditor({
     } else if (kind === "systemd") params = { unit: str(f.get("unit")) };
     else if (kind === "service") params = { unit: str(f.get("unit")) };
     else if (kind === "fritzbox") params = { item: str(f.get("item")) };
+    else if (kind === "probe") {
+      const wanted = probes.data?.find((x) => x.name === probe);
+      const args: Record<string, string | boolean> = {};
+      for (const name of Object.keys(wanted?.args ?? {})) {
+        const v = f.get(`arg_${name}`);
+        if (name === "verify_tls") args[name] = v === "on";
+        else if (v && String(v).trim()) args[name] = String(v).trim();
+      }
+      params = { probe, ...(Object.keys(args).length ? { args } : {}) };
+    }
     else if (kind === "port") params = { port: num(f.get("port")), proto: f.get("proto") };
     else if (kind === "tcp") params = { port: num(f.get("port")), host: str(f.get("host")) };
     else if (kind === "backup") params = { max_age_h: num(f.get("max_age_h")) ?? undefined };
@@ -143,6 +158,35 @@ export function CheckEditor({
               <option value="traffic">Traffic</option>
             </select>
           </Field>
+        )}
+        {kind === "probe" && (
+          <>
+            <Field label="Probe" hint={probes.data?.find((x) => x.name === probe)?.description}>
+              <Select value={probe} onChange={(e) => setProbe(e.target.value)}>
+                {(probes.data ?? [{ name: probe } as ProbeInfo]).map((x) => (
+                  <option key={x.name} value={x.name}>
+                    {x.name}
+                    {x.unit ? ` (${x.unit})` : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {"url" in (probes.data?.find((x) => x.name === probe)?.args ?? {}) && (
+              <Field label="Status page URL" hint="Apache: /server-status?auto, readable by the Janus-Ops server">
+                <TextInput name="arg_url" required defaultValue={String(probeArgs.url ?? "")} placeholder="http://host/server-status?auto" />
+              </Field>
+            )}
+            {"storage" in (probes.data?.find((x) => x.name === probe)?.args ?? {}) && (
+              <Field label="Storage" hint="Empty = the fullest one">
+                <TextInput name="arg_storage" defaultValue={String(probeArgs.storage ?? "")} />
+              </Field>
+            )}
+            {probes.data?.find((x) => x.name === probe)?.requires && (
+              <p className="text-[11px] text-fg-muted">
+                Needs the {probes.data.find((x) => x.name === probe)?.requires} capability on this node.
+              </p>
+            )}
+          </>
         )}
         {kind === "service" && (
           <Field label="Unit" hint="systemd unit checked with systemctl is-active, e.g. ser2net.service">

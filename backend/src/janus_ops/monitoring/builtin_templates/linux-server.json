@@ -1,0 +1,26 @@
+{
+  "slug": "linux-server",
+  "version": 1,
+  "name": "Linux server (agent)",
+  "category": "server",
+  "description": "Agent connected, CPU, memory, filesystem usage and failed systemd units.",
+  "requires": "agent",
+  "macros": [
+    {"name": "CPU_WARN", "default": 85, "description": "CPU usage warning, %"},
+    {"name": "CPU_CRIT", "default": 95, "description": "CPU usage critical, %"},
+    {"name": "MEM_WARN", "default": 85, "description": "Memory usage warning, %"},
+    {"name": "MEM_CRIT", "default": 95, "description": "Memory usage critical, %"},
+    {"name": "FS_WARN", "default": 85, "description": "Filesystem usage warning, %"},
+    {"name": "FS_CRIT", "default": 95, "description": "Filesystem usage critical, %"}
+  ],
+  "items": [
+    {"name": "Agent connected", "kind": "host", "interval_s": 30},
+    {"name": "CPU usage", "kind": "metric", "params": {"metric": "cpu.usage_pct", "window_s": 300},
+     "comparison": "gt", "warn": "{$CPU_WARN}", "crit": "{$CPU_CRIT}", "check_cycles": 3},
+    {"name": "Memory usage", "kind": "metric", "params": {"metric": "mem.used_pct"},
+     "comparison": "gt", "warn": "{$MEM_WARN}", "crit": "{$MEM_CRIT}", "check_cycles": 3},
+    {"name": "Filesystem usage", "kind": "metric", "params": {"metric": "fs.used_pct"},
+     "comparison": "gt", "warn": "{$FS_WARN}", "crit": "{$FS_CRIT}", "interval_s": 300},
+    {"name": "Failed systemd units", "kind": "systemd", "check_cycles": 2}
+  ]
+}

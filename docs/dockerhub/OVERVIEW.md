@@ -315,7 +315,7 @@ Variables used by the Compose stack (`.env`):
 | `/api/v1/ansible/*` | Playbook sources, files, runs |
 | `/api/v1/workflows/*` | Workflows, runs, approvals; `/{id}/webhook` is the signed trigger (HMAC-SHA256) |
 | `/api/v1/gitops/*` | GitOps stacks; `/stacks/{id}/webhook` is the signed push trigger |
-| `/api/v1/snmp-oids` · `/snmp-templates` · `/fritzbox/*` | SNMP catalogue and templates, FRITZ!Box |
+| `/api/v1/snmp-oids` · `/templates` · `/fritzbox/*` | SNMP catalogue, check templates (macros, built-in files), FRITZ!Box · `/probes` service probe catalog |
 | `/api/v1/ai/*` | AI Copilot diagnoses and action plans |
 | `/api/v1/health` | Liveness: the process is up |
 | `/api/v1/ready` | Readiness: database reachable, TimescaleDB loaded, schema up to date and, with a secret manager, reachable (`503` otherwise) |

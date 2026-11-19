@@ -29,7 +29,13 @@ from janus_ops.directory import LldapAdmin
 from janus_ops.gitops.router import router as gitops
 from janus_ops.inventory import credentials, environments, groups, nodes
 from janus_ops.monitoring import engine as check_engine
-from janus_ops.monitoring import fritz_router, notify, snmp_oids, snmp_templates
+from janus_ops.monitoring import (
+    fritz_router,
+    notify,
+    snmp_oids,
+    template_discovery,
+    templates,
+)
 from janus_ops.monitoring import router as monitoring
 from janus_ops.proxmox import router as proxmox
 from janus_ops.proxmox.access import ProxmoxAccess
@@ -99,6 +105,9 @@ def create_app(
         # (skipped when the schema is not migrated yet: /ready reports that)
         with contextlib.suppress(Exception):
             await workflow_engine.recover(engine)
+        # the check templates shipped with the product (same: needs the migrated schema)
+        with contextlib.suppress(Exception):
+            await templates.sync_builtin(engine)
         app.state.docker = DockerAccess(engine, app.state.vault, settings, app.state.agents)
         app.state.proxmox = ProxmoxAccess(engine, app.state.vault)
         app.state.check_engine = check_engine.Engine(
@@ -181,7 +190,8 @@ def create_app(
         monitoring.router,
         snmp_oids.router,
         fritz_router.router,
-        snmp_templates.router,
+        template_discovery.router,  # before templates: /templates/suggestions is not an id
+        templates.router,
         workflows,
         containers.router,
         proxmox.router,

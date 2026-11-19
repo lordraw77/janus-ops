@@ -30,7 +30,7 @@ Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 Manager = Annotated[Session, Depends(require_permission("inventory.manage"))]
 
 Environment = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")]  # a row of `environment`
-CapabilityKind = Literal["ssh", "agent", "proxmox", "docker", "snmp", "fritzbox"]
+CapabilityKind = Literal["ssh", "agent", "proxmox", "docker", "snmp", "fritzbox", "postgres"]
 
 NODE_NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$"
 _HOST_LABEL = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
@@ -78,6 +78,14 @@ class FritzConfig(_Config):
     port: int = Field(default=49000, ge=1, le=65535)
 
 
+class PostgresConfig(_Config):
+    # the server connects to the node's PostgreSQL; the user and password are in the credential
+    port: int = Field(default=5432, ge=1, le=65535)
+    database: str = Field(default="postgres", pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}$")
+    # `require` encrypts without checking the certificate; `prefer` falls back to plain text
+    sslmode: Literal["disable", "prefer", "require"] = "prefer"
+
+
 # kind -> (config model, credential kinds accepted, credential required)
 RULES: dict[str, tuple[type[_Config], frozenset[str], bool]] = {
     "ssh": (SshConfig, frozenset({"ssh_key", "ssh_password"}), True),
@@ -86,6 +94,7 @@ RULES: dict[str, tuple[type[_Config], frozenset[str], bool]] = {
     "docker": (DockerConfig, frozenset(), False),
     "snmp": (SnmpConfig, frozenset({"snmp_v3", "generic"}), True),
     "fritzbox": (FritzConfig, frozenset({"fritzbox_password"}), True),
+    "postgres": (PostgresConfig, frozenset({"postgres_password"}), True),
 }
 
 

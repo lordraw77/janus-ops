@@ -14,6 +14,7 @@ const USERNAME_HINT: Record<string, string> = {
   proxmox_token: "Token id, e.g. root@pam!janus",
   proxmox_password: "User with realm, e.g. root@pam or admin@pve",
   fritzbox_password: "FRITZ!Box user, e.g. janus",
+  postgres_password: "PostgreSQL role, e.g. janus_monitor",
   docker_registry: "Registry user",
   snmp_v3: "SNMPv3 user",
 };
@@ -23,6 +24,7 @@ const SECRET_LABEL: Record<string, string> = {
   proxmox_token: "Token secret",
   proxmox_password: "Password",
   fritzbox_password: "Password of the FRITZ!Box user",
+  postgres_password: "Password of the PostgreSQL role",
   generic: "Secret (e.g. SNMP v2c community)",
   snmp_v3: "Authentication passphrase (8+ characters)",
 };
