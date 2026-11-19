@@ -1,6 +1,7 @@
 """Check templates (F8): ready-made bundles of checks for a kind of service or device.
 
-A template is a name, a category, the node capability it needs (`requires`), `macros` and `items`.
+A template is a name, a category, what the node needs (`requires`: a capability or a service
+kind), `macros` and `items`.
 Each item is one check of any kind; `{$NAME}` in its name, params and thresholds is replaced by the
 macro value of the node (the node's own value, else the macro default). `{$NODE_ADDRESS}` and
 `{$NODE_NAME}` always exist. Applying a template creates ordinary checks, so the engine, the states
@@ -32,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from janus_ops import audit
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
+from janus_ops.inventory.services import has_requirement, missing_code
 from janus_ops.monitoring import probes
 from janus_ops.monitoring.checks import NEEDS_AGENT, PARAMS, THRESHOLDS, Kind
 from janus_ops.monitoring.template_auto import Auto, effective
@@ -565,14 +567,6 @@ class ApplyIn(BaseModel):
     dry_run: bool = False
 
 
-async def _has_capability(conn: AsyncConnection, node_id: uuid.UUID, kind: str) -> bool:
-    found = await conn.scalar(
-        text("SELECT 1 FROM node_capability WHERE node_id = :n AND kind = :k AND enabled"),
-        {"n": node_id, "k": kind},
-    )
-    return bool(found)
-
-
 @router.post("/{template_id}/apply", responses={404: {}, 422: {}})
 async def apply_template(
     template_id: uuid.UUID, body: ApplyIn, request: Request, session: Manager
@@ -588,8 +582,8 @@ async def apply_template(
                 text("SELECT name, address FROM node WHERE id = :id"), {"id": body.node_id}
             )
         ).one()
-        if tpl.requires and not await _has_capability(conn, body.node_id, tpl.requires):
-            raise HTTPException(422, f"no_{tpl.requires}_capability")
+        if tpl.requires and not await has_requirement(conn, body.node_id, tpl.requires):
+            raise HTTPException(422, missing_code(tpl.requires))
         stored = (
             await conn.scalar(
                 text("SELECT macros FROM template_node WHERE template_id = :t AND node_id = :n"),

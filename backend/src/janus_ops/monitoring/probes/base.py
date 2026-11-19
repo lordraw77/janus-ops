@@ -36,7 +36,8 @@ class ProbeError(Exception):
 # error code -> the state of the check and the text shown
 ERRORS: dict[str, tuple[State, str]] = {
     "no_capability": ("unknown", "the node does not have the capability this probe needs"),
-    "no_credential": ("unknown", "the capability has no credential of the right kind"),
+    "no_service": ("unknown", "the node has no such service configured (Inventory → Services)"),
+    "no_credential": ("unknown", "the service has no credential of the right kind"),
     "vault_unavailable": ("unknown", "the vault is not available"),
     "unreachable": ("crit", "the service does not answer"),
     "timeout": ("crit", "the service did not answer in time"),
@@ -126,22 +127,30 @@ class Secret:
 
 
 _LOAD = """
-SELECT c.config, n.address, cr.id AS cred_id, cr.kind AS cred_kind, cr.username,
+SELECT s.config, n.address, cr.id AS cred_id, cr.kind AS cred_kind, cr.username,
        cr.ciphertext, cr.nonce, cr.dek_wrapped
-FROM node_capability c
-JOIN node n ON n.id = c.node_id
-LEFT JOIN credential cr ON cr.id = c.credential_id
-WHERE c.node_id = CAST(:node AS uuid) AND c.kind = :cap AND c.enabled
+FROM node_service s
+JOIN node n ON n.id = s.node_id
+LEFT JOIN credential cr ON cr.id = s.credential_id
+WHERE s.node_id = CAST(:node AS uuid) AND s.kind = :kind AND s.enabled
+  AND (CAST(:name AS text) IS NULL OR lower(s.name) = lower(:name))
+ORDER BY s.name LIMIT 1
 """
 
 
 async def load_secret(
-    conn: AsyncConnection, vault: Vault | None, node_id: str, capability: str, cred_kind: str
+    conn: AsyncConnection,
+    vault: Vault | None,
+    node_id: str,
+    kind: str,
+    cred_kind: str,
+    name: str | None = None,
 ) -> Secret:
-    """The node's capability, with its credential opened from the vault."""
-    row = (await conn.execute(text(_LOAD), {"node": node_id, "cap": capability})).first()
+    """The node's service of this kind (the one called `name`, else the first by name), with its
+    credential opened from the vault."""
+    row = (await conn.execute(text(_LOAD), {"node": node_id, "kind": kind, "name": name})).first()
     if row is None:
-        raise ProbeError("no_capability")
+        raise ProbeError("no_service")
     if row.cred_id is None or row.cred_kind != cred_kind:
         raise ProbeError("no_credential")
     if vault is None or not vault.available:

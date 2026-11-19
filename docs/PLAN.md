@@ -145,6 +145,13 @@
 > when the node changes (a new port), the stored value and the checks made from it follow, and the
 > change is audited. Needs an agent newer than 0.7.0.
 >
+> **v0.30** — **node services** (migration `0028`, 0.8.1): PostgreSQL and FRITZ!Box leave the capabilities
+> (how Janus-Ops reaches a node: ssh, agent, proxmox, docker, snmp) and become **services**
+> (`node_service`): a node has any number, each with a name, config and credential, so two PostgreSQL
+> servers are two services. The kinds, their config and credential kinds are a catalog in code
+> (`GET /service-types`) from which the web form is drawn: a new kind is an entry and its connector. A
+> probe names the service it reads (`service` argument) when the node has several.
+>
 > **0.8.0 released** (agent signed): migrations `0026` and `0027` applied on the live stack, checked with a
 > Rocky Linux 9 + PostgreSQL 13 test server (discovery, macros found by the agent, probes).
 >

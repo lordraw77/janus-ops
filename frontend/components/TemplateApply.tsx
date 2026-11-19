@@ -75,6 +75,8 @@ function originLabel(origin: string | undefined): string {
   return "";
 }
 
+const SERVICE_KINDS = ["postgres", "fritzbox"];
+
 /** A short line describing one item's thresholds, for lists. */
 export function thresholds(item: TemplateItem): string {
   if (!item.comparison) return "";
@@ -105,7 +107,9 @@ export function TemplateApplyDialog({
   const [templateId, setTemplateId] = useState(template?.id ?? "");
   const current = template ?? (list.data ?? []).find((t) => t.id === templateId) ?? null;
   const capability = current?.requires ?? requires ?? null;
-  const nodes = useResource<NodeRow[]>(capability ? `/nodes?capability=${capability}` : "/nodes");
+  // what a template needs is a capability (snmp, proxmox…) or a service (postgres, fritzbox)
+  const filter = capability ? `?${SERVICE_KINDS.includes(capability) ? "service" : "capability"}=${capability}` : "";
+  const nodes = useResource<NodeRow[]>(`/nodes${filter}`);
   // what each macro is on the node: its own value, what the agent found, or the default
   const effective = useResource<Record<string, { value: MacroValue; origin: "manual" | "auto" | "default" }>>(
     current && nodeId ? `/templates/macros?template_id=${current.id}&node_id=${nodeId}` : null,

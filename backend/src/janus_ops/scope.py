@@ -71,8 +71,10 @@ class Scope:
                 params[f"{p}g"] = list(rule.groups)
             if rule.capabilities:
                 ands.append(
-                    f"EXISTS (SELECT 1 FROM node_capability x WHERE x.node_id = {alias}.id"
+                    f"(EXISTS (SELECT 1 FROM node_capability x WHERE x.node_id = {alias}.id"
                     f" AND x.enabled AND x.kind = ANY(CAST(:{p}c AS text[])))"
+                    f" OR EXISTS (SELECT 1 FROM node_service x WHERE x.node_id = {alias}.id"
+                    f" AND x.enabled AND x.kind = ANY(CAST(:{p}c AS text[]))))"
                 )
                 params[f"{p}c"] = list(rule.capabilities)
             if rule.nodes:

@@ -203,17 +203,18 @@ def discover(data: dict[str, str]) -> list[str]:
 _LOAD = """
 SELECT c.config, n.address, cr.id AS cred_id, cr.kind AS cred_kind, cr.username,
        cr.ciphertext, cr.nonce, cr.dek_wrapped
-FROM node_capability c
+FROM node_service c
 JOIN node n ON n.id = c.node_id
 LEFT JOIN credential cr ON cr.id = c.credential_id
 WHERE c.node_id = CAST(:node AS uuid) AND c.kind = 'fritzbox' AND c.enabled
+ORDER BY c.name LIMIT 1
 """
 
 
 async def load_target(conn: AsyncConnection, vault: Vault | None, node_id: str) -> Target:
     row = (await conn.execute(text(_LOAD), {"node": node_id})).first()
     if row is None:
-        raise FritzError("no_fritzbox_capability")
+        raise FritzError("no_fritzbox_service")
     if row.cred_id is None or row.cred_kind != "fritzbox_password":
         raise FritzError("no_credential")
     if vault is None or not vault.available:
@@ -244,8 +245,8 @@ _ERRORS: dict[str, tuple[Literal["unknown"], str]] = {
         "unknown",
         "the FRITZ!Box refused the user: check the credential and TR-064 access",
     ),
-    "no_fritzbox_capability": ("unknown", "the node has no FRITZ!Box capability"),
-    "no_credential": ("unknown", "the FRITZ!Box capability has no credential"),
+    "no_fritzbox_service": ("unknown", "the node has no FRITZ!Box service"),
+    "no_credential": ("unknown", "the FRITZ!Box service has no credential"),
     "vault_unavailable": ("unknown", "the vault is not available"),
 }
 

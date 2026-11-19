@@ -1,8 +1,10 @@
 """/api/v1/nodes: the unified host inventory (FR-01).
 
 A node is an IP or FQDN with an environment, tags, groups, an optional parent (dependency for
-alert suppression, FR-32) and capabilities: ssh, agent, proxmox, docker, snmp. Each capability
-has a validated configuration and, where needed, a vault credential of a compatible kind.
+alert suppression, FR-32), capabilities (how Janus-Ops reaches it: ssh, agent, proxmox, docker,
+snmp) and services (what it runs, read over the network: PostgreSQL, FRITZ!Box; see services.py).
+Each capability has a validated configuration and, where needed, a vault credential of a
+compatible kind.
 """
 
 import ipaddress
@@ -23,6 +25,14 @@ from janus_ops.admin.common import record
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.inventory.groups import TAG_NAME
+from janus_ops.inventory.services import (
+    MAX_SERVICES,
+    ServiceIn,
+    ServiceKind,
+    ServiceOut,
+    unique_names,
+)
+from janus_ops.inventory.services import write as write_services
 
 router = APIRouter(prefix="/nodes", tags=["inventory"])
 
@@ -30,7 +40,7 @@ Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 Manager = Annotated[Session, Depends(require_permission("inventory.manage"))]
 
 Environment = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")]  # a row of `environment`
-CapabilityKind = Literal["ssh", "agent", "proxmox", "docker", "snmp", "fritzbox", "postgres"]
+CapabilityKind = Literal["ssh", "agent", "proxmox", "docker", "snmp"]
 
 NODE_NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$"
 _HOST_LABEL = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
@@ -73,19 +83,6 @@ class SnmpConfig(_Config):
     priv_protocol: Literal["AES128", "AES256"] = "AES128"
 
 
-class FritzConfig(_Config):
-    # TR-064 over HTTP (the box's default is 49000); the user and password are in the credential
-    port: int = Field(default=49000, ge=1, le=65535)
-
-
-class PostgresConfig(_Config):
-    # the server connects to the node's PostgreSQL; the user and password are in the credential
-    port: int = Field(default=5432, ge=1, le=65535)
-    database: str = Field(default="postgres", pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.$-]{0,62}$")
-    # `require` encrypts without checking the certificate; `prefer` falls back to plain text
-    sslmode: Literal["disable", "prefer", "require"] = "prefer"
-
-
 # kind -> (config model, credential kinds accepted, credential required)
 RULES: dict[str, tuple[type[_Config], frozenset[str], bool]] = {
     "ssh": (SshConfig, frozenset({"ssh_key", "ssh_password"}), True),
@@ -93,8 +90,6 @@ RULES: dict[str, tuple[type[_Config], frozenset[str], bool]] = {
     "proxmox": (ProxmoxConfig, frozenset({"proxmox_token", "proxmox_password"}), True),
     "docker": (DockerConfig, frozenset(), False),
     "snmp": (SnmpConfig, frozenset({"snmp_v3", "generic"}), True),
-    "fritzbox": (FritzConfig, frozenset({"fritzbox_password"}), True),
-    "postgres": (PostgresConfig, frozenset({"postgres_password"}), True),
 }
 
 
@@ -146,6 +141,7 @@ class NodeOut(BaseModel):
     tags: list[str]
     groups: list[str]
     capabilities: list[CapabilityOut]
+    services: list[ServiceOut]
     agent: AgentSummary | None = None
     created_at: datetime
     updated_at: datetime
@@ -172,6 +168,7 @@ class NodeIn(BaseModel):
     tags: list[Annotated[str, Field(pattern=TAG_NAME)]] | None = Field(default=None, max_length=32)
     groups: list[str] | None = Field(default=None, max_length=64)
     capabilities: list[CapabilityIn] | None = Field(default=None, max_length=5)
+    services: list[ServiceIn] | None = Field(default=None, max_length=MAX_SERVICES)
 
     @field_validator("address")
     @classmethod
@@ -184,6 +181,11 @@ class NodeIn(BaseModel):
         if value is not None and len({c.kind for c in value}) != len(value):
             raise ValueError("each capability kind may appear once")
         return value
+
+    @field_validator("services")
+    @classmethod
+    def _unique_services(cls, value: list[ServiceIn] | None) -> list[ServiceIn] | None:
+        return None if value is None else unique_names(value)
 
 
 # ---------------------------------------------------------------- reading
@@ -229,6 +231,15 @@ async def _load(
         ),
         {"ids": ids},
     )
+    svcs = await conn.execute(
+        text(
+            "SELECT s.id, s.node_id, s.kind, s.name, s.enabled, s.config, cr.id AS cred_id,"
+            " cr.name AS cred_name, cr.kind AS cred_kind FROM node_service s"
+            " LEFT JOIN credential cr ON cr.id = s.credential_id"
+            " WHERE s.node_id = ANY(:ids) ORDER BY s.kind, lower(s.name)"
+        ),
+        {"ids": ids},
+    )
     agents = await conn.execute(
         text(
             "SELECT node_id, version, arch, revoked_at IS NOT NULL AS revoked FROM agent"
@@ -263,6 +274,20 @@ async def _load(
                 else None,
             )
         )
+    svc_map: dict[Any, list[ServiceOut]] = {}
+    for r in svcs:
+        svc_map.setdefault(r.node_id, []).append(
+            ServiceOut(
+                id=str(r.id),
+                kind=r.kind,
+                name=r.name,
+                enabled=r.enabled,
+                config=r.config,
+                credential={"id": str(r.cred_id), "name": r.cred_name, "kind": r.cred_kind}
+                if r.cred_id
+                else None,
+            )
+        )
     return [
         NodeOut(
             id=str(n.id),
@@ -274,6 +299,7 @@ async def _load(
             tags=tag_map.get(n.id, []),
             groups=group_map.get(n.id, []),
             capabilities=cap_map.get(n.id, []),
+            services=svc_map.get(n.id, []),
             agent=agent_map.get(n.id),
             created_at=n.created_at,
             updated_at=n.updated_at,
@@ -291,6 +317,7 @@ async def list_nodes(
     tag: Annotated[str | None, Query(max_length=64)] = None,
     group: Annotated[str | None, Query(max_length=128)] = None,
     capability: CapabilityKind | None = None,
+    service: ServiceKind | None = None,
 ) -> list[NodeOut]:
     scope_sql, params = session.scope.sql("n")
     clauses = [scope_sql]
@@ -318,6 +345,12 @@ async def list_nodes(
             " AND c.kind = :cap AND c.enabled)"
         )
         params["cap"] = capability
+    if service:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM node_service s WHERE s.node_id = n.id"
+            " AND s.kind = :svc AND s.enabled)"
+        )
+        params["svc"] = service
     where = "WHERE " + " AND ".join(clauses)
     async with request.app.state.engine.connect() as conn:
         return await _load(conn, where, params)
@@ -450,12 +483,16 @@ async def _write_relations(conn: AsyncConnection, node_id: uuid.UUID, body: Node
                 ),
                 {"id": node_id, "k": kind, "e": enabled, "c": json.dumps(config), "cred": cred},
             )
+    if body.services is not None:
+        await write_services(conn, node_id, body.services)
 
 
 def _summary(body: NodeIn) -> dict[str, Any]:
     data = body.model_dump(mode="json", exclude_unset=True)
     if "capabilities" in data:
         data["capabilities"] = [c["kind"] for c in data["capabilities"]]
+    if "services" in data:
+        data["services"] = [f"{s['kind']}:{s.get('name') or s['kind']}" for s in data["services"]]
     return data
 
 

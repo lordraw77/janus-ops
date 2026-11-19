@@ -26,10 +26,20 @@ export const KIND_LABELS: Record<string, string> = {
   generic: "Generic secret",
 };
 
-export type CapabilityKind = "ssh" | "agent" | "proxmox" | "docker" | "snmp" | "fritzbox" | "postgres";
+export type CapabilityKind = "ssh" | "agent" | "proxmox" | "docker" | "snmp";
 
 export type Capability = {
   kind: CapabilityKind;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  credential: { id: string; name: string; kind: string } | null;
+};
+
+/** A service of a node (what it runs that is read over the network): see ServicesEditor. */
+export type NodeService = {
+  id: string;
+  kind: string;
+  name: string;
   enabled: boolean;
   config: Record<string, unknown>;
   credential: { id: string; name: string; kind: string } | null;
@@ -45,6 +55,7 @@ export type InventoryNode = {
   tags: string[];
   groups: string[];
   capabilities: Capability[];
+  services: NodeService[];
   agent: AgentSummary | null;
   created_at: string;
   updated_at: string;
@@ -75,7 +86,5 @@ export const CAPABILITIES: Record<CapabilityKind, { label: string; credentials: 
   proxmox: { label: "Proxmox node", credentials: ["proxmox_token", "proxmox_password"], required: true },
   docker: { label: "Docker host", credentials: [], required: false },
   snmp: { label: "SNMP device", credentials: ["snmp_v3", "generic"], required: true },
-  fritzbox: { label: "FRITZ!Box (TR-064)", credentials: ["fritzbox_password"], required: true },
-  postgres: { label: "PostgreSQL (statistics)", credentials: ["postgres_password"], required: true },
 };
 

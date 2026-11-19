@@ -79,7 +79,7 @@ export function TemplateSuggestions({
                   </div>
                 )}
                 {!s.applicable && s.requires && (
-                  <div className="text-xs text-warn">The node needs the {s.requires} capability first.</div>
+                  <div className="text-xs text-warn">The node needs the {s.requires} {["postgres", "fritzbox"].includes(s.requires) ? "service" : "capability"} first (Inventory).</div>
                 )}
               </div>
               {can("monitoring.manage") && (

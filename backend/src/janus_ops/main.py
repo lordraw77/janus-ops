@@ -27,7 +27,7 @@ from janus_ops.containers.access import DockerAccess
 from janus_ops.db import create_engine, schema_head
 from janus_ops.directory import LldapAdmin
 from janus_ops.gitops.router import router as gitops
-from janus_ops.inventory import credentials, environments, groups, nodes
+from janus_ops.inventory import credentials, environments, groups, nodes, services
 from janus_ops.monitoring import engine as check_engine
 from janus_ops.monitoring import (
     fritz_router,
@@ -179,6 +179,7 @@ def create_app(
         audit_log.router,
         environments.router,
         nodes.router,
+        services.router,
         groups.router,
         credentials.router,
         terminal.router,

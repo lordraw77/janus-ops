@@ -1,5 +1,5 @@
-"""Probes over the API and the check engine: the postgres capability and credential, probe checks
-that need the capability, real PostgreSQL (the test database itself) and a local Apache-like status
+"""Probes over the API and the check engine: the postgres service and credential, probe checks
+that need the service, real PostgreSQL (the test database itself) and a local Apache-like status
 page. Real database and lldap; no external host."""
 
 import asyncio
@@ -66,6 +66,18 @@ def _pg_credential(
     return str(r.json()["id"])
 
 
+def _pg_service(
+    credential: str | None, port: int | None = None, name: str | None = None
+) -> dict[str, Any]:
+    url = make_url(DB_URL)
+    return {
+        "kind": "postgres",
+        **({"name": name} if name else {}),
+        "config": {"port": port or url.port, "database": url.database, "sslmode": "disable"},
+        "credential_id": credential,
+    }
+
+
 def _pg_node(client: Any, credential: str | None, port: int | None = None) -> str:
     url = make_url(DB_URL)
     r = client.post(
@@ -74,17 +86,7 @@ def _pg_node(client: Any, credential: str | None, port: int | None = None) -> st
             "name": _name("pgnode"),
             "address": url.host,
             "environment": "lab",
-            "capabilities": [
-                {
-                    "kind": "postgres",
-                    "config": {
-                        "port": port or url.port,
-                        "database": url.database,
-                        "sslmode": "disable",
-                    },
-                    "credential_id": credential,
-                }
-            ],
+            "services": [_pg_service(credential, port)],
         },
     )
     assert r.status_code == 201, r.text
@@ -163,10 +165,10 @@ def status_server() -> Iterator[int]:
     server.shutdown()
 
 
-# ---------------------------------------------------------------- capability and credential
+# ---------------------------------------------------------------- service and credential
 
 
-def test_the_postgres_capability_needs_a_postgres_credential() -> None:
+def test_a_postgres_service_needs_a_postgres_credential() -> None:
     url = make_url(DB_URL)
     with signed_in("alice") as admin:
         wrong = _pg_credential(admin, kind="generic")
@@ -180,9 +182,7 @@ def test_the_postgres_capability_needs_a_postgres_credential() -> None:
                     "name": _name("pgbad"),
                     "address": url.host,
                     "environment": "lab",
-                    "capabilities": [
-                        {"kind": "postgres", "config": {}, "credential_id": credential}
-                    ],
+                    "services": [{"kind": "postgres", "config": {}, "credential_id": credential}],
                 },
             )
             assert r.status_code == 422 and r.json()["detail"] == f"{code}:postgres", r.text
@@ -211,7 +211,7 @@ def test_a_postgres_config_rejects_unknown_settings() -> None:
                 "name": _name("pgcfg"),
                 "address": "127.0.0.1",
                 "environment": "lab",
-                "capabilities": [
+                "services": [
                     {
                         "kind": "postgres",
                         "config": {"sslmode": "verify-none"},
@@ -236,7 +236,7 @@ def test_the_catalog_is_listed() -> None:
     assert names["httpd.busy_workers"]["args"] == {"url": True, "verify_tls": False}
 
 
-def test_a_probe_check_needs_a_known_probe_and_the_capability() -> None:
+def test_a_probe_check_needs_a_known_probe_and_the_service() -> None:
     with signed_in("alice") as admin:
         plain = admin.post(
             "/api/v1/nodes",
@@ -248,8 +248,8 @@ def test_a_probe_check_needs_a_known_probe_and_the_capability() -> None:
         no_cap = admin.post(
             "/api/v1/checks", json=base | {"params": {"probe": "postgres.connections"}}
         )
-        assert no_cap.status_code == 422 and no_cap.json()["detail"] == "no_postgres_capability"
-        # Apache needs no capability, only its URL
+        assert no_cap.status_code == 422 and no_cap.json()["detail"] == "no_postgres_service"
+        # Apache needs no service, only its URL
         no_url = admin.post(
             "/api/v1/checks", json=base | {"params": {"probe": "httpd.busy_workers"}}
         )
@@ -324,18 +324,18 @@ def test_a_server_that_does_not_answer_is_critical() -> None:
     assert state == "crit" and "does not answer" in output
 
 
-def test_a_disabled_capability_leaves_the_probe_unknown() -> None:
+def test_a_disabled_service_leaves_the_probe_unknown() -> None:
     with signed_in("alice") as admin:
         node = _pg_node(admin, _pg_credential(admin))
         check = _probe_check(admin, node, "postgres.connections")
         run_sql(
-            "UPDATE node_capability SET enabled = false WHERE node_id = CAST(:n AS uuid)"
+            "UPDATE node_service SET enabled = false WHERE node_id = CAST(:n AS uuid)"
             " AND kind = 'postgres'",
             {"n": node},
         )
         _tick(admin)
     state, output = _state(check)
-    assert state == "unknown" and "capability" in output
+    assert state == "unknown" and "no such service" in output
 
 
 # ---------------------------------------------------------------- Apache status
@@ -375,7 +375,7 @@ def _template(client: Any, slug: str) -> dict[str, Any]:
     return next(r for r in rows if r["slug"] == slug)
 
 
-def test_the_postgres_database_template_applies_only_with_the_capability_and_runs() -> None:
+def test_the_postgres_database_template_applies_only_with_the_service_and_runs() -> None:
     with signed_in("alice") as admin:
         tpl = _template(admin, "postgresql-database")
         assert tpl["requires"] == "postgres"
@@ -384,7 +384,7 @@ def test_the_postgres_database_template_applies_only_with_the_capability_and_run
             json={"name": _name("plain"), "address": "127.0.0.3", "environment": "lab"},
         ).json()["id"]
         refused = admin.post(f"/api/v1/templates/{tpl['id']}/apply", json={"node_id": plain})
-        assert refused.status_code == 422 and refused.json()["detail"] == "no_postgres_capability"
+        assert refused.status_code == 422 and refused.json()["detail"] == "no_postgres_service"
 
         node = _pg_node(admin, _pg_credential(admin))
         done = admin.post(f"/api/v1/templates/{tpl['id']}/apply", json={"node_id": node}).json()

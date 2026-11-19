@@ -34,6 +34,7 @@ EXPECTED_TABLES = {
     "snmp_oid",
     "check_template",
     "template_node",
+    "node_service",
     "workflow",
     "workflow_run",
     "workflow_step_run",

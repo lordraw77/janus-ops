@@ -49,7 +49,14 @@ XID_LIMIT = 2_147_483_647  # transaction ids wrap at 2^31
 
 async def _snapshot(ctx: Ctx, target: Target) -> dict[str, Any]:
     async with ctx.db.connect() as conn:
-        secret = await load_secret(conn, ctx.vault, target.node_id, "postgres", "postgres_password")
+        secret = await load_secret(
+            conn,
+            ctx.vault,
+            target.node_id,
+            "postgres",
+            "postgres_password",
+            str(target.args["service"]) if target.args.get("service") else None,
+        )
     cfg = secret.config
     try:
         pg = await asyncpg.connect(
@@ -91,7 +98,9 @@ async def _snapshot(ctx: Ctx, target: Target) -> dict[str, Any]:
 
 
 async def snapshot(ctx: Ctx, target: Target) -> dict[str, Any]:
-    return await CACHE.get(f"pg:{target.node_id}", lambda: _snapshot(ctx, target))
+    return await CACHE.get(
+        f"pg:{target.node_id}:{target.args.get('service') or ''}", lambda: _snapshot(ctx, target)
+    )
 
 
 def _pct_used(s: dict[str, Any], _: dict[str, Any]) -> tuple[float, str]:
@@ -120,7 +129,10 @@ def _wraparound(s: dict[str, Any], _: dict[str, Any]) -> tuple[float, str]:
 
 
 def _p(name: str, unit: str, description: str, extract: Any) -> Probe:
-    return Probe(f"postgres.{name}", "postgres", unit, description, "postgres", {}, extract)
+    # `service` names one of the node's PostgreSQL services when it has more than one
+    return Probe(
+        f"postgres.{name}", "postgres", unit, description, "postgres", {"service": False}, extract
+    )
 
 
 PROBES = [

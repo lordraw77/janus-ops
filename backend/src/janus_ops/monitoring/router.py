@@ -14,6 +14,7 @@ from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
+from janus_ops.inventory.services import has_requirement, missing_code
 from janus_ops.monitoring import probes
 from janus_ops.monitoring.checks import PARAMS, THRESHOLDS, Kind
 from janus_ops.monitoring.notify import Message, SendError, channel_secret_id, deliver
@@ -139,13 +140,10 @@ async def _node_name(conn: Any, node_id: uuid.UUID) -> str:
 
 
 async def _require_capability(conn: Any, node_id: uuid.UUID, kind: str) -> None:
-    """An SNMP (FR-82) or FRITZ!Box check needs the node's capability of that kind enabled."""
-    found = await conn.scalar(
-        text("SELECT 1 FROM node_capability WHERE node_id = :n AND kind = :k AND enabled"),
-        {"n": node_id, "k": kind},
-    )
-    if not found:
-        raise HTTPException(422, f"no_{kind}_capability")
+    """An SNMP (FR-82) or FRITZ!Box check, or a probe, needs what it reads on the node: the
+    capability (snmp, proxmox) or the service (fritzbox, postgres), enabled."""
+    if not await has_requirement(conn, node_id, kind):
+        raise HTTPException(422, missing_code(kind))
 
 
 @router.get("/probes")

@@ -5,6 +5,13 @@ import Link from "next/link";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { EnvBadge } from "@/components/EnvBadge";
+import {
+  type ServiceState,
+  type ServiceType,
+  ServicesEditor,
+  servicesFrom,
+  servicesPayload,
+} from "@/components/ServicesEditor";
 import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { RequirePermission, useAuth } from "@/lib/auth";
@@ -46,8 +53,6 @@ const DEFAULT_CONFIG: Record<CapabilityKind, Record<string, string | boolean>> =
   proxmox: { port: "8006", verify_tls: true, node_name: "" },
   docker: { via: "agent" },
   snmp: { version: "v2c", port: "161", security_level: "authPriv", auth_protocol: "SHA256", priv_protocol: "AES128" },
-  fritzbox: { port: "49000" },
-  postgres: { port: "5432", database: "postgres", sslmode: "prefer" },
 };
 
 function initialCaps(node: InventoryNode | null): Record<CapabilityKind, CapState> {
@@ -101,6 +106,8 @@ function NodeDialog({
   const [tags, setTags] = useState((node?.tags ?? []).join(", "));
   const [picked, setPicked] = useState<string[]>(node?.groups ?? []);
   const [caps, setCaps] = useState(() => initialCaps(node));
+  const serviceTypes = useResource<ServiceType[]>("/service-types");
+  const [services, setServices] = useState<ServiceState[]>(() => servicesFrom(node?.services ?? []));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -126,6 +133,7 @@ function NodeDialog({
       tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
       groups: picked,
       capabilities: (Object.keys(caps) as CapabilityKind[]).filter((k) => caps[k].on).map((k) => toPayload(k, caps[k])),
+      services: servicesPayload(services, serviceTypes.data ?? []),
     };
     const r = node
       ? await api(`/nodes/${node.id}`, { method: "PATCH", body })
@@ -309,27 +317,6 @@ function NodeDialog({
                         )}
                       </>
                     )}
-                    {kind === "postgres" && (
-                      <>
-                        <Field label="Port">
-                          <TextInput inputMode="numeric" value={String(c.config.port)} onChange={(e) => setConfig(kind, "port", e.target.value)} />
-                        </Field>
-                        <Field label="Database">
-                          <TextInput value={String(c.config.database)} onChange={(e) => setConfig(kind, "database", e.target.value)} />
-                        </Field>
-                        <Field label="Encryption">
-                          <select value={String(c.config.sslmode)} onChange={(e) => setConfig(kind, "sslmode", e.target.value)} className={SELECT}>
-                            <option value="prefer">prefer (encrypt when the server can)</option>
-                            <option value="require">require (never plain text)</option>
-                            <option value="disable">disable</option>
-                          </select>
-                        </Field>
-                        <p className="col-span-2 text-[11px] text-fg-muted">
-                          The server connects to read statistics only. Give the role pg_monitor and nothing else:{" "}
-                          <span className="font-mono">GRANT pg_monitor TO janus_monitor;</span>
-                        </p>
-                      </>
-                    )}
                     {kind === "agent" && (
                       <p className="col-span-2 text-[11px] text-fg-muted">Agent installation arrives with roadmap phase F2.</p>
                     )}
@@ -339,6 +326,8 @@ function NodeDialog({
             );
           })}
         </div>
+
+        <ServicesEditor types={serviceTypes.data ?? []} value={services} onChange={setServices} credentials={credentials} />
 
         {error && <Alert>{error}</Alert>}
         <div className="flex justify-end gap-2">
@@ -476,6 +465,11 @@ function NodesTab({ groups }: { groups: Group[] }) {
                       {n.capabilities.map((c) => (
                         <Chip key={c.kind} muted={!c.enabled}>
                           {c.kind}
+                        </Chip>
+                      ))}
+                      {n.services.map((s) => (
+                        <Chip key={s.id} muted={!s.enabled}>
+                          {s.name === s.kind ? s.kind : `${s.kind}:${s.name}`}
                         </Chip>
                       ))}
                     </div>

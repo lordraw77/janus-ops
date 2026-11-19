@@ -60,8 +60,10 @@ async def suggestions(node_id: uuid.UUID, request: Request, session: Reader) -> 
             text(
                 "SELECT t.id, t.name, t.category, t.description, t.requires, t.macros, t.detect,"
                 " tn.macros AS stored, tn.applied_version IS NOT NULL AS applied,"
-                " EXISTS (SELECT 1 FROM node_capability c WHERE c.node_id = :n"
-                "         AND c.kind = t.requires AND c.enabled) AS has_capability"
+                " (EXISTS (SELECT 1 FROM node_capability c WHERE c.node_id = :n"
+                "          AND c.kind = t.requires AND c.enabled)"
+                "  OR EXISTS (SELECT 1 FROM node_service s WHERE s.node_id = :n"
+                "          AND s.kind = t.requires AND s.enabled)) AS has_capability"
                 " FROM check_template t LEFT JOIN template_node tn"
                 "   ON tn.template_id = t.id AND tn.node_id = :n"
                 " WHERE t.detect <> '{}'::jsonb ORDER BY t.category, lower(t.name)"

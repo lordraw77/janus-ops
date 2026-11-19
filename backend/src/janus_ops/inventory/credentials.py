@@ -155,7 +155,11 @@ async def list_credentials(request: Request, _: Reader) -> list[CredentialOut]:
                 text(
                     "SELECT c.credential_id, n.id AS node_id, n.name, c.kind"
                     " FROM node_capability c JOIN node n ON n.id = c.node_id"
-                    " WHERE c.credential_id IS NOT NULL ORDER BY lower(n.name)"
+                    " WHERE c.credential_id IS NOT NULL"
+                    " UNION ALL"
+                    " SELECT s.credential_id, n.id, n.name, s.kind"
+                    " FROM node_service s JOIN node n ON n.id = s.node_id"
+                    " WHERE s.credential_id IS NOT NULL ORDER BY 3"
                 )
             )
         ).all()

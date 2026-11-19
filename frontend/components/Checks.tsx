@@ -181,9 +181,15 @@ export function CheckEditor({
                 <TextInput name="arg_storage" defaultValue={String(probeArgs.storage ?? "")} />
               </Field>
             )}
+            {"service" in (probes.data?.find((x) => x.name === probe)?.args ?? {}) && (
+              <Field label="Service" hint="Name of the node's service; empty = the first one">
+                <TextInput name="arg_service" defaultValue={String(probeArgs.service ?? "")} />
+              </Field>
+            )}
             {probes.data?.find((x) => x.name === probe)?.requires && (
               <p className="text-[11px] text-fg-muted">
-                Needs the {probes.data.find((x) => x.name === probe)?.requires} capability on this node.
+                Needs the {probes.data.find((x) => x.name === probe)?.requires}{" "}
+                {["postgres", "fritzbox"].includes(probes.data.find((x) => x.name === probe)?.requires ?? "") ? "service" : "capability"} on this node.
               </p>
             )}
           </>
