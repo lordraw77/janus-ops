@@ -439,6 +439,7 @@ function NodesTab({ groups }: { groups: Group[] }) {
                 <th className="py-2 pr-3 font-medium">Address</th>
                 <th className="py-2 pr-3 font-medium">Env</th>
                 <th className="py-2 pr-3 font-medium">Capabilities</th>
+                <th className="py-2 pr-3 font-medium">Services</th>
                 <th className="py-2 pr-3 font-medium">Agent</th>
                 <th className="py-2 pr-3 font-medium">Installed at</th>
                 <th className="py-2 pr-3 font-medium">Tags / groups</th>
@@ -467,6 +468,10 @@ function NodesTab({ groups }: { groups: Group[] }) {
                           {c.kind}
                         </Chip>
                       ))}
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <div className="flex flex-wrap gap-1">
                       {n.services.map((s) => (
                         <Chip key={s.id} muted={!s.enabled}>
                           {s.name === s.kind ? s.kind : `${s.kind}:${s.name}`}
