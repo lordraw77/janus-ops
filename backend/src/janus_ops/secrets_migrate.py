@@ -42,6 +42,15 @@ TABLES = (
         "channel-",
     ),
     (
+        "ai_config",
+        "id",
+        "secret_ciphertext",
+        "secret_nonce",
+        "secret_dek",
+        "secret_kek_version",
+        "",
+    ),
+    (
         "gitops_stack",
         "id",
         "secret_ciphertext",

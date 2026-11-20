@@ -17,11 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from janus_ops import audit
 from janus_ops.admin.common import record
 from janus_ops.agents import exec as node_exec
-from janus_ops.ai import diagnose, llm
+from janus_ops.ai import config_store, diagnose, iac, llm
+from janus_ops.ai.config_router import router as config_router
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+router.include_router(config_router)
 EXEC_TIMEOUT_S = 60
 
 User = Annotated[Session, Depends(require_permission("ai.use"))]
@@ -30,7 +32,7 @@ Executor = Annotated[Session, Depends(require_permission("actions.execute"))]
 
 LIST_COLUMNS = (
     "d.id, d.problem_id, d.node_name, d.check_name, d.status, d.model, d.requested_by,"
-    " d.requested_at, d.finished_at, d.summary, d.actions, d.error"
+    " d.requested_at, d.finished_at, d.summary, d.actions, d.error, d.second_status"
 )
 
 
@@ -47,11 +49,40 @@ class DiagnosisOut(BaseModel):
     summary: str | None
     actions: list[dict[str, Any]]
     error: str | None
+    second_status: str | None
 
 
 class DiagnosisDetail(DiagnosisOut):
     prompt: str
     response: str | None
+    second_model: str | None
+    second_summary: str | None
+    second_actions: list[dict[str, Any]]
+    second_error: str | None
+    comparison: dict[str, Any] | None
+
+
+class IacRequest(BaseModel):
+    node_id: uuid.UUID
+    kind: Literal["ansible", "compose", "shell"]
+    request: str = Field(min_length=5, max_length=2000)
+
+
+class IacOut(BaseModel):
+    id: str
+    node_id: str | None
+    node_name: str
+    kind: str
+    request: str
+    status: str
+    model: str
+    requested_by: str
+    requested_at: datetime
+    finished_at: datetime | None
+    content: str | None
+    notes: list[str]
+    warnings: list[str]
+    error: str | None
 
 
 class ActionPatch(BaseModel):
@@ -75,6 +106,7 @@ def _out(row: Any) -> DiagnosisOut:
         summary=row.summary,
         actions=row.actions or [],
         error=row.error,
+        second_status=row.second_status,
     )
 
 
@@ -98,10 +130,12 @@ async def _visible_diagnosis(
 
 @router.get("/status")
 async def status(request: Request, session: User) -> dict[str, Any]:
-    settings = request.app.state.settings
+    settings = await _settings(request)
     return {
         "enabled": llm.enabled(settings),
         "model": settings.ai_model if llm.enabled(settings) else None,
+        "review_enabled": llm.enabled(settings) and llm.review_enabled(settings),
+        "review_model": settings.ai_review_model if llm.review_enabled(settings) else None,
     }
 
 
@@ -109,7 +143,7 @@ async def status(request: Request, session: User) -> dict[str, Any]:
     "/problems/{problem_id}/diagnose", status_code=202, responses={404: {}, 409: {}, 503: {}}
 )
 async def start_diagnosis(problem_id: uuid.UUID, request: Request, session: User) -> dict[str, str]:
-    settings = request.app.state.settings
+    settings = await _settings(request)
     if not llm.enabled(settings):
         raise HTTPException(503, "ai_not_configured")
     engine = request.app.state.engine
@@ -192,7 +226,140 @@ async def get_diagnosis(
     async with request.app.state.engine.connect() as conn:
         row = await _visible_diagnosis(conn, session, diagnosis_id)
     base = _out(row).model_dump()
-    return DiagnosisDetail(**base, prompt=row.prompt, response=row.response)
+    return DiagnosisDetail(
+        **base,
+        prompt=row.prompt,
+        response=row.response,
+        second_model=row.second_model,
+        second_summary=row.second_summary,
+        second_actions=row.second_actions or [],
+        second_error=row.second_error,
+        comparison=row.comparison,
+    )
+
+
+@router.post(
+    "/diagnoses/{diagnosis_id}/second-opinion",
+    status_code=202,
+    responses={404: {}, 409: {}, 503: {}},
+)
+async def start_second_opinion(
+    diagnosis_id: uuid.UUID, request: Request, session: User
+) -> dict[str, str]:
+    """Ask the reviewing model the same question, then compare the two answers."""
+    settings = await _settings(request)
+    if not (llm.enabled(settings) and llm.review_enabled(settings)):
+        raise HTTPException(503, "ai_review_not_configured")
+    engine = request.app.state.engine
+    async with engine.begin() as conn:
+        row = await _visible_diagnosis(conn, session, diagnosis_id)
+        if row.status != "done":
+            raise HTTPException(409, "diagnosis_not_ready")
+        claimed = await conn.execute(
+            text(
+                "UPDATE ai_diagnosis SET second_status = 'pending', second_model = :m,"
+                " second_requested_by = :by, second_summary = NULL, second_actions = '[]',"
+                " second_response = NULL, second_error = NULL, comparison = NULL"
+                " WHERE id = :id AND second_status IS DISTINCT FROM 'pending'"
+            ),
+            {"m": settings.ai_review_model, "by": session.username, "id": diagnosis_id},
+        )
+        if claimed.rowcount == 0:
+            raise HTTPException(409, "already_running")
+    await record(
+        request,
+        session,
+        "ai.second_opinion.requested",
+        "node",
+        row.node_name,
+        {"diagnosis": str(diagnosis_id), "models": [row.model, settings.ai_review_model]},
+    )
+    diagnose.start_second_opinion(engine, settings, str(diagnosis_id))
+    return {"id": str(diagnosis_id), "second_status": "pending"}
+
+
+@router.post("/iac", status_code=202, responses={404: {}, 503: {}})
+async def start_iac(body: IacRequest, request: Request, session: User) -> dict[str, str]:
+    """Generate code for a node. The result is text to read: nothing is run."""
+    settings = await _settings(request)
+    if not llm.enabled(settings):
+        raise HTTPException(503, "ai_not_configured")
+    engine = request.app.state.engine
+    scope_sql, params = session.scope.sql("n")
+    async with engine.begin() as conn:
+        node = (
+            await conn.execute(
+                text(f"SELECT n.id, n.name FROM node n WHERE n.id = :id AND {scope_sql}"),  # noqa: S608
+                {"id": body.node_id, **params},
+            )
+        ).first()
+        if node is None:
+            raise HTTPException(404, "not_found")
+        iac_id = await conn.scalar(
+            text(
+                "INSERT INTO ai_iac (node_id, node_name, kind, request, status, model,"
+                " requested_by) VALUES (:n, :nn, :k, :rq, 'pending', :m, :by) RETURNING id"
+            ),
+            {
+                "n": node.id,
+                "nn": node.name,
+                "k": body.kind,
+                "rq": body.request,
+                "m": settings.ai_model,
+                "by": session.username,
+            },
+        )
+    await record(
+        request,
+        session,
+        "ai.iac.requested",
+        "node",
+        node.name,
+        {"iac": str(iac_id), "kind": body.kind, "model": settings.ai_model},
+    )
+    iac.start(engine, settings, str(iac_id))
+    return {"id": str(iac_id), "status": "pending"}
+
+
+@router.get("/iac", response_model=list[IacOut])
+async def list_iac(
+    request: Request,
+    session: User,
+    node_id: uuid.UUID | None = None,
+    limit: int = Query(30, ge=1, le=100),
+) -> list[IacOut]:
+    scope_sql, params = session.scope.sql("n")
+    where = scope_sql
+    if node_id is not None:
+        where += " AND i.node_id = :node"
+        params["node"] = node_id
+    async with request.app.state.engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT i.* FROM ai_iac i JOIN node n ON n.id = i.node_id"  # noqa: S608
+                f" WHERE {where} ORDER BY i.requested_at DESC LIMIT :limit"
+            ),
+            {**params, "limit": limit},
+        )
+        return [IacOut(**iac.out_fields(r)) for r in rows]
+
+
+@router.get("/iac/{iac_id}", response_model=IacOut, responses={404: {}})
+async def get_iac(iac_id: uuid.UUID, request: Request, session: User) -> IacOut:
+    scope_sql, params = session.scope.sql("n")
+    async with request.app.state.engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT i.* FROM ai_iac i JOIN node n ON n.id = i.node_id"  # noqa: S608
+                    f" WHERE i.id = :id AND {scope_sql}"
+                ),
+                {"id": iac_id, **params},
+            )
+        ).first()
+    if row is None:
+        raise HTTPException(404, "not_found")
+    return IacOut(**iac.out_fields(row))
 
 
 @router.patch(
@@ -403,3 +570,9 @@ async def execute_action(
     async with engine.connect() as conn:
         fresh = await _visible_diagnosis(conn, session, diagnosis_id)
     return _out(fresh)
+
+
+async def _settings(request: Request) -> Any:
+    """Environment settings with the endpoints, models and keys saved in Settings on top."""
+    app = request.app.state
+    return await config_store.effective(app.engine, app.settings, app.vault)

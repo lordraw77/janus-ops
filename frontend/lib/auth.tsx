@@ -20,6 +20,7 @@ export type Permission =
   | "containers.manage"
   | "containers.exec"
   | "environments.manage"
+  | "ai.manage"
   | "proxmox.manage"
   | "proxmox.console"
   | "ansible.read"

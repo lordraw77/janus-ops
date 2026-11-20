@@ -35,6 +35,7 @@ PERMISSIONS: dict[str, str] = {
     "ansible.manage": "Add, sync and delete playbook sources; edit and upload files",
     "ansible.run": "Run playbooks against nodes in scope (runs as the Janus-Ops host)",
     "ai.use": "Ask the AI Copilot to diagnose problems in scope (data goes to the AI endpoint)",
+    "ai.manage": "Set the AI endpoints, models and API keys (keys are never shown again)",
     "ai.approve": "Approve, reject or edit the action plans proposed by the AI Copilot",
     "actions.execute": "Run approved action plans on nodes; the node's agent must allow exec",
     "gitops.manage": "Create, change and delete GitOps stacks and rotate their webhook secrets",

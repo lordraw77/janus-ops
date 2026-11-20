@@ -38,11 +38,54 @@ export type Diagnosis = {
   summary: string | null;
   actions: DiagnosisAction[];
   error: string | null;
+  second_status: "pending" | "done" | "error" | null;
 };
 
-export type DiagnosisDetail = Diagnosis & { prompt: string; response: string | null };
+export type Comparison = {
+  agreement?: "agree" | "partial" | "disagree";
+  common?: string[];
+  differences?: string[];
+  preferred?: "first" | "second" | "both" | "neither";
+  verdict?: string;
+  judge?: string;
+  error?: string;
+};
 
-export type AiStatus = { enabled: boolean; model: string | null };
+export type DiagnosisDetail = Diagnosis & {
+  prompt: string;
+  response: string | null;
+  second_model: string | null;
+  second_summary: string | null;
+  second_actions: DiagnosisAction[];
+  second_error: string | null;
+  comparison: Comparison | null;
+};
+
+export type AiStatus = {
+  enabled: boolean;
+  model: string | null;
+  review_enabled: boolean;
+  review_model: string | null;
+};
+
+export type IacKind = "ansible" | "compose" | "shell";
+
+export type IacResult = {
+  id: string;
+  node_id: string | null;
+  node_name: string;
+  kind: IacKind;
+  request: string;
+  status: "pending" | "done" | "error";
+  model: string;
+  requested_by: string;
+  requested_at: string;
+  finished_at: string | null;
+  content: string | null;
+  notes: string[];
+  warnings: string[];
+  error: string | null;
+};
 
 export type OpenProblem = {
   id: string;
@@ -52,3 +95,15 @@ export type OpenProblem = {
   opened_at: string;
   last_output: string | null;
 };
+
+export type AiSlot = {
+  slot: "main" | "review";
+  base_url: string | null;
+  model: string | null;
+  timeout_s: number | null;
+  key_set: boolean;
+  key_source: "database" | "environment" | "none";
+  in_database: boolean;
+};
+
+export type AiConfig = { slots: AiSlot[]; vault_available: boolean };

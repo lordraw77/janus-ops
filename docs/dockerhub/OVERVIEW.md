@@ -263,6 +263,7 @@ Variables read by the `janus-ops` process:
 | `JANUS_SFTP_MAX_UPLOAD_MB` / `JANUS_SFTP_IDLE_S` | `1024` / `300` | SFTP upload limit; idle SFTP connections are closed after this many seconds |
 | `JANUS_ANSIBLE_MOUNT_ROOTS` | — | Directories that network-mount playbook sources may live under (unset = disabled) |
 | `JANUS_AI_BASE_URL` / `JANUS_AI_MODEL` / `JANUS_AI_API_KEY` / `JANUS_AI_TIMEOUT_S` | — / — / — / `120` | OpenAI-compatible endpoint for the Copilot (both URL and model needed to enable it) |
+| `JANUS_AI_REVIEW_MODEL` / `JANUS_AI_REVIEW_BASE_URL` / `JANUS_AI_REVIEW_API_KEY` | — / main endpoint / main key | Second model for the "second opinion" button (compared with the first diagnosis); empty model = button off |
 | `JANUS_AGENT_SERVER_URL` | URL used in the browser | `https://` URL agents connect to; must match the TLS certificate |
 | `JANUS_AGENT_CA_FILE` | `/var/lib/janus-ops/pki/root.crt` (Compose) | CA certificate (PEM) written to nodes for the agent |
 | `JANUS_AGENT_INTERVAL_S` | `10` | Telemetry interval, 5–15 seconds |

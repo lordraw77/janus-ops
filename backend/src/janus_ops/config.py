@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     ai_model: str | None = Field(default=None, max_length=200)
     ai_api_key: SecretStr | None = None
     ai_timeout_s: int = Field(default=120, ge=5, le=900)
+    # Second opinion: another model (same endpoint and key unless overridden); unset = button off
+    ai_review_model: str | None = Field(default=None, max_length=200)
+    ai_review_base_url: str | None = Field(default=None, max_length=2048)
+    ai_review_api_key: SecretStr | None = None
 
     # --- Agent and telemetry (F2)
     agent_dir: Path | None = Field(
@@ -255,13 +259,13 @@ class Settings(BaseSettings):
             raise ValueError("must start with postgresql+asyncpg://")
         return value
 
-    @field_validator("ai_api_key", mode="before")
+    @field_validator("ai_api_key", "ai_review_api_key", mode="before")
     @classmethod
     def _empty_key_is_unset(cls, value: object) -> object:
         # JANUS_AI_API_KEY= (empty in the env file) means "no key", not an empty bearer token
         return None if value is None or (isinstance(value, str) and not value.strip()) else value
 
-    @field_validator("ai_base_url")
+    @field_validator("ai_base_url", "ai_review_base_url")
     @classmethod
     def _ai_url_https(cls, value: str | None) -> str | None:
         if not value or not value.strip():

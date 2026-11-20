@@ -4,10 +4,20 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Alert, Button, Card, Field, Select, TextInput } from "@/components/ui";
-import { type AiStatus, type Diagnosis, type DiagnosisAction, type DiagnosisDetail, type OpenProblem } from "@/lib/ai";
+import {
+  type AiStatus,
+  type Comparison,
+  type Diagnosis,
+  type DiagnosisAction,
+  type DiagnosisDetail,
+  type IacKind,
+  type IacResult,
+  type OpenProblem,
+} from "@/lib/ai";
 import { useLoad } from "@/lib/ansible";
 import { api, message } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type { InventoryNode } from "@/lib/inventory";
 
 // Same rule as the server (janus_ops/agents/exec.py): no shell syntax can run on a node
 const SHELL_CHARS = /[;|&`$<>()\\\n\r]/;
@@ -34,7 +44,7 @@ export function CopilotConsole() {
   const [busy, setBusy] = useState(false);
   const diagnoses = useLoad<Diagnosis[]>(problemId ? `/ai/diagnoses?problem_id=${problemId}` : null);
   const detail = useLoad<DiagnosisDetail>(diagnosisId ? `/ai/diagnoses/${diagnosisId}` : null);
-  const pending = (diagnoses.data ?? []).some((d) => d.status === "pending");
+  const pending = (diagnoses.data ?? []).some((d) => d.status === "pending" || d.second_status === "pending");
 
   // While a diagnosis runs, the list is refreshed until it finishes
   useEffect(() => {
@@ -77,6 +87,20 @@ export function CopilotConsole() {
       return;
     }
     setNotice({ kind: "ok", text: `Action "${action.title}" updated.` });
+    detail.reload();
+    diagnoses.reload();
+  }
+
+  async function secondOpinion() {
+    if (!diagnosisId) return;
+    setBusy(true);
+    const r = await api(`/ai/diagnoses/${diagnosisId}/second-opinion`, { method: "POST" });
+    setBusy(false);
+    if (!r.ok) {
+      setNotice({ kind: "error", text: message(r.code) });
+      return;
+    }
+    setNotice({ kind: "ok", text: "Second opinion requested: the same data goes to the reviewing model, then the two answers are compared." });
     detail.reload();
     diagnoses.reload();
   }
@@ -165,12 +189,15 @@ export function CopilotConsole() {
                   busy={busy}
                   onDecide={decide}
                   onExecute={execute}
+                  reviewModel={status.data?.review_enabled ? status.data.review_model : null}
+                  onSecondOpinion={secondOpinion}
                 />
               )}
             </div>
           )}
         </Card>
       </div>
+      {canUse && <IacCard enabled={!!status.data?.enabled} />}
     </div>
   );
 }
@@ -182,6 +209,8 @@ function DiagnosisView({
   busy,
   onDecide,
   onExecute,
+  reviewModel,
+  onSecondOpinion,
 }: {
   detail: DiagnosisDetail;
   canApprove: boolean;
@@ -189,6 +218,8 @@ function DiagnosisView({
   busy: boolean;
   onDecide: (action: DiagnosisAction, change: Record<string, unknown>) => Promise<void>;
   onExecute: (action: DiagnosisAction) => Promise<void>;
+  reviewModel: string | null;
+  onSecondOpinion: () => Promise<void>;
 }) {
   return (
     <div className="space-y-3 text-sm">
@@ -212,6 +243,9 @@ function DiagnosisView({
             />
           ))}
         </ol>
+      )}
+      {detail.status === "done" && (
+        <SecondOpinion detail={detail} reviewModel={reviewModel} busy={busy} onAsk={onSecondOpinion} />
       )}
       <details className="text-xs text-fg-muted">
         <summary className="cursor-pointer">What was sent to the model</summary>
@@ -315,5 +349,201 @@ function ActionRow({
         </div>
       )}
     </li>
+  );
+}
+
+const AGREEMENT: Record<string, { label: string; className: string }> = {
+  agree: { label: "The two models agree", className: "text-ok" },
+  partial: { label: "Partly different", className: "text-warn" },
+  disagree: { label: "The two models disagree", className: "text-crit" },
+};
+const PREFERRED: Record<string, string> = {
+  first: "The first diagnosis is better supported",
+  second: "The second opinion is better supported",
+  both: "Both are supported",
+  neither: "Neither is reliable on this evidence",
+};
+
+function List({ title, items }: { title: string; items?: string[] }) {
+  if (!items?.length) return null;
+  return (
+    <div>
+      <p className="text-xs uppercase text-fg-muted">{title}</p>
+      <ul className="list-disc space-y-0.5 pl-5">
+        {items.map((i) => (
+          <li key={i}>{i}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ComparisonView({ c }: { c: Comparison }) {
+  if (c.error) return <p className="text-xs text-warn">The comparison failed ({message(c.error)}); the two answers are shown as they are.</p>;
+  const agreement = AGREEMENT[c.agreement ?? ""];
+  return (
+    <div className="space-y-2 rounded border border-line bg-elevated p-3">
+      <p className={`font-medium ${agreement?.className ?? ""}`}>{agreement?.label ?? "Comparison"}</p>
+      {c.preferred && <p className="text-xs text-fg-secondary">{PREFERRED[c.preferred]}</p>}
+      <List title="Common ground" items={c.common} />
+      <List title="Differences" items={c.differences} />
+      {c.verdict && <p className="whitespace-pre-wrap">{c.verdict}</p>}
+      <p className="text-[11px] text-fg-muted">
+        Compared by {c.judge ?? "the main model"}. A model judging models is a hint, not proof: check the evidence.
+      </p>
+    </div>
+  );
+}
+
+function SecondOpinion({
+  detail,
+  reviewModel,
+  busy,
+  onAsk,
+}: {
+  detail: DiagnosisDetail;
+  reviewModel: string | null;
+  busy: boolean;
+  onAsk: () => Promise<void>;
+}) {
+  const running = detail.second_status === "pending";
+  return (
+    <div className="space-y-2 border-t border-line pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">Second opinion</span>
+        <Button disabled={busy || running || !reviewModel} onClick={() => void onAsk()}>
+          {running ? "Asking…" : detail.second_status ? "Ask again" : "Ask for a second opinion"}
+        </Button>
+        {!reviewModel && <span className="text-xs text-fg-muted">Set JANUS_AI_REVIEW_MODEL to enable it.</span>}
+        {reviewModel && <span className="text-xs text-fg-muted">reviewing model: {reviewModel}</span>}
+      </div>
+      {running && <p className="text-fg-muted">Waiting for the reviewing model, then the comparison…</p>}
+      {detail.second_status === "error" && <Alert>{message(detail.second_error ?? "run_error")}</Alert>}
+      {detail.second_status === "done" && (
+        <div className="space-y-3">
+          {detail.comparison && <ComparisonView c={detail.comparison} />}
+          <div>
+            <p className="text-xs text-fg-muted">{detail.second_model} · second diagnosis (proposals are informative only)</p>
+            <p className="whitespace-pre-wrap">{detail.second_summary}</p>
+            {detail.second_actions.length > 0 && (
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-fg-secondary">
+                {detail.second_actions.map((a) => (
+                  <li key={a.id}>
+                    <span className={RISK_STYLE[a.risk] ?? ""}>{a.risk}</span> · {a.title}
+                    {a.command ? <code className="ml-1 font-mono">{a.command}</code> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const IAC_KINDS: { value: IacKind; label: string }[] = [
+  { value: "ansible", label: "Ansible playbook" },
+  { value: "compose", label: "Docker Compose file" },
+  { value: "shell", label: "Shell script" },
+];
+
+function IacCard({ enabled }: { enabled: boolean }) {
+  const nodes = useLoad<InventoryNode[]>("/nodes");
+  const [nodeId, setNodeId] = useState("");
+  const [kind, setKind] = useState<IacKind>("ansible");
+  const [request, setRequest] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [resultId, setResultId] = useState<string | null>(null);
+  const result = useLoad<IacResult>(resultId ? `/ai/iac/${resultId}` : null);
+  const running = result.data?.status === "pending";
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => result.reload(), 2500);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  async function generate(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    const r = await api<{ id: string }>("/ai/iac", { method: "POST", body: { node_id: nodeId, kind, request } });
+    setBusy(false);
+    if (!r.ok) return setError(message(r.code));
+    setResultId(r.data.id);
+  }
+
+  const data = result.data;
+  return (
+    <Card title="Generate code for a node (IaC)">
+      <form onSubmit={generate} className="space-y-3">
+        <p className="text-xs text-fg-secondary">
+          The model sees the node&apos;s inventory (no secrets), last-hour metrics and checks. The result is text to read and
+          edit: nothing is run or deployed from here.
+        </p>
+        {error && <Alert>{error}</Alert>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Node">
+            <Select value={nodeId} onChange={(e) => setNodeId(e.target.value)} required>
+              <option value="">Choose a node</option>
+              {(nodes.data ?? []).map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="What to write">
+            <Select value={kind} onChange={(e) => setKind(e.target.value as IacKind)}>
+              {IAC_KINDS.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <Field label="Request" hint="For example: rotate and compress the nginx logs weekly, keep 8 weeks">
+          <TextInput value={request} onChange={(e) => setRequest(e.target.value)} minLength={5} maxLength={2000} required />
+        </Field>
+        <Button type="submit" variant="primary" disabled={busy || running || !enabled || !nodeId || request.trim().length < 5}>
+          {running ? "Generating…" : "Generate"}
+        </Button>
+      </form>
+      {data && (
+        <div className="mt-4 space-y-3 text-sm">
+          <p className="text-xs text-fg-muted">
+            {data.model} · {data.node_name} · {data.kind} · {data.status}
+            {data.error ? ` · ${message(data.error)}` : ""}
+          </p>
+          {running && <p className="text-fg-muted">Waiting for the model…</p>}
+          {data.warnings.length > 0 && (
+            <Alert kind="info">
+              <ul className="list-disc space-y-0.5 pl-5">
+                {data.warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            </Alert>
+          )}
+          {data.content && (
+            <div className="space-y-2">
+              <pre className="max-h-96 overflow-auto whitespace-pre rounded bg-elevated p-3 font-mono text-xs">{data.content}</pre>
+              <Button onClick={() => void navigator.clipboard?.writeText(data.content ?? "")}>Copy</Button>
+            </div>
+          )}
+          {data.notes.length > 0 && (
+            <ul className="list-disc space-y-0.5 pl-5 text-fg-secondary">
+              {data.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

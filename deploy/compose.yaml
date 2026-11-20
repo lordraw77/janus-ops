@@ -79,6 +79,9 @@ services:
       JANUS_AI_MODEL: ${JANUS_AI_MODEL:-}
       JANUS_AI_API_KEY: ${JANUS_AI_API_KEY:-}
       JANUS_AI_TIMEOUT_S: ${JANUS_AI_TIMEOUT_S:-120}
+      JANUS_AI_REVIEW_MODEL: ${JANUS_AI_REVIEW_MODEL:-}
+      JANUS_AI_REVIEW_BASE_URL: ${JANUS_AI_REVIEW_BASE_URL:-}
+      JANUS_AI_REVIEW_API_KEY: ${JANUS_AI_REVIEW_API_KEY:-}
     volumes:
       - recordings:/var/lib/janus-ops/recordings
       - pki_public:/var/lib/janus-ops/pki:ro

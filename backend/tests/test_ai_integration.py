@@ -65,7 +65,12 @@ def _seed_done_diagnosis(actions: list[dict[str, object]]) -> str:
 
 def test_copilot_is_off_without_an_endpoint() -> None:
     with signed_in("bob") as operator:
-        assert operator.get("/api/v1/ai/status").json() == {"enabled": False, "model": None}
+        assert operator.get("/api/v1/ai/status").json() == {
+            "enabled": False,
+            "model": None,
+            "review_enabled": False,
+            "review_model": None,
+        }
         r = operator.post(f"/api/v1/ai/problems/{uuid.uuid4()}/diagnose")
         assert r.status_code == 503 and r.json()["detail"] == "ai_not_configured"
 
@@ -152,3 +157,41 @@ def test_only_approved_actions_run_and_a_refused_run_leaves_the_action_approved(
         {"d": diagnosis},
     )
     assert audited[0][0] == 1
+
+
+def test_second_opinion_and_iac_are_off_without_an_endpoint() -> None:
+    diagnosis = _seed_done_diagnosis([_action("a1", "Free space")])
+    with signed_in("bob") as operator:
+        r = operator.post(f"/api/v1/ai/diagnoses/{diagnosis}/second-opinion")
+        assert r.status_code == 503 and r.json()["detail"] == "ai_review_not_configured"
+        r = operator.post(
+            "/api/v1/ai/iac",
+            json={"node_id": str(uuid.uuid4()), "kind": "shell", "request": "rotate the logs"},
+        )
+        assert r.status_code == 503 and r.json()["detail"] == "ai_not_configured"
+    with signed_in("carol") as auditor:
+        assert auditor.get("/api/v1/ai/iac").status_code == 403
+        assert auditor.post(f"/api/v1/ai/diagnoses/{diagnosis}/second-opinion").status_code == 403
+
+
+def test_ai_settings_are_for_administrators_and_never_return_the_key() -> None:
+    with signed_in("bob") as operator:
+        assert operator.get("/api/v1/ai/config").status_code == 403
+        assert operator.put("/api/v1/ai/config/main", json={}).status_code == 403
+    with signed_in("alice") as admin:
+        r = admin.put(
+            "/api/v1/ai/config/review",
+            json={"base_url": "http://insecure.lan/v1", "model": "m"},
+        )
+        assert r.status_code == 422 and r.json()["detail"] == "invalid_ai_url"
+        r = admin.put(
+            "/api/v1/ai/config/review",
+            json={"base_url": "https://llm.lan/v1", "model": "second", "api_key": "sekret-123"},
+        )
+        assert r.status_code == 204
+        body = admin.get("/api/v1/ai/config").json()
+        review = next(s for s in body["slots"] if s["slot"] == "review")
+        assert review["model"] == "second" and review["key_set"] is True
+        assert "sekret-123" not in admin.get("/api/v1/ai/config").text
+        assert admin.delete("/api/v1/ai/config/review").status_code == 204
+        assert admin.delete("/api/v1/ai/config/review").status_code == 404

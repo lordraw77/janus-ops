@@ -48,3 +48,46 @@ async def chat(settings: Settings, messages: list[dict[str, str]], transport: An
     if not isinstance(content, str):
         raise AIError("ai_bad_response")
     return content
+
+
+def review_enabled(settings: Settings) -> bool:
+    """The second opinion needs its own model name and an endpoint (its own or the main one)."""
+    return bool(settings.ai_review_model and (settings.ai_review_base_url or settings.ai_base_url))
+
+
+def review_settings(settings: Settings) -> Settings:
+    """Settings that point `chat` at the reviewing model; endpoint and key fall back to the main."""
+    if not review_enabled(settings):
+        raise AIError("ai_review_not_configured")
+    return settings.model_copy(
+        update={
+            "ai_model": settings.ai_review_model,
+            "ai_base_url": settings.ai_review_base_url or settings.ai_base_url,
+            "ai_api_key": settings.ai_review_api_key or settings.ai_api_key,
+        }
+    )
+
+
+async def list_models(settings: Settings, transport: Any = None) -> list[str]:
+    """Model ids the endpoint offers (`GET /models`); used to pick a valid name in Settings."""
+    if not settings.ai_base_url:
+        raise AIError("ai_not_configured")
+    headers = {}
+    if settings.ai_api_key is not None:
+        headers["Authorization"] = f"Bearer {settings.ai_api_key.get_secret_value()}"
+    try:
+        async with httpx2.AsyncClient(
+            timeout=min(settings.ai_timeout_s, 30), transport=transport
+        ) as http:
+            response = await http.get(f"{settings.ai_base_url}/models", headers=headers)
+    except httpx2.TimeoutException:
+        raise AIError("ai_timeout") from None
+    except httpx2.HTTPError:
+        raise AIError("ai_unreachable") from None
+    if response.status_code != 200:
+        raise AIError("ai_http_error")
+    try:
+        ids = [str(m["id"]) for m in response.json()["data"]]
+    except (ValueError, KeyError, TypeError):
+        raise AIError("ai_bad_response") from None
+    return sorted(ids)[:300]
