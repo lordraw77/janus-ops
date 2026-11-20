@@ -94,6 +94,7 @@ def create_app(
         app.state.schema_head = schema_head()
         app.state.auth = AuthService(engine, settings, directory)
         app.state.directory_admin = LldapAdmin(settings) if settings.directory_managed else None
+        app.state.auth._admin = app.state.directory_admin
         app.state.vault = Vault(app.state.auth.box, build_kv(settings))
         app.state.terminals = terminal.TerminalCounter()
         app.state.sftp = sftp.SftpPool(engine, app.state.vault, settings)

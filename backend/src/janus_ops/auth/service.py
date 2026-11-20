@@ -11,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from janus_ops import audit
 from janus_ops.auth import mfa, sessions
 from janus_ops.auth.ldap import DirectoryBackend, DirectoryUnavailable, InvalidCredentials
-from janus_ops.auth.passwords import verify_password
+from janus_ops.auth.passwords import hash_password, verify_password
 from janus_ops.auth.ratelimit import LoginRateLimiter
 from janus_ops.config import Settings
 from janus_ops.crypto import Box
+from janus_ops.directory import DirectoryError, LldapAdmin
 from janus_ops.rbac import ADMIN_ROLE, roles_for_groups
 from janus_ops.transit import build_box
 
@@ -55,6 +56,7 @@ class AuthService:
         self._user_limiter = user_limiter or LoginRateLimiter(max_failures=5, window_s=900)
         self._ip_limiter = ip_limiter or LoginRateLimiter(max_failures=30, window_s=900)
         self.box: Box | None = build_box(settings)
+        self._admin: LldapAdmin | None = None  # set by the app when users are managed here
 
     async def _fail(
         self, username: str, ip: str | None, reason: str, status: int, *, count: bool
@@ -156,6 +158,39 @@ class AuthService:
         return await self._open_session(
             str(row.id), user.username, roles, "ldap", ip, totp_enabled=row.totp_enabled
         )
+
+    async def change_password(
+        self, user_id: str, username: str, method: str, current: str, new: str
+    ) -> None:
+        """Verify the current password, then set the new one (local hash or directory)."""
+        if method == "breakglass":
+            async with self._engine.connect() as conn:
+                row = (
+                    await conn.execute(
+                        text("SELECT password_hash FROM app_user WHERE id = CAST(:i AS uuid)"),
+                        {"i": user_id},
+                    )
+                ).first()
+            if row is None or not verify_password(current, row.password_hash):
+                raise LoginError("invalid_credentials", 400)
+            async with self._engine.begin() as conn:
+                await conn.execute(
+                    text("UPDATE app_user SET password_hash = :h WHERE id = CAST(:i AS uuid)"),
+                    {"h": hash_password(new), "i": user_id},
+                )
+            return
+        if self._directory is None or self._admin is None:
+            raise LoginError("directory_read_only", 409)
+        try:
+            await self._directory.authenticate(username, current)
+        except InvalidCredentials:
+            raise LoginError("invalid_credentials", 400) from None
+        except DirectoryUnavailable:
+            raise LoginError("directory_unavailable", 503) from None
+        try:
+            await self._admin.set_password(username, new)
+        except DirectoryError as exc:
+            raise LoginError(exc.code, exc.status) from None
 
     async def _open_session(
         self,

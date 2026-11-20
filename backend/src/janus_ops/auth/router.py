@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from janus_ops import audit
 from janus_ops.auth import mfa, sessions
@@ -26,6 +27,11 @@ class LoginRequest(BaseModel):
 
 class CodeRequest(BaseModel):
     code: str = Field(min_length=6, max_length=32, description="TOTP code or recovery code")
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=12, max_length=256)
 
 
 class LoginResponse(BaseModel):
@@ -147,6 +153,46 @@ async def me(session: Annotated[Session, Depends(current_session)]) -> SessionOu
 
 
 # ---------------------------------------------------------------- TOTP self-service
+@router.post("/password", status_code=204, responses={400: {}, 409: {}, 503: {}})
+async def change_password(
+    body: PasswordChange,
+    request: Request,
+    session: Annotated[Session, Depends(current_session)],
+) -> Response:
+    """Self-service password change: needs the current password; other sessions are ended."""
+    if session.stage != "full":
+        return JSONResponse({"detail": "unauthenticated"}, status_code=401)
+    if body.new_password == body.current_password:
+        return JSONResponse({"detail": "invalid_input"}, status_code=400)
+    service = _service(request)
+    try:
+        await service.change_password(
+            session.user_id,
+            session.username,
+            session.method,
+            body.current_password,
+            body.new_password,
+        )
+    except LoginError as err:
+        return _error(err)
+    async with request.app.state.engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE user_session SET revoked_at = now() WHERE user_id = CAST(:u AS uuid)"
+                " AND id <> CAST(:s AS uuid) AND revoked_at IS NULL"
+            ),
+            {"u": session.user_id, "s": session.id},
+        )
+        await audit.append(
+            conn,
+            action="auth.password_changed",
+            actor_id=session.user_id,
+            actor_name=session.username,
+            source_ip=_client_ip(request),
+        )
+    return Response(status_code=204)
+
+
 def _totp_error(exc: Exception) -> JSONResponse:
     if isinstance(exc, mfa.TotpStateError):
         code = 400 if exc.code == "invalid_code" else 409

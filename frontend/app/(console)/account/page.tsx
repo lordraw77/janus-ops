@@ -37,6 +37,54 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
   );
 }
 
+function PasswordCard() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setDone(false);
+    if (next !== again) return setError("The two new passwords do not match.");
+    setBusy(true);
+    const r = await api("/auth/password", {
+      method: "POST",
+      body: { current_password: current, new_password: next },
+    });
+    setBusy(false);
+    if (!r.ok) return setError(message(r.code));
+    setCurrent("");
+    setNext("");
+    setAgain("");
+    setDone(true);
+  }
+
+  return (
+    <Card title="Password">
+      <form onSubmit={submit} className="space-y-3">
+        {error && <Alert>{error}</Alert>}
+        {done && <Alert kind="info">Password changed. Your other sessions were signed out.</Alert>}
+        <Field label="Current password">
+          <TextInput type="password" autoComplete="current-password" required value={current} onChange={(e) => setCurrent(e.target.value)} />
+        </Field>
+        <Field label="New password" hint="At least 12 characters">
+          <TextInput type="password" autoComplete="new-password" required value={next} onChange={(e) => setNext(e.target.value)} />
+        </Field>
+        <Field label="Repeat new password">
+          <TextInput type="password" autoComplete="new-password" required value={again} onChange={(e) => setAgain(e.target.value)} />
+        </Field>
+        <Button type="submit" variant="primary" disabled={busy || !current || next.length < 12 || !again}>
+          Change password
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
 function TotpCard() {
   const { refresh } = useAuth();
   const { data: status, error: loadError, reload } = useResource<TotpStatus>("/auth/totp");
@@ -216,6 +264,7 @@ export default function AccountPage() {
           Roles come from your LDAP groups and are read at sign-in.
         </p>
       </Card>
+      <PasswordCard />
       <TotpCard />
     </div>
   );
