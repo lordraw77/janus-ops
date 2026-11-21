@@ -112,6 +112,25 @@ def test_two_steps_then_search_keep_and_delete() -> None:
         assert item["keep"] is False and item["expires_at"] is not None
         kept_item = next(i for i in found["items"] if i["node_name"] == tag + "-kept")
         assert kept_item["keep"] is True and kept_item["expires_at"] is None
+        # sorting on a column (whitelisted), by host and by group
+        asc = admin.get(f"{BASE}/recordings", params={"q": tag, "sort": "node", "dir": "asc"})
+        assert [i["node_name"] for i in asc.json()["items"]] == [tag + "-kept", tag + "-old"]
+        desc = admin.get(f"{BASE}/recordings", params={"q": tag, "sort": "node", "dir": "desc"})
+        assert [i["node_name"] for i in desc.json()["items"]] == [tag + "-old", tag + "-kept"]
+        junk = admin.get(f"{BASE}/recordings", params={"sort": "id; drop table x", "dir": "asc"})
+        assert junk.status_code == 200  # an unknown column falls back to the default order
+        assert admin.get(f"{BASE}/recordings", params={"dir": "sideways"}).status_code == 422
+        by_host = admin.get(f"{BASE}/recordings", params={"host": tag + "-old"}).json()
+        assert [i["node_name"] for i in by_host["items"]] == [tag + "-old"]
+        opts = admin.get(f"{BASE}/filters", params={"kind": "recordings"}).json()
+        assert tag + "-old" in opts["hosts"] and isinstance(opts["groups"], list)
+        assert admin.get(f"{BASE}/filters", params={"kind": "nope"}).status_code == 422
+        by_group = admin.get(f"{BASE}/recordings", params={"group": str(uuid.uuid4())}).json()
+        assert by_group["total"] == 0
+        chats_host = admin.get(f"{BASE}/chats", params={"host": tag + "-chat-old"}).json()
+        assert [c["id"] for c in chats_host["items"]] == [chat_old]
+        chats_sorted = admin.get(f"{BASE}/chats", params={"sort": "messages", "dir": "asc"})
+        assert chats_sorted.status_code == 200
         only_kept = admin.get(f"{BASE}/recordings", params={"q": tag, "keep": "true"}).json()
         assert only_kept["total"] == 1
         chats = admin.get(f"{BASE}/chats", params={"q": f"ntp server {tag}"}).json()

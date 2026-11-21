@@ -94,6 +94,36 @@ class KeepIn(Selection):
     keep: bool
 
 
+RECORDING_SORT = {
+    "started": "t.started_at",
+    "user": "lower(u.username)",
+    "node": "lower(t.node_name)",
+    "remote_user": "lower(t.remote_user)",
+    "duration": "(t.ended_at - t.started_at)",
+    "bytes": "t.bytes_out",
+    "archived": "t.archived_at",
+    "expires": "(CASE WHEN t.keep THEN NULL ELSE t.ended_at END)",
+}
+CHAT_SORT = {
+    "updated": "s.updated_at",
+    "title": "lower(s.title)",
+    "user": "lower(s.created_by)",
+    "servers": "lower(array_to_string(s.node_names, ','))",
+    "messages": "messages",
+    "archived": "s.archived_at",
+    "expires": "(CASE WHEN s.keep THEN NULL ELSE s.updated_at END)",
+}
+
+
+def _order(
+    columns: dict[str, str], sort: str | None, direction: str, default: str, tie: str
+) -> str:
+    """An ORDER BY from a whitelisted column and direction (never from user text)."""
+    expr = columns.get(sort or "", columns[default])
+    way = "ASC" if direction == "asc" else "DESC"
+    return f"{expr} {way} NULLS LAST, {tie} {way}"
+
+
 def _like(q: str | None) -> str | None:
     if not q or not q.strip():
         return None
@@ -209,8 +239,12 @@ async def list_recordings(
     q: str | None = None,
     in_content: bool = False,
     keep: bool | None = None,
+    host: str | None = None,
+    group: uuid.UUID | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
+    sort: str | None = None,
+    direction: Annotated[Literal["asc", "desc"], Query(alias="dir")] = "desc",
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page:
@@ -221,6 +255,15 @@ async def list_recordings(
     if keep is not None:
         where.append("t.keep = :keep")
         params["keep"] = keep
+    if host:
+        where.append("t.node_name = :host")
+        params["host"] = host
+    if group is not None:
+        where.append(
+            "EXISTS (SELECT 1 FROM node_group_member gm WHERE gm.group_id = :group"
+            " AND gm.node_id = t.node_id)"
+        )
+        params["group"] = group
     if since is not None:
         where.append("t.started_at >= :since")
         params["since"] = since
@@ -238,6 +281,7 @@ async def list_recordings(
     if like:
         params["like"] = like
     cfg = await _config(request)
+    order = _order(RECORDING_SORT, sort, direction, "started", "t.id")
     columns = (
         "t.id, u.username, t.node_name, t.target, t.remote_user, t.started_at, t.ended_at,"
         " t.bytes_out, t.archived_at, t.keep"
@@ -262,12 +306,12 @@ async def list_recordings(
         if not content_search:
             total = await conn.scalar(text("SELECT count(*)" + base), params)
             rows = await conn.execute(
-                text(f"SELECT {columns}{base} ORDER BY t.started_at DESC LIMIT :l OFFSET :o"),
+                text(f"SELECT {columns}{base} ORDER BY {order} LIMIT :l OFFSET :o"),
                 {**params, "l": limit, "o": offset},
             )
             return Page(items=[item(r) for r in rows], total=int(total or 0))
         rows = await conn.execute(
-            text(f"SELECT {columns}{base} ORDER BY t.started_at DESC LIMIT {CONTENT_FILES * 4}"),
+            text(f"SELECT {columns}{base} ORDER BY {order} LIMIT {CONTENT_FILES * 4}"),
             params,
         )
         candidates = list(rows)
@@ -317,8 +361,12 @@ async def list_chats(
     session: Reader,
     q: str | None = None,
     keep: bool | None = None,
+    host: str | None = None,
+    group: uuid.UUID | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
+    sort: str | None = None,
+    direction: Annotated[Literal["asc", "desc"], Query(alias="dir")] = "desc",
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page:
@@ -327,6 +375,15 @@ async def list_chats(
     if keep is not None:
         where.append("s.keep = :keep")
         params["keep"] = keep
+    if host:
+        where.append(":host = ANY(s.node_names)")
+        params["host"] = host
+    if group is not None:
+        where.append(
+            "EXISTS (SELECT 1 FROM node_group_member gm WHERE gm.group_id = :group"
+            " AND gm.node_id = ANY(s.node_ids))"
+        )
+        params["group"] = group
     if since is not None:
         where.append("s.updated_at >= :since")
         params["since"] = since
@@ -343,6 +400,7 @@ async def list_chats(
         )
         params["like"] = like
     cfg = await _config(request)
+    order = _order(CHAT_SORT, sort, direction, "updated", "s.id")
     base = f" FROM ai_operate_session s WHERE {' AND '.join(where)}"
     async with request.app.state.engine.connect() as conn:
         total = await conn.scalar(text("SELECT count(*)" + base), params)
@@ -351,7 +409,7 @@ async def list_chats(
                 "SELECT s.id, s.title, s.node_names, s.created_by, s.created_at, s.updated_at,"
                 " s.archived_at, s.keep, (SELECT count(*) FROM ai_operate_message m"
                 " WHERE m.session_id = s.id) AS messages"
-                f"{base} ORDER BY s.updated_at DESC LIMIT :l OFFSET :o"
+                f"{base} ORDER BY {order} LIMIT :l OFFSET :o"
             ),
             {**params, "l": limit, "o": offset},
         )
@@ -416,6 +474,44 @@ async def get_chat(chat_id: uuid.UUID, request: Request, session: Reader) -> dic
             for m in msgs
         ],
     }  # fmt: skip
+
+
+# ----------------------------------------------------------------------------- filter choices
+@router.get("/filters")
+async def filters(request: Request, session: Reader, kind: Kind) -> dict[str, Any]:
+    """Hosts that appear in the archive (that the caller may see) and the node groups."""
+    async with request.app.state.engine.connect() as conn:
+        if kind == "recordings":
+            visible, params = _visible_recordings(session)
+            rows = await conn.execute(
+                text(
+                    "SELECT DISTINCT t.node_name AS name FROM terminal_session t"
+                    f" WHERE t.archived_at IS NOT NULL AND t.node_name IS NOT NULL AND {visible}"
+                    " ORDER BY 1"
+                ),
+                params,
+            )
+        else:
+            visible, params = _visible_chats(session)
+            rows = await conn.execute(
+                text(
+                    "SELECT DISTINCT n AS name FROM ai_operate_session s,"
+                    f" unnest(s.node_names) AS n WHERE s.archived_at IS NOT NULL AND {visible}"
+                    " ORDER BY 1"
+                ),
+                params,
+            )
+        hosts = [r.name for r in rows]
+        groups = [
+            {"id": str(r.id), "name": r.name}
+            for r in await conn.execute(
+                text(
+                    "SELECT g.id, g.name FROM node_group g WHERE EXISTS (SELECT 1 FROM"
+                    " node_group_member m WHERE m.group_id = g.id) ORDER BY lower(g.name)"
+                )
+            )
+        ]
+    return {"hosts": hosts, "groups": groups}
 
 
 # ----------------------------------------------------------------------------- bulk actions

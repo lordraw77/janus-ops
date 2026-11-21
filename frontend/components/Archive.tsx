@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Bubble } from "@/components/Operate";
@@ -120,6 +121,19 @@ function duration(r: RecordingItem): string {
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 }
 
+function Th({ label, col, sort, onSort }: { label: string; col: string; sort: { col: string; dir: "asc" | "desc" } | null; onSort: (col: string) => void }) {
+  const active = sort?.col === col;
+  const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <th className="py-2 pr-3 font-medium" aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={() => onSort(col)} className={`inline-flex items-center gap-1 hover:text-fg ${active ? "text-fg" : ""}`}>
+        {label}
+        <Icon className={`h-3 w-3 ${active ? "" : "opacity-40"}`} aria-hidden />
+      </button>
+    </th>
+  );
+}
+
 function ArchiveList({ kind }: { kind: Kind }) {
   const { can } = useAuth();
   const manage = can("archive.manage");
@@ -128,7 +142,11 @@ function ArchiveList({ kind }: { kind: Kind }) {
   const [keep, setKeep] = useState<"" | "true" | "false">("");
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
-  const [applied, setApplied] = useState({ q: "", inContent: false, keep: "", since: "", until: "" });
+  const [host, setHost] = useState("");
+  const [group, setGroup] = useState("");
+  const [options, setOptions] = useState<{ hosts: string[]; groups: { id: string; name: string }[] }>({ hosts: [], groups: [] });
+  const [applied, setApplied] = useState({ q: "", inContent: false, keep: "", since: "", until: "", host: "", group: "" });
+  const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<ArchivePage<RecordingItem | ChatItem> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,10 +162,22 @@ function ArchiveList({ kind }: { kind: Kind }) {
     if (applied.q.trim()) p.set("q", applied.q.trim());
     if (kind === "recordings" && applied.inContent && applied.q.trim()) p.set("in_content", "true");
     if (applied.keep) p.set("keep", applied.keep);
+    if (applied.host) p.set("host", applied.host);
+    if (applied.group) p.set("group", applied.group);
+    if (sort) {
+      p.set("sort", sort.col);
+      p.set("dir", sort.dir);
+    }
     if (applied.since) p.set("since", new Date(applied.since).toISOString());
     if (applied.until) p.set("until", new Date(`${applied.until}T23:59:59`).toISOString());
     return `/archive/${kind}?${p.toString()}`;
-  }, [applied, kind, offset]);
+  }, [applied, kind, offset, sort]);
+
+  useEffect(() => {
+    void api<typeof options>(`/archive/filters?kind=${kind}`).then((r) => {
+      if (r.ok) setOptions(r.data);
+    });
+  }, [kind, version]);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,10 +199,15 @@ function ArchiveList({ kind }: { kind: Kind }) {
   const items = page?.items ?? [];
   const allPicked = items.length > 0 && items.every((i) => picked.includes(i.id));
 
+  function toggleSort(col: string) {
+    setOffset(0);
+    setSort((cur) => (cur?.col === col ? (cur.dir === "asc" ? { col, dir: "desc" } : null) : { col, dir: "asc" }));
+  }
+
   function search() {
     setOffset(0);
     setPicked([]);
-    setApplied({ q, inContent, keep, since, until });
+    setApplied({ q, inContent, keep, since, until, host, group });
   }
 
   async function bulk(action: "delete" | "keep" | "unkeep", ids: string[]) {
@@ -199,14 +234,38 @@ function ArchiveList({ kind }: { kind: Kind }) {
   return (
     <div className="space-y-3">
       <form
-        className="flex flex-wrap items-end gap-3"
+        className="grid grid-cols-2 items-end gap-3 md:grid-cols-4 xl:grid-cols-[minmax(14rem,2fr)_repeat(5,minmax(8rem,1fr))_auto]"
         onSubmit={(e) => {
           e.preventDefault();
           search();
         }}
       >
-        <Field label="Search" hint={kind === "recordings" ? "User, node, target or remote user" : "Title, user, servers or anything said in the chat"}>
-          <TextInput className="w-72" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Field label="Search">
+          <TextInput
+            value={q}
+            placeholder={kind === "recordings" ? "User, node, target, remote user…" : "Title, user, servers, what was said…"}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </Field>
+        <Field label="Host">
+          <Select value={host} onChange={(e) => setHost(e.target.value)}>
+            <option value="">All hosts</option>
+            {options.hosts.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Group">
+          <Select value={group} onChange={(e) => setGroup(e.target.value)}>
+            <option value="">All groups</option>
+            {options.groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </Select>
         </Field>
         <Field label="Keep">
           <Select value={keep} onChange={(e) => setKeep(e.target.value as "" | "true" | "false")}>
@@ -221,13 +280,13 @@ function ArchiveList({ kind }: { kind: Kind }) {
         <Field label="To">
           <TextInput type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
         </Field>
-        <Button type="submit" variant="primary">
+        <Button type="submit" variant="primary" className="h-[34px] px-5">
           Search
         </Button>
         {kind === "recordings" && (
-          <label className="flex items-center gap-1 pb-2 text-xs">
+          <label className="col-span-full flex items-center gap-1 text-xs text-fg-secondary">
             <input type="checkbox" checked={inContent} onChange={(e) => setInContent(e.target.checked)} />
-            also inside the recorded output (slower)
+            Also search inside the recorded output (slower: the most recent recordings only)
           </label>
         )}
       </form>
@@ -261,23 +320,23 @@ function ArchiveList({ kind }: { kind: Kind }) {
               )}
               {kind === "recordings" ? (
                 <>
-                  <th className="py-2 pr-3 font-medium">Started</th>
-                  <th className="py-2 pr-3 font-medium">User</th>
-                  <th className="py-2 pr-3 font-medium">Node</th>
-                  <th className="py-2 pr-3 font-medium">Remote user</th>
-                  <th className="py-2 pr-3 font-medium">Duration</th>
+                  <Th label="Started" col="started" sort={sort} onSort={toggleSort} />
+                  <Th label="User" col="user" sort={sort} onSort={toggleSort} />
+                  <Th label="Node" col="node" sort={sort} onSort={toggleSort} />
+                  <Th label="Remote user" col="remote_user" sort={sort} onSort={toggleSort} />
+                  <Th label="Duration" col="duration" sort={sort} onSort={toggleSort} />
                 </>
               ) : (
                 <>
-                  <th className="py-2 pr-3 font-medium">Last message</th>
-                  <th className="py-2 pr-3 font-medium">Chat</th>
-                  <th className="py-2 pr-3 font-medium">User</th>
-                  <th className="py-2 pr-3 font-medium">Servers</th>
-                  <th className="py-2 pr-3 font-medium">Messages</th>
+                  <Th label="Last message" col="updated" sort={sort} onSort={toggleSort} />
+                  <Th label="Chat" col="title" sort={sort} onSort={toggleSort} />
+                  <Th label="User" col="user" sort={sort} onSort={toggleSort} />
+                  <Th label="Servers" col="servers" sort={sort} onSort={toggleSort} />
+                  <Th label="Messages" col="messages" sort={sort} onSort={toggleSort} />
                 </>
               )}
-              <th className="py-2 pr-3 font-medium">Archived</th>
-              <th className="py-2 pr-3 font-medium">Deleted</th>
+              <Th label="Archived" col="archived" sort={sort} onSort={toggleSort} />
+              <Th label="Deleted" col="expires" sort={sort} onSort={toggleSort} />
               <th />
             </tr>
           </thead>
@@ -342,7 +401,7 @@ function ArchiveList({ kind }: { kind: Kind }) {
         </table>
         {items.length === 0 && !loading && (
           <p className="py-3 text-sm text-fg-muted">
-            {applied.q || applied.keep || applied.since || applied.until ? "Nothing matches." : `No archived ${kind === "chats" ? "chats" : "recordings"} yet.`}
+            {applied.q || applied.keep || applied.since || applied.until || applied.host || applied.group ? "Nothing matches." : `No archived ${kind === "chats" ? "chats" : "recordings"} yet.`}
           </p>
         )}
       </div>
