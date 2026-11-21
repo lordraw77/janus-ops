@@ -17,7 +17,7 @@
 
 ---
 
-> **Status: pre-1.0 (0.9.x).** Every planned module exists (phases F0–F8), but they are not equally
+> **Status: pre-1.0 (0.10.x).** Every planned module exists (phases F0–F8), but they are not equally
 > proven: some have been exercised against real infrastructure, others only against simulated
 > services or in tests. Each module's verification status is listed in the
 > [plan](https://github.com/lordraw77/janus-ops/blob/main/docs/PLAN.md). Evaluate it on a lab before
