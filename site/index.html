@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Janus-Ops — one portal for your whole infrastructure</title>
+<meta name="description" content="Janus-Ops is an open-source infrastructure control plane: monitoring, Docker, Proxmox VE, SSH bastion, Ansible and an AI Copilot in one pane of glass. Built for segmented and air-gapped networks.">
+<link rel="canonical" href="https://lordraw77.github.io/janus-ops/">
+<meta name="theme-color" content="#090a0f">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Janus-Ops — one portal for your whole infrastructure">
+<meta property="og:description" content="Monitoring, containers, Proxmox, SSH, Ansible and AI troubleshooting in a single pane of glass. Open source, air-gap friendly.">
+<meta property="og:url" content="https://lordraw77.github.io/janus-ops/">
+<meta property="og:image" content="https://lordraw77.github.io/janus-ops/assets/janus-ops-app-icon-512.png">
+<meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="assets/janus-ops-logo-512.png" alt="" width="32" height="32"><span>Janus-<b>Ops</b></span></a>
+    <ul>
+      <li><a href="#modules">Modules</a></li>
+      <li><a href="#agent">Agent</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#start">Quick start</a></li>
+      <li><a class="btn small" href="https://github.com/lordraw77/janus-ops">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main id="main">
+<header class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow">Open source · Apache-2.0 · Pre-alpha</span>
+      <h1>One portal for your whole <em>infrastructure</em> lifecycle.</h1>
+      <p class="lead">Monitoring, containers, virtualization, SSH, automation and AI troubleshooting in a single pane of glass. One inventory at the core, decoupled modules around it, and an agent that only ever connects <strong>out</strong>.</p>
+      <div class="cta">
+        <a class="btn primary" href="#start">Run it in 2 minutes</a>
+        <a class="btn" href="https://github.com/lordraw77/janus-ops">View on GitHub</a>
+        <a class="btn" href="https://hub.docker.com/r/lordraw/janus-ops">Docker Hub</a>
+      </div>
+      <p class="meta"><span>FastAPI + Next.js</span><span>Go agent</span><span>TimescaleDB</span><span>Single Docker image</span></p>
+    </div>
+
+    <div>
+      <div class="console" role="img" aria-label="Illustration of the Janus-Ops console: node health hexagons, a problems list and an AI Copilot suggestion">
+        <header><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>NOC · prod</span><span>illustration</span></header>
+        <div class="body">
+          <div class="hexes" aria-hidden="true">
+            <span class="hex ok">12</span><span class="hex warn">2</span><span class="hex crit">1</span><span class="hex off">1</span>
+            <small>OK · WARN · CRIT · OFFLINE</small>
+          </div>
+          <svg class="spark" viewBox="0 0 400 56" preserveAspectRatio="none" aria-hidden="true">
+            <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22d3ee" stop-opacity=".35"/><stop offset="1" stop-color="#22d3ee" stop-opacity="0"/></linearGradient></defs>
+            <path d="M0 40 L30 34 L60 38 L90 26 L120 30 L150 18 L180 24 L210 14 L240 22 L270 12 L300 20 L330 10 L360 16 L400 8 L400 56 L0 56Z" fill="url(#g)"/>
+            <path d="M0 40 L30 34 L60 38 L90 26 L120 30 L150 18 L180 24 L210 14 L240 22 L270 12 L300 20 L330 10 L360 16 L400 8" fill="none" stroke="#22d3ee" stroke-width="2"/>
+          </svg>
+          <div class="rows" aria-hidden="true">
+            <div class="row"><span class="led crit"></span><span class="k">db-02 · postgres.connections</span><span class="v">CRIT 96%</span></div>
+            <div class="row"><span class="led warn"></span><span class="k">nas-01 · fs.used_pct /vol1</span><span class="v">WARN 84%</span></div>
+            <div class="row"><span class="led ok"></span><span class="k">web-01 · docker.containers</span><span class="v">OK 14/14</span></div>
+          </div>
+          <div class="copilot" aria-hidden="true"><b>AI COPILOT</b><br>Connection pool exhausted after the 02:10 deploy. Proposed plan: raise <code>max_connections</code>, restart the pooler. <em>Waiting for human approval.</em></div>
+        </div>
+      </div>
+      <p class="caption">Illustration with sample data, not a screenshot.</p>
+    </div>
+  </div>
+</header>
+
+<section id="why">
+  <div class="wrap">
+    <span class="kicker">Why Janus-Ops</span>
+    <h2>Stop juggling six tools to run one infrastructure.</h2>
+    <p class="sub">Checkmk for monitoring, Portainer for containers, the Proxmox web UI, MobaXterm for SSH, a terminal for Ansible. Every jump costs context. Janus-Ops, named after the two-faced Roman god of gateways, puts <strong>one central inventory</strong> at the core: define a host once and its capabilities (agent, SSH target, Docker host, Proxmox node, SNMP device) light up the matching tools.</p>
+    <div class="grid c3">
+      <div class="card"><h3>One inventory</h3><p>Nodes, tags, groups with Ansible variables, parents for alert suppression, and a vault for every credential.</p></div>
+      <div class="card"><h3>Built for restricted networks</h3><p>Segmented, proxy-only and air-gapped sites are the design target. The UI ships every asset locally, with no CDN and no fonts fetched from the internet.</p></div>
+      <div class="card"><h3>Auditable by default</h3><p>Every privileged action is attributed and written to a hash-chained audit log, with optional terminal session recording.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="modules" class="alt">
+  <div class="wrap">
+    <span class="kicker">Modules</span>
+    <h2>Everything an operator reaches for, in one place.</h2>
+    <p class="sub">Each module is useful on its own and gets better with the others: a failing check can open the container logs, the SSH session or an Ansible run on the same host.</p>
+    <div class="grid c3">
+      <article class="card">
+        <div class="ico tel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <h3>Observability &amp; alerting</h3>
+        <p>High-frequency metrics, service discovery, OK / WARN / CRIT / UNKNOWN with hysteresis, acknowledgements, downtimes, flapping detection, parent/child dependencies and notification routing. SNMP v2c/v3 for NAS, switches and UPS.</p>
+        <span class="tag">Checkmk-style</span>
+      </article>
+      <article class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg></div>
+        <h3>Containers &amp; stacks</h3>
+        <p>Multi-host Docker through the agent tunnel: live logs and stats, exec shells, Compose stacks deployed from Git with signed webhooks, prune and image update checks.</p>
+        <span class="tag">Portainer / Dockhand-style</span>
+      </article>
+      <article class="card">
+        <div class="ico warn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></div>
+        <h3>Virtualization</h3>
+        <p>Proxmox VE clusters: quorum, nodes, storage, VM and LXC lifecycle, snapshots, migration, console, plus backup and replication audit.</p>
+        <span class="tag">Proxmox VE</span>
+      </article>
+      <article class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></div>
+        <h3>SSH bastion</h3>
+        <p>A web terminal with host key pinning, vault-backed credentials, an SFTP browser, multi-tab and broadcast, a snippet library, ProxyJump, and session recording.</p>
+        <span class="tag">MobaXterm / Termius-style</span>
+      </article>
+      <article class="card">
+        <div class="ico tel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7.5 11 16M16 7.5 13 16"/></svg></div>
+        <h3>Automation hub</h3>
+        <p>Ansible playbooks with a dynamic inventory from the database, surveys and live output. A visual workflow builder with webhook, interval and alert triggers, branches, approvals, and runs that resume after a restart.</p>
+        <span class="tag">AWX / n8n-style</span>
+      </article>
+      <article class="card">
+        <div class="ico ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg></div>
+        <h3>AI Copilot</h3>
+        <p>Root-cause analysis on a failing service from logs, metrics and the audit trail; a second opinion from another model; contextual IaC generation. It proposes action plans, and only a person can approve them.</p>
+        <span class="tag">Your model endpoint</span>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="agent">
+  <div class="wrap">
+    <span class="kicker">The agent</span>
+    <h2>A single Go binary that only ever calls out.</h2>
+    <p class="sub">No inbound port on your nodes, no dependency to install. <code>janus-agent</code> opens one outbound WebSocket over HTTPS and everything else (telemetry, Docker, commands, updates) travels through it.</p>
+    <div class="flow">
+      <div class="box">
+        <h3>your node</h3>
+        <ul><li>janus-agent, static binary</li><li>Linux amd64 · arm64 · arm (Raspberry Pi)</li><li>Windows service (preview)</li><li>24 h disk buffer while offline</li></ul>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 70 24" aria-hidden="true"><path d="M2 12h62m-8-8 8 8-8 8"/></svg>outbound only<br>TLS · port 443</div>
+      <div class="box">
+        <h3>janus-ops server</h3>
+        <ul><li>Ed25519 key per agent, one-time enrollment token</li><li>Optional HTTP(S) proxy</li><li>Signed self-update, with automatic rollback</li><li>Everything audited</li></ul>
+      </div>
+    </div>
+    <ul class="points">
+      <li><b>You keep the last word.</b> Whether a node accepts commands, interactive shells or the Docker API is a <em>local policy</em> written when the agent is installed. The server cannot change it afterwards.</li>
+      <li><b>Install your way.</b> Over SSH from the UI, or with a one-line PowerShell command on Windows when SSH is not an option.</li>
+      <li><b>Updates you can trust.</b> Releases are signed offline with an Ed25519 key; the agent verifies the signature, refuses downgrades and rolls back if the new binary does not come up.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="security" class="alt">
+  <div class="wrap">
+    <span class="kicker">Security</span>
+    <h2>Secrets stay on the server. Actions stay attributable.</h2>
+    <div class="grid c2" style="margin-top:28px">
+      <div class="card"><h3>Encrypted vault</h3><p>Envelope encryption with AES-256-GCM, one key per secret. Secrets are write-only: no page or API returns them, and they never reach the browser or the audit log. The master key or the secrets themselves can live in an external manager such as OpenBao or HashiCorp Vault.</p></div>
+      <div class="card"><h3>Identity and access</h3><p>LDAP-backed sign-in (lldap included, or your own AD/LDAP), optional TOTP, a break-glass account, and RBAC with Admin, Operator and Auditor roles plus custom roles and per-node scope.</p></div>
+      <div class="card"><h3>Immutable audit trail</h3><p>Every sign-in, change, shell, restart, playbook and AI action plan is attributed and chained by hash, so tampering is detectable.</p></div>
+      <div class="card"><h3>Human in the loop</h3><p>The AI Copilot is read-only by default, never sees vault secrets and never runs destructive actions on its own. Plans wait for approval from someone with the right permission.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <span class="kicker">Quick start</span>
+    <h2>From clone to console in a few commands.</h2>
+    <p class="sub">You need Docker with Compose v2, <code>make</code> and a Linux host. The stack runs a TLS proxy, the app, TimescaleDB and an LDAP directory.</p>
+<pre><span class="c"># from a clone of the repository</span>
+<span class="p">$</span> git clone https://github.com/lordraw77/janus-ops && cd janus-ops
+<span class="p">$</span> make env          <span class="c"># creates deploy/.env with random secrets</span>
+<span class="p">$</span> make docker/run   <span class="c"># builds the image and starts the stack</span>
+
+<span class="c"># then open https://localhost/ and sign in as janus-admin</span>
+<span class="c"># (the initial password is JANUS_ADMIN_PASSWORD in deploy/.env)</span></pre>
+    <p class="sub" style="margin-top:20px">Prefer the published image? See the <a href="https://hub.docker.com/r/lordraw/janus-ops">Docker Hub overview</a>, or read the <a href="https://github.com/lordraw77/janus-ops#quick-start">full guide</a> on GitHub.</p>
+  </div>
+</section>
+
+<section id="status" class="alt">
+  <div class="wrap">
+    <span class="kicker">Project status</span>
+    <h2>Pre-alpha, moving fast, in the open.</h2>
+    <p class="sub">Janus-Ops is under active development and not yet recommended for production use. The roadmap is public, with acceptance criteria and architecture decisions in the repository.</p>
+    <div class="status">
+      <div class="item"><span class="pill done">DONE</span><span>Inventory and vault, SSH bastion, agent and NOC dashboard, alerting, Docker, Proxmox VE, Ansible, AI Copilot</span></div>
+      <div class="item"><span class="pill done">DONE</span><span>Commands through the agent, GitOps (private repositories included), SNMP, visual workflows, signed agent updates, external secret manager</span></div>
+      <div class="item"><span class="pill now">NOW</span><span>Windows agent (running in preview)</span></div>
+      <div class="item"><span class="pill next">NEXT</span><span>Remote desktop in the browser, OIDC sign-in, SNMP templates from the UI</span></div>
+    </div>
+    <p class="sub" style="margin-top:24px"><a href="https://github.com/lordraw77/janus-ops/blob/main/docs/PLAN.md">Read the plan and roadmap →</a></p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>© Janus-Ops contributors · Licensed under the <a href="https://github.com/lordraw77/janus-ops/blob/main/LICENSE">Apache License 2.0</a></div>
+    <ul>
+      <li><a href="https://github.com/lordraw77/janus-ops">GitHub</a></li>
+      <li><a href="https://hub.docker.com/r/lordraw/janus-ops">Docker Hub</a></li>
+      <li><a href="https://github.com/lordraw77/janus-ops/issues">Issues</a></li>
+      <li><a href="https://github.com/lordraw77/janus-ops/blob/main/docs/PLAN.md">Roadmap</a></li>
+    </ul>
+  </div>
+</footer>
+</body>
+</html>
