@@ -62,4 +62,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS metric_series_name_idx")
     for name, *_ in reversed(VIEWS):
-        op.execute(f"DROP MATERIALIZED VIEW IF EXISTS {name}")
+        # TimescaleDB's own policy job can touch the aggregate while it is dropped and fail the
+        # drop with "tuple concurrently deleted" (internal_error): try again, a few times.
+        op.execute(
+            "DO $$ BEGIN FOR i IN 1..10 LOOP BEGIN"
+            f" DROP MATERIALIZED VIEW IF EXISTS {name}; EXIT;"
+            " EXCEPTION WHEN internal_error THEN PERFORM pg_sleep(0.5); END; END LOOP; END $$"
+        )
