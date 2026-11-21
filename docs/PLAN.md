@@ -176,6 +176,26 @@
 > content in KV v2 (`openbao-kv`), `janus-ops secrets status|migrate|prune`, readiness that checks the secret
 > manager. ADR-011 implemented and tested against real OpenBao 2.4.1 and Vault 1.20.
 >
+> **v0.36** — **release 0.10.0** (migrations `0032`–`0038`):
+> - **Windows agent** (FR-85, now built): Windows service `JanusAgent` with recovery actions, metrics (CPU, memory, swap,
+>   file systems, network without filter interfaces, uptime, processes), one-time enrollment and a PowerShell install
+>   one-liner that pins the server CA (`POST /agents/{id}/install-command`, `/agent/install.ps1`). Shell, signed update,
+>   listening ports and service discovery on Windows are not done.
+> - **Workflows**: runs interrupted by a restart resume between steps (a run with an `exec` step in flight is marked failed).
+>   **GitOps**: private https repositories with a vault `git_token` credential.
+> - **AI providers and fallback routes** (ported from AIFRED, `docs/AI_PROVIDERS.md`, migration `0037`): providers with
+>   presets, several sealed keys each, models read or added by name and tested, routes with a failover chain (quota, rate limit,
+>   outage, timeout, bad key, missing model), health and usage, `janus-ops ai-import-providers`.
+> - **MCP tools for the Copilot** (`docs/MCP_PLAN.md`, migrations `0033`, `0034`): `lordraw/linux-mcp` and `lordraw/proxmox-mcp`
+>   started with `docker run -i`, configured from the inventory, read tools always, operational tools under `ai.operate`
+>   plus a global switch and per-environment *action plan only*; every call recorded (`ai_step`) and audited.
+> - **Operate** (migrations `0035`, `0036`): a chat that carries out instructions on up to ten servers (several Linux hosts
+>   and Proxmox nodes in one run), model or route chosen per chat, archive/rename/delete.
+> - **Archive and retention** (migration `0038`): archive after X days, delete after Y (1 and 30), keep flag, search including
+>   the recorded output, bulk delete; permissions `archive.read`, `archive.manage`.
+> - **Console**: Settings in tabs, grouped collapsible menu, sortable tables with host and group filters.
+> - Release 0.10.0: agent signatures renewed (the agent bytes changed), image published on Docker Hub.
+>
 > **v0.35** — **continuous aggregates and the 500-node load test** (NFR-05): see the F1 row of the metrics and `docs/SIZING.md`. Release **0.7.0** published (the live stack runs on it): migration `0025` on the real database materialised the history of 16M points in about 2 minutes in the background; charts of 1 h to 90 d answer in 50-100 ms.
 > **v0.34** — **Ctrl+K palette (pages, nodes, SSH, run a check, ask the AI); undo/redo in the workflow editor (Ctrl+Z, Ctrl+Shift+Z or Y; typing in a field is one step; 100 steps; `lib/history.ts`, 8 tests) and a browser test of a notification step; Copilot and Ansible tried in the browser on the live stack**: the Copilot with the real NVIDIA model, Ansible with a real dry run on a node (see FR-05 and the F7/F6 rows). Release **0.6.0** (graph workflow editor) published on Docker Hub; the live stack runs on the published image.
 > **v0.33** — **graph workflow editor**: nodes and branches on a canvas (React Flow), drag to reorder and connect, side panel,
@@ -294,7 +314,7 @@ Points of the specifications that must be corrected, clarified or scaled down be
 | FR-82 | SNMP (v2c/v3) for NAS, switches, UPS | SHOULD | F8 |
 | FR-83 | PTY and remote commands through the agent tunnel | SHOULD | F8 |
 | FR-84 | Signed air-gapped agent auto-update | SHOULD | F8 |
-| FR-85 | Windows agent | WON'T (MVP) | F9+ |
+| FR-85 | Windows agent | SHOULD — service, metrics and install built in 0.10; shell, update and discovery pending | F8+ |
 | FR-86 | Secrets and keys in an external secret manager (OpenBao, HashiCorp Vault or similar): master key (KEK) and/or secret content outside Janus-Ops. **AMEND Product Owner (v0.9)**: from WON'T to SHOULD, at the user's request; design in ADR-011. **Done (v0.28, option a of ADR-011)**: `JANUS_SECRET_BACKEND=openbao-transit`, the master key in the Transit engine of OpenBao/Vault (AppRole, minimal encrypt/decrypt policy, token renewal, DEK cache `JANUS_BAO_DEK_CACHE_S`), `janus-ops secrets status` and `secrets migrate --to ...` (DEK re-wrap only, idempotent, reversible, all or nothing, audit), readiness that checks the secret manager, TOTP included. Tested against a real OpenBao 2.4.1 and a real HashiCorp Vault 1.20 (Transit, key rotation without re-wrap, KV v2). **Option (b) `openbao-kv`** done: the content of each secret lives in KV v2, Postgres keeps only a reference (`kv1:` + mount, path and pinned version), the path derives from the record id and a reference pointing elsewhere is refused; `secrets migrate --to openbao-kv` and back, deleting a credential removes its content from KV, `secrets prune` for orphans (deleted GitOps stacks, workflows and channels do not do it by themselves). TOTP stays on the Transit or local key. **OpenBao in the stack** (`deploy/compose.openbao.yaml`, `scripts/openbao-setup.sh`, `docs/OPENBAO.md`): raft storage, TLS with its own CA, **auto-unseal with a static key** on restart (tested: restart of the container and of the whole stack), AppRole and minimal policy; the live stack has run on it since 2026-11-17 with `openbao-transit` (18 secrets migrated). A defect found in the real migration (channel secrets are sealed under `channel-<id>`) is fixed and covered by tests. **Not yet:** "by reference" credentials pointing to secrets of other teams (read-only) | SHOULD | F8+ |
 | FR-87 | Multi-tenancy, server HA | WON'T (MVP) | — |
 

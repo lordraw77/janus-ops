@@ -38,7 +38,7 @@
 <header class="hero" id="top">
   <div class="wrap">
     <div>
-      <span class="eyebrow">Open source · Apache-2.0 · Pre-alpha</span>
+      <span class="eyebrow">Open source · Apache-2.0 · Pre-1.0 (0.10)</span>
       <h1>One portal for your whole <em>infrastructure</em> lifecycle.</h1>
       <p class="lead">Monitoring, containers, virtualization, SSH, automation and AI troubleshooting in a single pane of glass. One inventory at the core, decoupled modules around it, and an agent that only ever connects <strong>out</strong>.</p>
       <div class="cta">
@@ -126,9 +126,15 @@
       </article>
       <article class="card">
         <div class="ico ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg></div>
-        <h3>AI Copilot</h3>
-        <p>Root-cause analysis on a failing service from logs, metrics and the audit trail; a second opinion from another model; contextual IaC generation. It proposes action plans, and only a person can approve them.</p>
-        <span class="tag">Your model endpoint</span>
+        <h3>AI Copilot &amp; Operate</h3>
+        <p>Root-cause analysis that can look at the node itself through MCP tools, a second opinion from another model, contextual IaC generation, and a chat to carry out an instruction on the servers you pick. Providers and keys of your choice, with fallback routes when one fails. Plans wait for approval; changes need a dedicated permission and are audited call by call.</p>
+        <span class="tag">Any OpenAI-compatible provider</span>
+      </article>
+      <article class="card">
+        <div class="ico warn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg></div>
+        <h3>Archive &amp; retention</h3>
+        <p>Recorded SSH sessions and Operate chats move to a searchable archive after a number of days and are deleted after another. Search even inside the recorded output, filter by host or group, replay, and mark what must never be deleted.</p>
+        <span class="tag">You set the days</span>
       </article>
     </div>
   </div>
@@ -142,7 +148,7 @@
     <div class="flow">
       <div class="box">
         <h3>your node</h3>
-        <ul><li>janus-agent, static binary</li><li>Linux amd64 · arm64 · arm (Raspberry Pi)</li><li>Windows service (preview)</li><li>24 h disk buffer while offline</li></ul>
+        <ul><li>janus-agent, static binary</li><li>Linux amd64 · arm64 · arm (Raspberry Pi)</li><li>Windows service, installed with one PowerShell line</li><li>24 h disk buffer while offline</li></ul>
       </div>
       <div class="arrow"><svg viewBox="0 0 70 24" aria-hidden="true"><path d="M2 12h62m-8-8 8 8-8 8"/></svg>outbound only<br>TLS · port 443</div>
       <div class="box">
@@ -190,13 +196,13 @@
 <section id="status" class="alt">
   <div class="wrap">
     <span class="kicker">Project status</span>
-    <h2>Pre-alpha, moving fast, in the open.</h2>
+    <h2>Pre-1.0, moving fast, in the open.</h2>
     <p class="sub">Janus-Ops is under active development and not yet recommended for production use. The roadmap is public, with acceptance criteria and architecture decisions in the repository.</p>
     <div class="status">
       <div class="item"><span class="pill done">DONE</span><span>Inventory and vault, SSH bastion, agent and NOC dashboard, alerting, Docker, Proxmox VE, Ansible, AI Copilot</span></div>
       <div class="item"><span class="pill done">DONE</span><span>Commands through the agent, GitOps (private repositories included), SNMP, visual workflows, signed agent updates, external secret manager</span></div>
-      <div class="item"><span class="pill now">NOW</span><span>Windows agent (running in preview)</span></div>
-      <div class="item"><span class="pill next">NEXT</span><span>Remote desktop in the browser, OIDC sign-in, SNMP templates from the UI</span></div>
+      <div class="item"><span class="pill done">DONE</span><span>Windows agent, AI providers with fallback routes, MCP tools for the Copilot, Operate chat, archive with retention (release 0.10)</span></div>
+      <div class="item"><span class="pill next">NEXT</span><span>Remote desktop in the browser, OIDC sign-in, SNMP templates from the UI, Windows shell and signed updates</span></div>
     </div>
     <p class="sub" style="margin-top:24px"><a href="https://github.com/lordraw77/janus-ops/blob/main/docs/PLAN.md">Read the plan and roadmap →</a></p>
   </div>

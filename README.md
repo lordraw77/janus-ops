@@ -9,7 +9,7 @@ Monitoring · Containers · Virtualization · SSH · Automation · AI troublesho
 
 **[Website](https://lordraw77.github.io/janus-ops/)** · **[Docker Hub](https://hub.docker.com/r/lordraw/janus-ops)** · **[Roadmap](docs/PLAN.md)**
 
-![Status](https://img.shields.io/badge/status-pre--alpha%200.1.0-F59E0B?style=flat-square)
+![Status](https://img.shields.io/badge/status-pre--1.0%20(0.10)-F59E0B?style=flat-square)
 ![Backend](https://img.shields.io/badge/backend-FastAPI%20%C2%B7%20Python%203.12-10B981?style=flat-square)
 ![Frontend](https://img.shields.io/badge/frontend-Next.js%20%C2%B7%20TypeScript-22D3EE?style=flat-square)
 ![Agent](https://img.shields.io/badge/agent-Go%20static%20binary-818CF8?style=flat-square)
@@ -42,11 +42,14 @@ It is designed from day one for **segmented, air-gapped and proxy-restricted net
 | 🛡️ **Virtualization** | Proxmox VE clusters: quorum, nodes, storage, VM/LXC lifecycle, snapshots, migration, console, backup & replication audit | Proxmox VE UI |
 | 🔑 **SSH Bastion** | Web terminal (xterm.js), credential vault, SFTP browser, multi-tab & broadcast, snippet library, transparent ProxyJump / agent tunnel | MobaXterm / Termius |
 | ⚡ **Automation Hub** | Ansible playbooks with dynamic inventory from the DB, surveys, live output; visual event-driven workflow builder | AWX / n8n |
-| 🤖 **Janus AI Copilot** | One-click RCA on failing services (logs + metrics + audit trail), contextual IaC generation, **human-approved** action plans only — powered by **self-hosted** models | — |
+| 🤖 **Janus AI Copilot** | One-click RCA on failing services (logs + metrics + audit trail), contextual IaC generation, a second opinion, **human-approved** action plans. Looks at the node itself through MCP tools; any OpenAI-compatible provider, with **fallback routes** | — |
+| 💬 **Operate** | A chat in which you pick servers and say what to do (“change the NTP server”): the AI looks, changes the minimum, verifies and reports, with every call listed and audited | — |
+| 🗄️ **Archive & retention** | Recorded SSH sessions and Operate chats move to a searchable archive after X days and are deleted after Y (defaults 1 and 30), unless marked *keep* | — |
 
 Cross-cutting: unified inventory, encrypted secret vault, LDAP-backed login with TOTP and RBAC
 (Admin / Operator / Auditor), immutable audit log with optional terminal session recording,
-global command palette (`Ctrl+K`).
+global command palette (`Ctrl+K`), a grouped and collapsible menu, and tables you can sort and
+filter by host and group.
 
 ## Quick start
 
@@ -190,6 +193,43 @@ The **Dashboard** shows a host-health hexagon, a card per node (CPU, RAM, disk, 
 and the items needing attention (agent offline, file system ≥ 85 %, memory ≥ 90 %, failed units).
 Thresholds are fixed until the alerting engine (F3). Each node page has charts over 1 h – 7 days.
 Protocol: [proto/agent-protocol.md](proto/agent-protocol.md).
+
+### AI providers, routes and Operate
+
+**Settings → AI providers** holds every provider you have a key for (Groq, OpenRouter, NVIDIA, Cloudflare,
+Mistral, Cerebras, Hugging Face, Gemini, Ollama, a local engine, any OpenAI-compatible endpoint). A provider can
+have several keys (sealed in the vault), its models are read from it (or added by name) and **Test** checks that a
+model answers and calls tools. **Routes and fallback** are ordered lists of models: the first one that works answers,
+and when it fails (limit reached, outage, timeout, bad key, model gone) the next one does, while the failing one
+rests. `default` serves the Copilot, Operate and the code generator, `review` the second opinion. Health and usage
+(calls, fallbacks, tokens, latency) are on the same page. Until a route has a model, the single endpoint of
+`JANUS_AI_*` keeps answering. `janus-ops ai-import-providers --env-file FILE` creates the providers from API keys you
+already have. Details: [docs/AI_PROVIDERS.md](docs/AI_PROVIDERS.md).
+
+**Copilot tools (MCP).** With `deploy/compose.mcp.yaml` the backend starts the published `lordraw/linux-mcp` and
+`lordraw/proxmox-mcp` images with `docker run -i` (stdio) on the host's Docker, configured from the inventory (SSH
+nodes and their credentials, Proxmox nodes), and the Copilot can look at the node while it diagnoses. Read tools are
+always offered; operational tools (restart a service, power a VM, run a command) need the new permission
+**`ai.operate`** (the admin role has it), the global switch in **Settings → AI models & tools**, and an environment that
+is not set to *action plan only*. Every call is recorded and audited. Plan and safeguards: [docs/MCP_PLAN.md](docs/MCP_PLAN.md).
+
+**Operate** is a page of its own: pick up to ten servers, choose a route or a model, and write what you want done. The
+assistant looks first, changes the minimum, checks the result and reports per server; it asks before anything that could
+cut access or lose data. Chats can be renamed, archived and deleted.
+
+### Archive and retention
+
+Recorded SSH sessions and Operate chats are looked after in two steps, counted in days from when they ended: after **X**
+days (default 1) they move to the **Archive** page, after **Y** days (default 30) they are deleted, recording file
+included. Both are set on that page (`archive.manage`). The Archive lists the two kinds on separate tabs with search (the
+recorded output too), filters by host, group, keep and date, sortable columns, replay or view, and bulk delete or
+**keep** (an item marked *keep* is never deleted). Viewing needs `archive.read`.
+
+### Windows agent
+
+`janus-agent` also runs as a **Windows service** (`JanusAgent`, with recovery actions): metrics (CPU, memory, file
+systems, network, uptime, processes), the same outbound-only connection and one-time enrollment. On the node page, **Install
+on Windows** gives a PowerShell one-liner that pins the server's CA. Shell and signed updates are Linux-only for now.
 
 ### Alerting
 
@@ -340,8 +380,8 @@ Implementation plan, ADRs and roadmap: [docs/PLAN.md](docs/PLAN.md)
 | Integrations | AsyncSSH, aiodocker / Docker Engine API, Proxmox VE REST API, pysnmp, ansible-runner |
 | Frontend | Next.js (App Router, static export served by the API), TypeScript, Tailwind CSS v4; later shadcn/ui, TanStack Query, Zustand, ECharts, Monaco, xterm.js, React Flow |
 | Packaging | One image `lordraw/janus-ops` (amd64/arm64), Docker Compose with Caddy for TLS |
-| Agent | Go, `CGO_ENABLED=0` static builds for `linux/amd64`, `linux/arm64` (Windows later) |
-| AI | OpenAI-compatible API to self-hosted models (Ollama / vLLM / SGLang), read-only tool calling |
+| Agent | Go, `CGO_ENABLED=0` static builds for `linux/amd64`, `linux/arm64`, `linux/arm`, and a Windows service (`windows/amd64`) |
+| AI | OpenAI-compatible providers (Groq, OpenRouter, NVIDIA, Cloudflare, Mistral, Cerebras, Ollama, vLLM, …) with keys in the vault and fallback routes; MCP tool servers (`linux-mcp`, `proxmox-mcp`) run with `docker run -i` |
 
 ## Design system — *Obsidian Graphite NOC*
 
@@ -369,7 +409,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 
 ## Project status & roadmap
 
-> 🚧 **Pre-1.0 (0.9.x).** Available today: the single `lordraw/janus-ops` image, LDAP
+> 🚧 **Pre-1.0 (0.10.x).** Available today: the single `lordraw/janus-ops` image, LDAP
 > sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
 > audit log, inventory and credential vault (phase F0), **web SSH bastion** with host key
 > pinning, session recording, SFTP browser, command broadcast and snippets (phase F1),
@@ -378,7 +418,9 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 > agent or SSH** (phase F4), **Proxmox VE** (F5), **Ansible** (F6), **AI Copilot** (F7). Phase F8 is in
 > progress: **commands executed through the agent**, including approved Copilot actions, **GitOps**
 > for Compose stacks from Git (API and web UI) and **SNMP v2c/v3 checks** for NAS, switches and
-> UPS. Visual workflow editor and resume of interrupted runs after a restart are done.
+> UPS. Visual workflow editor and resume of interrupted runs after a restart are done. Release 0.10 adds the
+> **Windows agent**, **AI providers with fallback routes**, **MCP tools** for the Copilot, the **Operate** chat and the
+> **archive with retention**.
 
 | Phase | Scope |
 |---|---|
@@ -390,8 +432,8 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 | **F5** Proxmox | Cluster overview, VM/LXC lifecycle, snapshots, backup audit, console |
 | **F6** Ansible | Dynamic inventory, playbook catalog, live runs |
 | **F7** AI Copilot | RCA on alerts, action plans with human approval |
-| **F8** In progress | Commands via agent and approved actions, GitOps with signed webhooks, SNMP v2c/v3 checks (done); visual workflows, resume after restart, GitOps web UI, private Git repositories over https with a vault token (done); Agent PTY and Windows agent (next) |
-| **F8+** | Agent PTY & auto-update, Windows agent, external secret manager (OpenBao / HashiCorp Vault) |
+| **F8** In progress | Commands via agent and approved actions, GitOps with signed webhooks, SNMP v2c/v3 checks (done); visual workflows, resume after restart, GitOps web UI, private Git repositories over https with a vault token (done); Windows agent (service, metrics, PowerShell install), AI providers with fallback routes, MCP tools, Operate chat, archive and retention (done in 0.10) |
+| **F8+** | Agent PTY & auto-update (done), external secret manager (done); next: remote desktop (RDP), Windows shell/updates, OIDC, a VM-to-hypervisor link for the Copilot |
 
 Details, acceptance criteria and open decisions: [docs/PLAN.md](docs/PLAN.md).
 

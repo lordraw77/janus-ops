@@ -35,14 +35,16 @@ self-hosted TLS, and a Go agent that only opens outbound connections.
 | Control plane, UI, audit | Sign-in with LDAP / Active Directory, roles and permissions, optional TOTP, break-glass account, hash-chained audit log |
 | Inventory and vault | Nodes, tags, groups, environments, per-role node scope; encrypted credential vault |
 | SSH bastion | Web terminal, jump host, host-key pinning, session recording and replay, SFTP browser, broadcast, snippets |
-| `janus-agent` | Outbound-only telemetry agent, SSH bootstrap, optional commands, shell and Docker access under a local policy, signed self-update with rollback |
+| `janus-agent` | Outbound-only telemetry agent (Linux, and a Windows service), SSH bootstrap or a PowerShell one-liner, optional commands, shell and Docker access under a local policy, signed self-update with rollback (Linux) |
 | Monitoring | Checks (agent, metrics, ports, HTTP, systemd, SNMP, FRITZ!Box), hysteresis, acknowledge, downtimes, dependencies, notifications (mail, Telegram, webhook, Discord, Slack, ntfy) |
 | Containers | Docker hosts and Compose stacks through the agent or SSH: logs, stats, actions, shell |
 | Proxmox VE | Clusters, VM/LXC lifecycle, snapshots, backup audit, consoles |
 | Ansible | Playbook catalogue (Git, upload, editor, network mount, SFTP), surveys, live runs, history |
 | Workflows | Graph editor (drag steps, connect branches), manual / interval / alert / signed-webhook triggers, conditional branches, approvals, run status drawn on the flow |
 | GitOps | Compose stacks deployed from Git with a signed webhook |
-| AI Copilot | Diagnosis of problems on your own OpenAI-compatible endpoint, action plans you approve |
+| AI Copilot | Diagnosis of problems on any OpenAI-compatible provider, with fallback routes and optional MCP tools that look at the node; action plans you approve |
+| Operate | A chat to carry out an instruction on servers you pick (looks, changes the minimum, verifies, reports); every call audited |
+| Archive | Recorded SSH sessions and Operate chats move to a searchable archive after X days and are deleted after Y (1 and 30 by default) |
 | Secret manager | Optional OpenBao / HashiCorp Vault for the master key (Transit) or the secrets themselves (KV) |
 
 ## What is in this image
@@ -105,7 +107,7 @@ Check readiness:
 
 ```bash
 curl -k https://localhost/api/v1/ready
-# {"status":"ok","version":"0.9.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
+# {"status":"ok","version":"0.10.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
 ```
 
 Optional overrides, used with `-f compose.yaml -f <file>` (all in the same `deploy/` folder):
@@ -195,6 +197,43 @@ installation (`allow_exec`, `allow_pty`, `allow_docker`); the server cannot chan
 agent checks the signature, refuses a version that is not newer, and rolls back automatically if the
 new binary cannot connect. Roll an update out from **Inventory → Update agents**.
 
+### AI providers, routes and Operate
+
+**Settings → AI providers**: add every provider you have a key for (Groq, OpenRouter, NVIDIA, Cloudflare, Mistral, Cerebras,
+Hugging Face, Gemini, Ollama, a local engine, anything OpenAI-compatible). Several keys per provider, sealed in the vault.
+**Routes and fallback** are ordered lists of models: a request goes to the first that works and falls over to the next on a
+limit, outage, timeout, bad key or missing model; health and usage are on the same page. The `JANUS_AI_*` variables keep
+working until a route has a model. `janus-ops ai-import-providers --env-file FILE` creates providers from keys you already
+have (`docker exec -i janus-ops janus-ops ai-import-providers --env-file - < keys.env`).
+
+### MCP tools for the Copilot (optional)
+
+The Copilot can look at a node (and, with the `ai.operate` permission, act on it) through `lordraw/linux-mcp` and
+`lordraw/proxmox-mcp`, started with `docker run -i` on the host's Docker and configured from the inventory. Add the
+overlay, which mounts the Docker socket into the backend (**root-equivalent on the host**: use a socket proxy if that is not
+acceptable):
+
+```bash
+JANUS_DOCKER_GID=$(stat -c %g /var/run/docker.sock) \
+docker compose -f compose.yaml -f compose.mcp.yaml up -d
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `JANUS_AI_MCP_ENABLED` | `false` (`true` in the overlay) | Switch on the MCP tools; also set in Settings → AI models & tools |
+| `JANUS_AI_MCP_NETWORK` | unset (`self` in the overlay) | Network of the MCP containers: `self` = the backend's own, or a Docker network name |
+| `JANUS_AI_MCP_DOCKER`, `JANUS_AI_MCP_DOCKER_HOST` | `docker`, unset | Docker CLI and socket to use |
+| `JANUS_AI_MCP_LINUX_IMAGE`, `JANUS_AI_MCP_PROXMOX_IMAGE` | `lordraw/linux-mcp:latest`, `lordraw/proxmox-mcp:latest` | Images to run |
+
+The **Operate** page (permission `ai.operate`) is a chat: pick up to ten servers and say what to do. The saved settings
+can switch operational tools off for everyone, or make chosen environments *action plan only*.
+
+### Archive and retention
+
+Recorded SSH sessions and Operate chats move to the **Archive** page after X days and are deleted after Y (days from when
+they ended; defaults 1 and 30, set on that page). The archive is searchable (recorded output too), filterable by host and
+group, sortable, and items can be marked *keep* so that nothing deletes them. Permissions: `archive.read`, `archive.manage`.
+
 ### Secret manager (optional)
 
 By default the master key is `JANUS_SECRET_KEY`. Set `JANUS_SECRET_BACKEND` to keep it in
@@ -224,12 +263,12 @@ Sign in as `breakglass`. Every use is audited and logged as a warning.
 # 1. Apply the schema (needs PostgreSQL 16 with the TimescaleDB extension)
 docker run --rm \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.9.0 migrate
+  lordraw/janus-ops:0.10.0 migrate
 
 # 2. Start the server
 docker run -d --name janus-ops -p 127.0.0.1:8000:8000 \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.9.0
+  lordraw/janus-ops:0.10.0
 ```
 
 ## Configuration
@@ -285,7 +324,7 @@ Variables used by the Compose stack (`.env`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.9.0` | Image and tag to run |
+| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.10.0` | Image and tag to run |
 | `JANUS_DOMAIN` | `localhost` | Host name served by Caddy |
 | `JANUS_TLS` | `internal` | `internal` (local CA, works offline) or an e-mail for ACME |
 | `JANUS_HTTP_PORT` / `JANUS_HTTPS_PORT` | `80` / `443` | Host ports of the proxy |
@@ -332,7 +371,7 @@ Variables used by the Compose stack (`.env`):
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.9.0`) | Immutable release, built from git tag `vX.Y.Z` |
+| `X.Y.Z` (e.g. `0.10.0`) | Immutable release, built from git tag `vX.Y.Z` |
 | `X.Y` (e.g. `0.5`) | Latest patch release of that minor version |
 | `latest` | Most recent release |
 
