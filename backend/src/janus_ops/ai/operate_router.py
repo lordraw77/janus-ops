@@ -34,7 +34,10 @@ class OperableNode(BaseModel):
 
 
 UPDATE_TITLE = "UPDATE ai_operate_session SET title = :v WHERE id = :id"
-UPDATE_ARCHIVED = "UPDATE ai_operate_session SET archived = :v WHERE id = :id"
+UPDATE_ARCHIVED = (
+    "UPDATE ai_operate_session SET archived = :v,"
+    " archived_at = CASE WHEN :v THEN coalesce(archived_at, now()) END WHERE id = :id"
+)
 UPDATE_PROVIDER = "UPDATE ai_operate_session SET provider = :v WHERE id = :id"
 UPDATE_MODEL = "UPDATE ai_operate_session SET model = :v WHERE id = :id"
 UPDATE_SPEC = "UPDATE ai_operate_session SET spec = :v WHERE id = :id"

@@ -11,13 +11,14 @@ from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from janus_ops import __version__, health
+from janus_ops import __version__, health, retention
 from janus_ops.admin import audit_log, roles, users
 from janus_ops.agents import gateway, manual, telemetry
 from janus_ops.agents import router as agents
 from janus_ops.agents.hub import AgentHub
 from janus_ops.ai.router import router as ai_copilot
 from janus_ops.ansible.router import router as ansible
+from janus_ops.archive import router as archive_router
 from janus_ops.auth.ldap import DirectoryBackend, LdapDirectory
 from janus_ops.auth.router import router as auth_router
 from janus_ops.auth.service import AuthService
@@ -119,7 +120,10 @@ def create_app(
             engine, app.state.agents, app.state.proxmox, app.state.vault
         )
         app.state.dispatcher = notify.Dispatcher(engine, app.state.vault)
-        tasks = [asyncio.create_task(sftp.reaper(app.state.sftp, engine))]
+        tasks = [
+            asyncio.create_task(sftp.reaper(app.state.sftp, engine)),
+            asyncio.create_task(retention.loop(engine, settings.recordings_dir)),
+        ]
         if settings.monitoring_enabled:
             tasks.append(asyncio.create_task(app.state.check_engine.run()))
             tasks.append(asyncio.create_task(app.state.dispatcher.run()))
@@ -206,6 +210,7 @@ def create_app(
         ansible,
         ai_copilot,
         gitops,
+        archive_router,
     ):
         app.include_router(module_router, prefix=API_PREFIX)
     for router in extra_routers:

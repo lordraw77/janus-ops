@@ -429,9 +429,10 @@ async def list_sessions(
                     "SELECT t.id, u.username, t.node_id, t.node_name, t.target, t.remote_user,"
                     " t.started_at, t.ended_at, t.end_reason, t.bytes_out FROM terminal_session t"
                     " LEFT JOIN app_user u ON u.id = t.user_id"
-                    " WHERE t.user_id = CAST(:me AS uuid) OR (CAST(:all AS boolean) AND"
+                    " WHERE t.archived_at IS NULL AND (t.user_id = CAST(:me AS uuid)"
+                    " OR (CAST(:all AS boolean) AND"
                     " (t.node_id IS NULL AND CAST(:free AS boolean) OR EXISTS"
-                    " (SELECT 1 FROM node n WHERE n.id = t.node_id AND <SCOPE>)))"
+                    " (SELECT 1 FROM node n WHERE n.id = t.node_id AND <SCOPE>))))"
                     " ORDER BY t.started_at DESC LIMIT :limit",
                     scope_sql,
                 )

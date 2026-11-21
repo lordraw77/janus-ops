@@ -329,3 +329,28 @@ def test_a_billed_provider_previews_as_disabled() -> None:
     data = {"type": "gemini", "slug": "gemini", "enabled": False}
     preview = asyncio.run(service.preview(data))
     assert preview.enabled is False and preview.slug == "gemini"
+
+
+def test_recording_files_are_removed_and_searched(tmp_path: Any) -> None:
+    import json
+
+    from janus_ops import retention
+    from janus_ops.archive import _content_matches
+
+    sid = "11111111-1111-1111-1111-111111111111"
+    cast = tmp_path / f"{sid}.cast"
+    header = {"version": 2, "width": 80, "height": 24}
+    cast.write_text(
+        json.dumps(header) + "\n"
+        + json.dumps([0.1, "o", "\x1b[32mdeploy fin"]) + "\n"
+        + json.dumps([0.2, "o", "ished OK\r\n"]) + "\n"
+        + json.dumps([0.3, "i", "secret-typed"]) + "\n"
+    )  # fmt: skip
+    assert _content_matches(cast, "Deploy Finished")  # across two chunks, case-insensitive
+    assert not _content_matches(cast, "secret-typed")  # keystrokes are never recorded
+    assert (
+        retention.delete_recording_files(tmp_path, [sid, "22222222-2222-2222-2222-222222222222"])
+        == 1
+    )
+    assert not cast.exists()
+    assert retention.delete_recording_files(None, [sid]) == 0

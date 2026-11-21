@@ -43,6 +43,7 @@ EXPECTED_TABLES = {
     "ai_route_entry",
     "ai_health",
     "ai_usage",
+    "retention_config",
     "gitops_stack",
     "gitops_run",
     "snmp_oid",
@@ -152,6 +153,7 @@ def test_builtin_roles_seeded(migrated: None) -> None:
     ]
     perms = run_sql("SELECT role, permission FROM role_permission ORDER BY 1, 2")
     assert perms == [
+        ("auditor", "archive.read"),
         ("auditor", "audit.read"),
         ("auditor", "inventory.read"),
         ("auditor", "users.read"),
