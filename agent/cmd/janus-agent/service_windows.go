@@ -25,14 +25,24 @@ const (
 func init() {
 	extraCommands["install"] = install
 	extraCommands["uninstall"] = uninstall
-	// started by the service control manager: there is no console, the manager wants a handler
-	if ok, err := svc.IsWindowsService(); err == nil && ok {
-		path := config.DefaultPath
-		if len(os.Args) > 2 && os.Args[1] == "run" && os.Args[2] == "-config" && len(os.Args) > 3 {
-			path = os.Args[3]
-		}
-		os.Exit(runService(path))
+	serviceHook = serviceMain
+}
+
+// serviceMain runs the agent as a service when the service control manager started this process.
+// It reports false for a console run. It is called from main, not from init: the dispatcher must
+// not run while packages are still initialising.
+func serviceMain() (int, bool) {
+	ok, err := svc.IsWindowsService()
+	if err != nil || !ok {
+		return 0, false
 	}
+	path := config.DefaultPath
+	for i, a := range os.Args {
+		if a == "-config" && i+1 < len(os.Args) {
+			path = os.Args[i+1]
+		}
+	}
+	return runService(path), true
 }
 
 type handler struct{ path string }
@@ -85,7 +95,9 @@ func logToFile(path string) {
 
 func runService(path string) int {
 	logToFile(path)
+	fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), "service starting, config", path)
 	if err := svc.Run(serviceName, handler{path: path}); err != nil {
+		fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), "service dispatcher:", err)
 		return 1
 	}
 	return 0

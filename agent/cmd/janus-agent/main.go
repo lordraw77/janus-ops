@@ -34,7 +34,16 @@ func usage() {
 `)
 }
 
+// serviceHook is set on Windows: it runs the agent under the service control manager when that
+// started this process.
+var serviceHook func() (int, bool)
+
 func main() {
+	if serviceHook != nil {
+		if code, ok := serviceHook(); ok {
+			os.Exit(code)
+		}
+	}
 	cmd := "run"
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] != "" && args[0][0] != '-' {
