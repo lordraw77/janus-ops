@@ -161,6 +161,9 @@ const (
 	ifTypeLoopback = 24
 	ifTypeTunnel   = 131
 	ifOperUp       = 1
+	// InterfaceAndOperStatusFlags: the bit of the filter drivers bound to a real adapter (QoS Packet
+	// Scheduler, WFP, Npcap): they repeat the adapter's counters under another name
+	ifFlagFilter = 0x02
 )
 
 func (c *Collector) netMetrics(p *points, elapsed float64, first bool) {
@@ -173,11 +176,13 @@ func (c *Collector) netMetrics(p *points, elapsed float64, first bool) {
 	now := map[string]netCounters{}
 	for i := range rows {
 		r := &rows[i]
-		if r.Type == ifTypeLoopback || r.Type == ifTypeTunnel || r.OperStatus != ifOperUp {
+		if r.Type == ifTypeLoopback || r.Type == ifTypeTunnel || r.OperStatus != ifOperUp ||
+			r.InterfaceAndOperStatusFlags&ifFlagFilter != 0 {
 			continue
 		}
 		name := windows.UTF16ToString(r.Alias[:])
-		if name == "" {
+		// Wi-Fi Direct and hosted-network adapters: always idle, only noise on a dashboard
+		if name == "" || strings.HasPrefix(name, "Local Area Connection*") {
 			continue
 		}
 		now[name] = netCounters{rx: r.InOctets, tx: r.OutOctets}
