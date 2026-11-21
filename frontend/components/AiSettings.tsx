@@ -3,7 +3,7 @@
 import { type FormEvent, useState } from "react";
 
 import { Alert, Button, Card, Field, Select, TextInput } from "@/components/ui";
-import type { AiConfig, AiSlot } from "@/lib/ai";
+import type { AiConfig, AiSlot, McpConfig } from "@/lib/ai";
 import { useLoad } from "@/lib/ansible";
 import { api, message } from "@/lib/api";
 
@@ -168,6 +168,115 @@ function SlotForm({
         )}
       </div>
     </form>
+  );
+}
+
+const REASONS: Record<string, string> = {
+  ok: "ready",
+  no_credential: "no usable credential",
+  jump_host_unsupported: "behind a jump host (not supported)",
+};
+
+export function McpSettingsCard() {
+  const mcp = useLoad<McpConfig>("/ai/config/mcp");
+  const [enabled, setEnabled] = useState<"env" | "on" | "off">("env");
+  const [allowWrite, setAllowWrite] = useState(true);
+  const [planOnly, setPlanOnly] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState<McpConfig | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+
+  if (mcp.data && mcp.data !== loaded) {
+    setLoaded(mcp.data);
+    setEnabled(mcp.data.enabled_source === "environment" ? "env" : mcp.data.enabled ? "on" : "off");
+    setAllowWrite(mcp.data.allow_write);
+    setPlanOnly(mcp.data.plan_only_environments);
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    const r = await api("/ai/config/mcp", {
+      method: "PUT",
+      body: {
+        enabled: enabled === "env" ? null : enabled === "on",
+        allow_write: allowWrite,
+        plan_only_environments: planOnly,
+      },
+    });
+    setBusy(false);
+    if (!r.ok) return setNotice({ kind: "error", text: message(r.code) });
+    setNotice({ kind: "ok", text: "Saved. Takes effect on the next diagnosis." });
+    mcp.reload();
+  }
+
+  const d = mcp.data;
+  return (
+    <Card title="Copilot tools (MCP)">
+      <form onSubmit={(e) => void save(e)} className="space-y-3 text-sm">
+        <p className="text-xs text-fg-secondary">
+          Lets the Copilot look at a node (and, with the permission “ai.operate”, act on it) through the linux-mcp and
+          proxmox-mcp containers, started on this host&apos;s Docker for each diagnosis. It sees only the node of the problem.
+        </p>
+        {mcp.error && <Alert>{mcp.error}</Alert>}
+        {notice && <Alert kind={notice.kind === "ok" ? "info" : "error"}>{notice.text}</Alert>}
+        {d && (
+          <>
+            <p className="text-xs">
+              Docker:{" "}
+              {d.docker_version ? (
+                <span className="text-ok">reachable (engine {d.docker_version})</span>
+              ) : (
+                <span className="text-crit">not reachable: add deploy/compose.mcp.yaml to the stack</span>
+              )}
+              {" · "}network: {d.network ?? "Docker default"} · images: {d.linux_image}, {d.proxmox_image}
+            </p>
+            <Field label="Tools">
+              <Select value={enabled} onChange={(e) => setEnabled(e.target.value as "env" | "on" | "off")}>
+                <option value="env">Follow the server environment (currently {d.enabled ? "on" : "off"})</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </Select>
+            </Field>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={allowWrite} onChange={(e) => setAllowWrite(e.target.checked)} />
+              Allow operational tools (restart a service, power a VM, run a command) for users with “ai.operate”
+            </label>
+            <Field label="Action plan only in these environments (no operational tools)">
+              <div className="flex flex-wrap gap-3">
+                {d.environments.map((env) => (
+                  <label key={env} className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={planOnly.includes(env)}
+                      onChange={(e) => setPlanOnly(e.target.checked ? [...planOnly, env] : planOnly.filter((x) => x !== env))}
+                    />
+                    {env}
+                  </label>
+                ))}
+              </div>
+            </Field>
+            <Button type="submit" variant="primary" disabled={busy}>
+              Save
+            </Button>
+            <div>
+              <p className="mb-1 text-xs font-medium">Nodes the tools can reach ({d.nodes.length})</p>
+              <ul className="max-h-56 overflow-auto text-xs">
+                {d.nodes.map((n) => (
+                  <li key={n.name} className="flex gap-3 border-b border-border py-1">
+                    <span className="w-40 font-mono">{n.name}</span>
+                    <span className="w-24 text-fg-muted">{n.environment}</span>
+                    <span>Linux: {n.linux ? (REASONS[n.linux] ?? n.linux) : "—"}</span>
+                    <span>Proxmox: {n.proxmox ? (REASONS[n.proxmox] ?? n.proxmox) : "—"}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )}
+      </form>
+    </Card>
   );
 }
 

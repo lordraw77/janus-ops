@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { AiSettingsCard } from "@/components/AiSettings";
+import { AiSettingsCard, McpSettingsCard } from "@/components/AiSettings";
 import { EnvironmentsCard } from "@/components/Environments";
 import { Alert, Button, Card } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
@@ -105,6 +105,7 @@ function Settings() {
       <h1 className="text-lg font-semibold">Settings</h1>
       {can("environments.manage") && <EnvironmentsCard />}
       {can("ai.manage") && <AiSettingsCard />}
+      {can("ai.manage") && <McpSettingsCard />}
       <div className="grid gap-4 lg:grid-cols-2">
         <AgentsCard />
         <SystemCard />

@@ -91,10 +91,41 @@ def overlay(settings: Settings, rows: dict[str, Row], vault: Vault) -> Settings:
     return settings.model_copy(update=update) if update else settings
 
 
+@dataclass(frozen=True)
+class McpRow:
+    enabled: bool | None
+    allow_write: bool
+    plan_only_environments: tuple[str, ...]
+
+
+async def load_mcp(conn: AsyncConnection) -> McpRow | None:
+    r = (
+        await conn.execute(
+            text("SELECT enabled, allow_write, plan_only_environments FROM ai_mcp_config")
+        )
+    ).first()
+    if r is None:
+        return None
+    return McpRow(r.enabled, r.allow_write, tuple(r.plan_only_environments or ()))
+
+
+def apply_mcp(settings: Settings, row: McpRow | None) -> Settings:
+    if row is None:
+        return settings
+    update: dict[str, Any] = {
+        "ai_mcp_allow_write": row.allow_write,
+        "ai_mcp_plan_only_environments": ",".join(row.plan_only_environments),
+    }
+    if row.enabled is not None:
+        update["ai_mcp_enabled"] = row.enabled
+    return settings.model_copy(update=update)
+
+
 async def effective(engine: AsyncEngine, settings: Settings, vault: Vault) -> Settings:
     async with engine.connect() as conn:
         rows = await load_rows(conn)
-    return overlay(settings, rows, vault)
+        mcp = await load_mcp(conn)
+    return apply_mcp(overlay(settings, rows, vault), mcp)
 
 
 def new_row_id() -> str:

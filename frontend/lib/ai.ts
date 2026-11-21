@@ -119,3 +119,18 @@ export type AiSlot = {
 };
 
 export type AiConfig = { slots: AiSlot[]; vault_available: boolean };
+
+export type McpNode = { name: string; environment: string; linux: string | null; proxmox: string | null };
+
+export type McpConfig = {
+  enabled: boolean;
+  enabled_source: "database" | "environment";
+  allow_write: boolean;
+  plan_only_environments: string[];
+  environments: string[];
+  docker_version: string | null;
+  network: string | null;
+  linux_image: string;
+  proxmox_image: string;
+  nodes: McpNode[];
+};

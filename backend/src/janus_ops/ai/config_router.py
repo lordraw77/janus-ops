@@ -4,7 +4,7 @@ Keys go in and never come out: the API says only whether one is set and where it
 """
 
 import time
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, SecretStr
@@ -13,6 +13,7 @@ from sqlalchemy import text
 from janus_ops.admin.common import record
 from janus_ops.ai import config_store, llm
 from janus_ops.ai.config_store import SLOTS, Slot
+from janus_ops.ai.mcp import runner
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.config import Settings
@@ -105,6 +106,123 @@ async def get_config(request: Request, _: Manager) -> ConfigOut:
         slots=[_out(s, app.settings, eff, rows) for s in SLOTS],
         vault_available=app.vault.available,
     )
+
+
+class McpNode(BaseModel):
+    name: str
+    environment: str
+    linux: str | None  # "ok", or why the Linux server cannot use the node; None = no SSH capability
+    proxmox: str | None
+
+
+class McpOut(BaseModel):
+    enabled: bool
+    enabled_source: Literal["database", "environment"]
+    allow_write: bool
+    plan_only_environments: list[str]
+    environments: list[str]
+    docker_version: str | None
+    network: str | None
+    linux_image: str
+    proxmox_image: str
+    nodes: list[McpNode]
+
+
+class McpIn(BaseModel):
+    enabled: bool | None = None  # None = follow the server environment
+    allow_write: bool = True
+    plan_only_environments: list[str] = Field(default_factory=list, max_length=100)
+
+
+def _reason(kind: str | None, accepted: tuple[str, ...], jump: bool) -> str:
+    if jump:
+        return "jump_host_unsupported"
+    return "ok" if kind in accepted else "no_credential"
+
+
+@router.get("/mcp", response_model=McpOut)
+async def get_mcp(request: Request, _: Manager) -> McpOut:
+    app = request.app.state
+    async with app.engine.connect() as conn:
+        row = await config_store.load_mcp(conn)
+        envs = [
+            r.name
+            for r in await conn.execute(
+                text("SELECT name FROM environment ORDER BY position, name")
+            )
+        ]
+        caps = await conn.execute(
+            text(
+                "SELECT n.name, n.environment, c.kind, c.config, cr.kind AS cred_kind"
+                " FROM node n JOIN node_capability c ON c.node_id = n.id AND c.enabled"
+                " AND c.kind IN ('ssh', 'proxmox') LEFT JOIN credential cr"
+                " ON cr.id = c.credential_id"
+                " ORDER BY n.name LIMIT 500"
+            )
+        )
+        by_node: dict[str, McpNode] = {}
+        for c in caps:
+            node = by_node.setdefault(
+                c.name, McpNode(name=c.name, environment=c.environment, linux=None, proxmox=None)
+            )
+            if c.kind == "ssh":
+                node.linux = _reason(
+                    c.cred_kind,
+                    ("ssh_key", "ssh_password"),
+                    bool((c.config or {}).get("jump_host_id")),
+                )
+            else:
+                node.proxmox = _reason(c.cred_kind, ("proxmox_token", "proxmox_password"), False)
+    eff = config_store.apply_mcp(app.settings, row)
+    version = await runner.docker_version(eff.ai_mcp_docker, eff.ai_mcp_docker_host)
+    return McpOut(
+        enabled=eff.ai_mcp_enabled,
+        enabled_source="database" if row and row.enabled is not None else "environment",
+        allow_write=eff.ai_mcp_allow_write,
+        plan_only_environments=[e for e in eff.ai_mcp_plan_only_environments.split(",") if e],
+        environments=envs,
+        docker_version=version,
+        network=eff.ai_mcp_network,
+        linux_image=eff.ai_mcp_linux_image,
+        proxmox_image=eff.ai_mcp_proxmox_image,
+        nodes=list(by_node.values()),
+    )
+
+
+@router.put("/mcp", status_code=204, responses={422: {}})
+async def put_mcp(body: McpIn, request: Request, session: Manager) -> Response:
+    async with request.app.state.engine.begin() as conn:
+        known = {r.name for r in await conn.execute(text("SELECT name FROM environment"))}
+        unknown = sorted(set(body.plan_only_environments) - known)
+        if unknown:
+            raise HTTPException(422, "invalid_config:unknown environment")
+        await conn.execute(
+            text(
+                "INSERT INTO ai_mcp_config (id, enabled, allow_write, plan_only_environments,"
+                " updated_by) VALUES (true, :e, :w, :p, :by) ON CONFLICT (id) DO UPDATE SET"
+                " enabled = :e, allow_write = :w, plan_only_environments = :p, updated_by = :by,"
+                " updated_at = now()"
+            ),
+            {
+                "e": body.enabled,
+                "w": body.allow_write,
+                "p": sorted(set(body.plan_only_environments)),
+                "by": session.username,
+            },
+        )
+    await record(
+        request,
+        session,
+        "ai.mcp.config.changed",
+        "ai_mcp_config",
+        "mcp",
+        {
+            "enabled": body.enabled,
+            "allow_write": body.allow_write,
+            "plan_only_environments": sorted(set(body.plan_only_environments)),
+        },
+    )
+    return Response(status_code=204)
 
 
 @router.put("/{slot}", status_code=204, responses={404: {}, 422: {}, 503: {}})

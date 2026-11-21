@@ -195,3 +195,24 @@ def test_ai_settings_are_for_administrators_and_never_return_the_key() -> None:
         assert "sekret-123" not in admin.get("/api/v1/ai/config").text
         assert admin.delete("/api/v1/ai/config/review").status_code == 204
         assert admin.delete("/api/v1/ai/config/review").status_code == 404
+
+
+def test_mcp_settings_are_for_administrators_and_validate_environments() -> None:
+    with signed_in("bob") as operator:
+        assert operator.get("/api/v1/ai/config/mcp").status_code == 403
+        assert operator.put("/api/v1/ai/config/mcp", json={}).status_code == 403
+    with signed_in("alice") as admin:
+        body = admin.get("/api/v1/ai/config/mcp").json()
+        assert body["allow_write"] is True and body["enabled_source"] == "environment"
+        bad = admin.put("/api/v1/ai/config/mcp", json={"plan_only_environments": ["nope"]})
+        assert bad.status_code == 422
+        env = body["environments"][0]
+        ok = admin.put(
+            "/api/v1/ai/config/mcp",
+            json={"enabled": False, "allow_write": False, "plan_only_environments": [env]},
+        )
+        assert ok.status_code == 204
+        saved = admin.get("/api/v1/ai/config/mcp").json()
+        assert saved["enabled"] is False and saved["enabled_source"] == "database"
+        assert saved["allow_write"] is False and saved["plan_only_environments"] == [env]
+        admin.put("/api/v1/ai/config/mcp", json={})  # back to the defaults

@@ -258,6 +258,12 @@ async def _converse(
                 {"id": diagnosis_id},
             )
         )
+        environment = await conn.scalar(
+            text("SELECT environment FROM node WHERE id = CAST(:id AS uuid)"), {"id": node_id}
+        )
+    plan_only = {e.strip() for e in settings.ai_mcp_plan_only_environments.split(",") if e.strip()}
+    # operational tools: the permission, the global switch and the environment rule must all allow
+    can_operate = can_operate and settings.ai_mcp_allow_write and environment not in plan_only
     specs = await loader.specs_for_node(
         engine, vault, node_id, settings.ai_mcp_linux_image, settings.ai_mcp_proxmox_image
     )

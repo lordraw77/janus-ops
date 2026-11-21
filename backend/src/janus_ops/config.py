@@ -121,6 +121,9 @@ class Settings(BaseSettings):
     # MCP servers (linux-mcp, proxmox-mcp) the Copilot may use, started with `docker run -i` on the
     # Docker of this host (deploy/compose.mcp.yaml gives the backend the socket). Off by default.
     ai_mcp_enabled: bool = False
+    ai_mcp_allow_write: bool = True
+    # comma separated environment names where only an action plan is allowed (no operational tools)
+    ai_mcp_plan_only_environments: str = Field(default="", max_length=1000)
     ai_mcp_docker: str = Field(default="docker", max_length=200)
     ai_mcp_docker_host: str | None = Field(default=None, max_length=500)
     # Network of the MCP containers: "self" = this container's (same routes as the backend), or a

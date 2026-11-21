@@ -117,7 +117,7 @@ def _settings(**over: Any) -> Any:
 
 
 def _run_loop(
-    monkeypatch: Any, answers: list[dict[str, Any]], can_operate: bool
+    monkeypatch: Any, answers: list[dict[str, Any]], can_operate: bool, **settings: Any
 ) -> tuple[str, list[dict[str, Any]], list[Any], FakeSession]:
     session = FakeSession()
     seen: list[list[dict[str, Any]]] = []
@@ -158,7 +158,7 @@ def _run_loop(
     content = asyncio.run(
         diagnose._converse(
             _Engine(),  # type: ignore[arg-type]
-            _settings(),
+            _settings(**settings),
             "d1",
             messages,
             "node-1",
@@ -220,3 +220,33 @@ def test_a_write_tool_runs_with_the_permission(monkeypatch: Any) -> None:
     )
     assert session.calls[0][0] == "service_control"
     assert recorded[0][1].mode == "write"
+
+
+def test_saved_mcp_settings_win_over_the_environment() -> None:
+    from janus_ops.ai import config_store
+
+    base = make_settings(ai_mcp_enabled=True)
+    row = config_store.McpRow(False, False, ("prod", "dr"))
+    eff = config_store.apply_mcp(base, row)
+    assert eff.ai_mcp_enabled is False and eff.ai_mcp_allow_write is False
+    assert eff.ai_mcp_plan_only_environments == "prod,dr"
+    inherited = config_store.apply_mcp(base, config_store.McpRow(None, True, ()))
+    assert inherited.ai_mcp_enabled is True
+    assert config_store.apply_mcp(base, None) is base
+
+
+def test_the_environment_rule_and_the_global_switch_withhold_write_tools(
+    monkeypatch: Any,
+) -> None:
+    call = [_call("linux_service_control", '{"action": "restart"}')]
+    for extra in (
+        {"ai_mcp_plan_only_environments": "alice"},  # the fake node's environment is "alice"
+        {"ai_mcp_allow_write": False},
+    ):
+        _, _, recorded, session = _run_loop(
+            monkeypatch,
+            [{"content": "", "tool_calls": call}, {"content": "{}"}],
+            can_operate=True,
+            **extra,
+        )
+        assert session.calls == [] and recorded[0][1].error == "unknown_tool"

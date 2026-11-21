@@ -171,3 +171,19 @@ async def open_session(
             yield McpSession(session)
     finally:  # --rm removes it once stopped; kill covers a server that ignores closing stdin
         await _run(docker, "kill", name, timeout_s=15)
+
+
+async def docker_version(docker: str = "docker", docker_host: str | None = None) -> str | None:
+    """The Docker server version, or None when this backend cannot use Docker."""
+    import os
+
+    env = {**os.environ, **({"DOCKER_HOST": docker_host} if docker_host else {})}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            docker, "version", "--format", "{{.Server.Version}}",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=env,
+        )  # fmt: skip
+        out, _ = await asyncio.wait_for(proc.communicate(), 8)
+    except (OSError, TimeoutError):
+        return None
+    return out.decode().strip() or None if proc.returncode == 0 else None
