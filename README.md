@@ -369,7 +369,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 
 ## Project status & roadmap
 
-> 🚧 **Pre-alpha (0.1.0).** Available today: the single `lordraw/janus-ops` image, LDAP
+> 🚧 **Pre-1.0 (0.9.x).** Available today: the single `lordraw/janus-ops` image, LDAP
 > sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
 > audit log, inventory and credential vault (phase F0), **web SSH bastion** with host key
 > pinning, session recording, SFTP browser, command broadcast and snippets (phase F1),

@@ -9,9 +9,15 @@
   Monitoring · Containers · Proxmox VE · SSH · Ansible · Workflows · AI troubleshooting
 </p>
 
+<p align="center">
+  <a href="https://lordraw77.github.io/janus-ops/"><b>Website</b></a> ·
+  <a href="https://github.com/lordraw77/janus-ops">GitHub</a> ·
+  <a href="https://github.com/lordraw77/janus-ops/blob/main/docs/PLAN.md">Roadmap</a>
+</p>
+
 ---
 
-> **Status: pre-1.0 (0.5.x).** Every planned module exists (phases F0–F8), but they are not equally
+> **Status: pre-1.0 (0.9.x).** Every planned module exists (phases F0–F8), but they are not equally
 > proven: some have been exercised against real infrastructure, others only against simulated
 > services or in tests. Each module's verification status is listed in the
 > [plan](https://github.com/lordraw77/janus-ops/blob/main/docs/PLAN.md). Evaluate it on a lab before
@@ -99,7 +105,7 @@ Check readiness:
 
 ```bash
 curl -k https://localhost/api/v1/ready
-# {"status":"ok","version":"0.8.3","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
+# {"status":"ok","version":"0.9.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
 ```
 
 Optional overrides, used with `-f compose.yaml -f <file>` (all in the same `deploy/` folder):
@@ -218,12 +224,12 @@ Sign in as `breakglass`. Every use is audited and logged as a warning.
 # 1. Apply the schema (needs PostgreSQL 16 with the TimescaleDB extension)
 docker run --rm \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.8.3 migrate
+  lordraw/janus-ops:0.9.0 migrate
 
 # 2. Start the server
 docker run -d --name janus-ops -p 127.0.0.1:8000:8000 \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.8.3
+  lordraw/janus-ops:0.9.0
 ```
 
 ## Configuration
@@ -279,7 +285,7 @@ Variables used by the Compose stack (`.env`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.8.3` | Image and tag to run |
+| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.9.0` | Image and tag to run |
 | `JANUS_DOMAIN` | `localhost` | Host name served by Caddy |
 | `JANUS_TLS` | `internal` | `internal` (local CA, works offline) or an e-mail for ACME |
 | `JANUS_HTTP_PORT` / `JANUS_HTTPS_PORT` | `80` / `443` | Host ports of the proxy |
@@ -326,7 +332,7 @@ Variables used by the Compose stack (`.env`):
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.8.3`) | Immutable release, built from git tag `vX.Y.Z` |
+| `X.Y.Z` (e.g. `0.9.0`) | Immutable release, built from git tag `vX.Y.Z` |
 | `X.Y` (e.g. `0.5`) | Latest patch release of that minor version |
 | `latest` | Most recent release |
 
