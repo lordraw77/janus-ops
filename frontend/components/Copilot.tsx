@@ -247,6 +247,29 @@ function DiagnosisView({
       {detail.status === "done" && (
         <SecondOpinion detail={detail} reviewModel={reviewModel} busy={busy} onAsk={onSecondOpinion} />
       )}
+      {(detail.steps ?? []).length > 0 && (
+        <details className="text-xs text-fg-muted" open={(detail.steps ?? []).some((s) => s.mode === "write")}>
+          <summary className="cursor-pointer">
+            What the AI looked at and did ({(detail.steps ?? []).length} tool calls
+            {(detail.steps ?? []).some((s) => s.mode === "write") ? ", including changes" : ""})
+          </summary>
+          <ol className="mt-2 space-y-2">
+            {(detail.steps ?? []).map((s) => (
+              <li key={s.seq} className="rounded bg-elevated p-2">
+                <p className="font-mono">
+                  {s.mode === "write" && <span className="mr-1 rounded bg-warn/20 px-1 text-warn">changed</span>}
+                  {s.tool} {JSON.stringify(s.arguments)}
+                  <span className="ml-2 text-fg-muted">{s.duration_ms ?? 0} ms</span>
+                </p>
+                {s.error && <p className="text-crit">{s.error}</p>}
+                {s.result && (
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap">{s.result}</pre>
+                )}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
       <details className="text-xs text-fg-muted">
         <summary className="cursor-pointer">What was sent to the model</summary>
         <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-elevated p-2">{detail.prompt}</pre>

@@ -52,6 +52,17 @@ class DiagnosisOut(BaseModel):
     second_status: str | None
 
 
+class StepOut(BaseModel):
+    seq: int
+    server: str
+    tool: str
+    mode: str
+    arguments: dict[str, Any]
+    result: str | None
+    error: str | None
+    duration_ms: int | None
+
+
 class DiagnosisDetail(DiagnosisOut):
     prompt: str
     response: str | None
@@ -60,6 +71,7 @@ class DiagnosisDetail(DiagnosisOut):
     second_actions: list[dict[str, Any]]
     second_error: str | None
     comparison: dict[str, Any] | None
+    steps: list[StepOut] = []
 
 
 class IacRequest(BaseModel):
@@ -192,7 +204,13 @@ async def start_diagnosis(problem_id: uuid.UUID, request: Request, session: User
             "model": settings.ai_model,
         },
     )
-    diagnose.start(engine, settings, str(diagnosis_id))
+    diagnose.start(
+        engine,
+        settings,
+        str(diagnosis_id),
+        request.app.state.vault,
+        "ai.operate" in session.permissions,
+    )
     return {"id": str(diagnosis_id), "status": "pending"}
 
 
@@ -225,8 +243,19 @@ async def get_diagnosis(
 ) -> DiagnosisDetail:
     async with request.app.state.engine.connect() as conn:
         row = await _visible_diagnosis(conn, session, diagnosis_id)
+        steps = [
+            StepOut(**dict(r._mapping))
+            for r in await conn.execute(
+                text(
+                    "SELECT seq, server, tool, mode, arguments, result, error, duration_ms"
+                    " FROM ai_step WHERE diagnosis_id = :id ORDER BY seq"
+                ),
+                {"id": diagnosis_id},
+            )
+        ]
     base = _out(row).model_dump()
     return DiagnosisDetail(
+        steps=steps,
         **base,
         prompt=row.prompt,
         response=row.response,

@@ -97,3 +97,12 @@ Goal: give the Copilot real tools (today it only gets a context bundle assembled
   written into a tmpfs by a wrapper, cap-drop ALL; official `mcp` SDK stdio client). Tested against the
   real images (91 Proxmox tools, 48 Linux tools). The image now carries the docker CLI; the socket comes
   from the optional `deploy/compose.mcp.yaml`.
+- Step 3 done: `ai/mcp/catalog.py` allow-list (read / write / hidden) with a snapshot test of the 139
+  published tools (48 + 91): a tool in the images but not in the catalog fails the test.
+- Step 4 done: tool calling in `llm.complete`, loop in `diagnose._converse` (8 rounds, 4 calls per round,
+  12 calls and 3 write calls per run, fallback to a plain request when the model rejects tools or no
+  server starts), `ai_step` table (0033), audit `ai.mcp.call`, trace in the Copilot page. v1 scope: the
+  servers see only the node of the problem (its `ssh` and `proxmox` capabilities).
+- Enable with `JANUS_AI_MCP_ENABLED=true` (set by `deploy/compose.mcp.yaml`).
+- Left: live test with the real model, an MCP settings page, wider scope (hypervisor of a VM), per
+  environment "Action Plan only" rule for production.

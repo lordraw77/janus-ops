@@ -118,6 +118,13 @@ class Settings(BaseSettings):
     ai_review_model: str | None = Field(default=None, max_length=200)
     ai_review_base_url: str | None = Field(default=None, max_length=2048)
     ai_review_api_key: SecretStr | None = None
+    # MCP servers (linux-mcp, proxmox-mcp) the Copilot may use, started with `docker run -i` on the
+    # Docker of this host (deploy/compose.mcp.yaml gives the backend the socket). Off by default.
+    ai_mcp_enabled: bool = False
+    ai_mcp_docker: str = Field(default="docker", max_length=200)
+    ai_mcp_docker_host: str | None = Field(default=None, max_length=500)
+    ai_mcp_linux_image: str = Field(default="lordraw/linux-mcp:latest", max_length=300)
+    ai_mcp_proxmox_image: str = Field(default="lordraw/proxmox-mcp:latest", max_length=300)
 
     # --- Agent and telemetry (F2)
     agent_dir: Path | None = Field(

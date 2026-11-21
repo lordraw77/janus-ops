@@ -51,7 +51,19 @@ export type Comparison = {
   error?: string;
 };
 
+export type AiStep = {
+  seq: number;
+  server: "linux" | "proxmox";
+  tool: string;
+  mode: "read" | "write";
+  arguments: Record<string, unknown>;
+  result: string | null;
+  error: string | null;
+  duration_ms: number | null;
+};
+
 export type DiagnosisDetail = Diagnosis & {
+  steps?: AiStep[];
   prompt: string;
   response: string | null;
   second_model: string | null;

@@ -7,5 +7,7 @@ services:
   janus-ops:
     volumes:
       - ${JANUS_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    environment:
+      JANUS_AI_MCP_ENABLED: "true"
     group_add:
       - ${JANUS_DOCKER_GID:-0}
