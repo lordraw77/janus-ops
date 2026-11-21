@@ -38,6 +38,8 @@ PERMISSIONS: dict[str, str] = {
     "ai.manage": "Set the AI endpoints, models and API keys (keys are never shown again)",
     "ai.approve": "Approve, reject or edit the action plans proposed by the AI Copilot",
     "actions.execute": "Run approved action plans on nodes; the node's agent must allow exec",
+    "ai.operate": "Let the AI Copilot run operational MCP tools (restart a service, power a VM)"
+    " on nodes in scope; every call is audited. The admin role has it by default",
     "gitops.manage": "Create, change and delete GitOps stacks and rotate their webhook secrets",
     "gitops.deploy": "Deploy GitOps stacks now; the node's agent must allow exec",
     "workflow.manage": "Create, change, enable and delete workflows",

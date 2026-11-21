@@ -33,23 +33,29 @@ Goal: give the Copilot real tools (today it only gets a context bundle assembled
 - A new `ai/mcp/` package: `spec.py` (mapper), `runner.py` (spawns the process and speaks JSON-RPC over
   stdin/stdout with the official `mcp` Python SDK's stdio client), `registry.py` (tool catalogue,
   allow-list).
-- **How to spawn**: two options, decide in step 0.
-  1. *Sidecar via Docker socket*: `docker run --rm -i --env-file <tmpfs> lordraw/linux-mcp`. Needs the
-     socket mounted into Janus-Ops (a broad privilege) — avoid unless needed.
-  2. **Recommended**: bake both servers into the Janus-Ops image (pip-install from their repos, pinned
-     versions, run as `python -m ...` child processes). No socket, no extra containers, secrets stay in
-     process memory. Costs image size; both are Python (`python:3.12-slim` base, same as ours).
+- **How to spawn (decided)**: `docker run --rm -i` of the published image, so MCP updates are not tied
+  to Janus-Ops releases (the image tag is a setting, default `latest`, pinnable). The backend needs the
+  Docker CLI and a Docker socket (or a `DOCKER_HOST` pointing at a socket proxy limited to
+  `containers/create|start|attach|wait|delete` and `images/create|json`). Secrets travel as `-e NAME`
+  with the values in the `docker` client's environment, never on argv; private keys are written by a
+  wrapper entrypoint from env vars into a tmpfs inside the container (`KEY_DIR`), because a path of the
+  Janus-Ops container does not exist on the host. The runner reads the image's original
+  Entrypoint/Cmd with `docker image inspect` and wraps it.
 - One MCP session per Copilot run, closed at the end (no long-lived process holding credentials).
   Each run gets only the nodes in the problem's scope (`scope.py` is applied before building the spec).
 
 ## 4. Safety (the important part)
 
-- **Allow-list, not block-list**: the registry maps each MCP tool to `read` or `write`. Only `read` tools
-  are exposed to the model by default (e.g. `list_processes`, `disk_usage`, `docker_ps`, `tail_log`,
-  `vm_status`, `cluster_resources`). `write` tools (`service_control`, `vm_stop`, `delete_path`,
-  `node_reboot`, ...) are never offered to the model; they can only appear as a proposed action in the
-  Action Plan and go through the existing approval flow (`actions.execute`, audit).
-- `execute_command`/`lxc_exec`/`vm_agent_exec` are `write` by definition (arbitrary code).
+- **Read tools** are offered to the model for anyone with `ai.use`. **Operational (write) tools** (e.g.
+  `service_control`, `vm_stop`, `node_reboot`, `execute_command`) need the new permission **`ai.operate`**:
+  configurable per role, **on by default for the `admin` role** (admin holds every permission) and off
+  for every other role. The tool is classified read/write by an allow-list; an unclassified tool is
+  never offered, and a test fails the build on a new one.
+- Operational tools may be called **directly** by the model, within the run of a user who has
+  `ai.operate`, without the Action Plan. Safeguards: scope (only nodes the user may reach), audit of
+  every call with the user as actor, a per-run cap on write calls, a global switch in the AI settings
+  ("allow operational tools", default on), and the environment rule (a `production` node can require
+  the Action Plan instead; setting per environment, default off).
 - Every tool call is audited (tool, node, arguments; result truncated). Output is cut to a fixed size and
   wrapped as untrusted data, as today (prompt-injection risk C10/E).
 - A per-run budget: max tool calls, max wall time, max bytes.
@@ -78,9 +84,12 @@ Goal: give the Copilot real tools (today it only gets a context bundle assembled
    reachable and why not).
 6. Live test on the stack with the real NVIDIA model (preferred provider), docs, release 0.10.0.
 
-## 7. Open decisions
+## 7. Decisions taken
 
-- Bundled vs Docker-socket spawn (see §3).
-- Whether `write` tools may ever be called directly after a human approves in the UI, or always via the
-  Action Plan only (recommended: Action Plan only).
-- Tool-calling support of the configured model: needs a capability flag in the AI settings.
+- Spawn with `docker run` (MCP updates independent of Janus-Ops releases).
+- Operational tools allowed directly, under `ai.operate` (admin by default, configurable per role).
+- Still open: tool-calling support of the configured model (capability flag in the AI settings).
+
+## 8. Progress
+
+- Step 1 done: `ai/mcp/spec.py` (mapper) with unit tests; permission `ai.operate`.

@@ -29,6 +29,7 @@ export type Permission =
   | "ai.use"
   | "ai.approve"
   | "actions.execute"
+  | "ai.operate"
   | "gitops.manage"
   | "gitops.deploy"
   | "workflow.manage"
