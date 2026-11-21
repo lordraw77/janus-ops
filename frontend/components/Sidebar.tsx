@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Archive,
   Bell,
   Bot,
   Boxes,
@@ -62,6 +63,7 @@ export const NAV: NavItem[] = [
   { label: "Janus AI Copilot", icon: Sparkles, keywords: "ask diagnose ai", target: { href: "/ai/", permission: "ai.use" }, ai: true },
   { label: "Operate", icon: Bot, keywords: "chat ai change configure ntp servers", target: { href: "/operate/", permission: "ai.operate" }, ai: true },
   { label: "Users & roles", icon: Users, target: { href: "/admin/users/", permission: "users.read" } },
+  { label: "Archive", icon: Archive, keywords: "recordings sessions chats old retention", target: { href: "/archive/", permission: "archive.read" } },
   { label: "Audit log", icon: ScrollText, keywords: "history who did", target: { href: "/audit/", permission: "audit.read" } },
   { label: "Notifications", icon: Bell, target: { href: "/notifications/", permission: "notifications.manage" } },
   { label: "Settings", icon: Settings, target: { href: "/settings/", permission: "inventory.read" } },

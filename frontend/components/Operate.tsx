@@ -113,7 +113,7 @@ function Steps({ steps }: { steps: OperateStep[] }) {
   );
 }
 
-function Bubble({ m }: { m: OperateMessage }) {
+export function Bubble({ m }: { m: OperateMessage }) {
   if (m.role === "user") {
     return (
       <div className="ml-auto max-w-[85%] whitespace-pre-wrap rounded bg-primary/15 p-3 text-sm">{m.content}</div>
@@ -381,6 +381,9 @@ export function OperateConsole() {
             </button>
           ))}
         </div>
+        {showArchived && (
+          <p className="mb-2 text-xs text-fg-muted">Chats also move here by themselves after a while. Search all of them in the Archive page.</p>
+        )}
         <ul className="space-y-1 text-sm">
           {(sessions.data ?? []).map((s) => (
             <li key={s.id}>
