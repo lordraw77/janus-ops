@@ -243,7 +243,7 @@ export function McpSettingsCard() {
               <input type="checkbox" checked={allowWrite} onChange={(e) => setAllowWrite(e.target.checked)} />
               Allow operational tools (restart a service, power a VM, run a command) for users with “ai.operate”
             </label>
-            <Field label="Action plan only in these environments (no operational tools)">
+            <Field label="Read-only in these environments (ticked = the AI cannot change servers there, it only proposes). Untick to allow changes">
               <div className="flex flex-wrap gap-3">
                 {d.environments.map((env) => (
                   <label key={env} className="flex items-center gap-1">

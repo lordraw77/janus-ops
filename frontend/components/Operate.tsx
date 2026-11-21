@@ -124,8 +124,9 @@ function Bubble({ m }: { m: OperateMessage }) {
       {m.content && m.status !== "error" && <div className="whitespace-pre-wrap">{m.content}</div>}
       {m.read_only && m.status === "done" && (
         <p className="mt-2 text-xs text-warn">
-          Read-only answer: operational tools were not available (permission, global switch or an environment set to
-          action plan only).
+          Read-only answer: operational tools were not offered. Check Settings → Copilot tools: the switch “Allow
+          operational tools” must be on and none of these servers&apos; environments may be ticked under “Action plan
+          only”. You also need the “ai.operate” permission.
         </p>
       )}
       <Steps steps={m.steps} />
