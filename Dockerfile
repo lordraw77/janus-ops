@@ -29,7 +29,10 @@ RUN for arch in amd64 arm64 arm; do \
       CGO_ENABLED=0 GOOS=linux GOARCH=$arch GOARM=7 go build -trimpath -buildvcs=false \
         -ldflags "-s -w -X main.version=${VERSION}" \
         -o /out/janus-agent-linux-$arch ./cmd/janus-agent; \
-    done
+    done; \
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false \
+      -ldflags "-s -w -X main.version=${VERSION}" \
+      -o /out/janus-agent-windows-amd64.exe ./cmd/janus-agent
 
 # Signatures made offline with the release key (`make agent/sign`, committed in agent/release/) ship
 # next to the binaries, which is what lets the server push signed updates (FR-84). The build is

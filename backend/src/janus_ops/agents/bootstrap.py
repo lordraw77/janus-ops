@@ -152,6 +152,7 @@ class Plan:
     allow_exec: bool = False
     allow_pty: bool = False
     update_public_key: str | None = None
+    ca_path: str = "/etc/janus-agent/ca.pem"  # where the CA file lands on the node
     steps: list[str] = field(default_factory=list)
     arch: str = ""
 
@@ -166,7 +167,7 @@ def render_config(plan: Plan) -> str:
         f"interval_s: {plan.interval_s}",
     ]
     if plan.ca_pem:
-        lines.append('ca_file: "/etc/janus-agent/ca.pem"')
+        lines.append(f"ca_file: {json.dumps(plan.ca_path)}")
     if plan.proxy:
         lines.append(f"proxy: {json.dumps(plan.proxy)}")
     if plan.update_public_key:

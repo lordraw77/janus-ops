@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from janus_ops import __version__, health
 from janus_ops.admin import audit_log, roles, users
-from janus_ops.agents import gateway, telemetry
+from janus_ops.agents import gateway, manual, telemetry
 from janus_ops.agents import router as agents
 from janus_ops.agents.hub import AgentHub
 from janus_ops.ai.router import router as ai_copilot
@@ -99,6 +99,7 @@ def create_app(
         app.state.terminals = terminal.TerminalCounter()
         app.state.sftp = sftp.SftpPool(engine, app.state.vault, settings)
         app.state.agents = AgentHub()
+        app.state.install_choices = {}  # what the operator chose for a manual install, by node
         app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
         app.state.gitops_jobs = set()  # GitOps deploys running in the background
         app.state.workflow_jobs = set()  # workflow runs advancing in the background
@@ -191,6 +192,8 @@ def create_app(
         snippets.router,
         gateway.router,
         agents.router,
+        manual.admin,
+        manual.public,
         telemetry.router,
         monitoring.router,
         snmp_oids.router,

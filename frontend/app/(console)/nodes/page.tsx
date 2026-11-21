@@ -210,9 +210,98 @@ function InstallDialog({ agent, onClose, onDone }: { agent: AgentDetail; onClose
   );
 }
 
+function WindowsInstallDialog({ agent, onClose }: { agent: AgentDetail; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ command: string; expires_in_s: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const proxy = String(form.get("proxy") ?? "").trim();
+    setBusy(true);
+    setError(null);
+    const r = await api<{ command: string; expires_in_s: number }>(`/agents/${agent.node_id}/install-command`, {
+      method: "POST",
+      body: { proxy: proxy || null, allow_exec: form.get("allow_exec") === "on", allow_docker: false },
+    });
+    setBusy(false);
+    if (!r.ok) return setError(message(r.code));
+    setResult(r.data);
+  }
+
+  async function copy() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.command);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <Modal title={`Install the agent on ${agent.node_name} (Windows)`} onClose={onClose}>
+      {!result ? (
+        <form onSubmit={(e) => void submit(e)} className="space-y-3">
+          <p className="text-xs text-fg-secondary">
+            No SSH needed. You get a one-line PowerShell command to run on the node, in a PowerShell opened as
+            administrator. It downloads the agent from this server (checked against a SHA-256 and, with a private
+            CA, a pinned certificate), writes its configuration with a one-time enrollment token and installs the{" "}
+            <code className="font-mono">JanusAgent</code> Windows service. The agent only connects out to this
+            server over HTTPS; it opens no port.
+          </p>
+          {error && <Alert>{error}</Alert>}
+          <Field label="HTTP(S) proxy" hint="Optional, e.g. http://proxy.example:3128. Empty = direct.">
+            <TextInput name="proxy" maxLength={512} placeholder="http://proxy:3128" />
+          </Field>
+          <label className="flex items-start gap-2 text-xs text-fg-secondary">
+            <input type="checkbox" name="allow_exec" defaultChecked={agent.policy?.allow_exec ?? false} className="mt-0.5" />
+            <span>
+              Allow commands: the agent runs the commands of approved action plans and workflows, without a shell,
+              as SYSTEM. Written in the node&apos;s local policy; the server cannot change it later.
+            </span>
+          </label>
+          <p className="text-xs text-fg-muted">Not available on Windows yet: interactive shell, Docker, signed self-update.</p>
+          <div className="flex justify-end gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button type="submit" variant="primary" disabled={busy}>
+              {busy ? "Generating…" : "Generate command"}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-fg-secondary">
+            Run this in PowerShell as administrator on <strong>{agent.node_name}</strong>. It is valid for{" "}
+            {Math.round(result.expires_in_s / 60)} minutes and works once; it contains the enrollment token, so do not
+            share it.
+          </p>
+          <textarea
+            readOnly
+            value={result.command}
+            rows={6}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full rounded border border-line bg-elevated p-2 font-mono text-[11px]"
+            aria-label="PowerShell command"
+          />
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</Button>
+            <Button variant="primary" onClick={onClose}>
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function AgentCard({ agent, reload }: { agent: AgentDetail; reload: () => void }) {
   const { can } = useAuth();
   const [installing, setInstalling] = useState(false);
+  const [installingWindows, setInstallingWindows] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const status = AGENT_STATUS[agent.status];
   const manage = can("agents.manage");
@@ -285,7 +374,10 @@ function AgentCard({ agent, reload }: { agent: AgentDetail; reload: () => void }
               ) : (
                 <span className="text-xs text-fg-muted">Add an SSH capability to install the agent from here.</span>
               )}
-              {agent.status === "online" && (
+              <Button onClick={() => setInstallingWindows(true)} title="No SSH: a PowerShell command to run on the Windows node">
+                <Download className="h-3 w-3" aria-hidden /> Install on Windows
+              </Button>
+              {agent.status === "online" && !(agent.os ?? "").startsWith("Windows") && (
                 <Button onClick={() => void updateAgent()} title="Signed self-update: no SSH needed, the agent must hold the release public key">
                   <Download className="h-3 w-3" aria-hidden /> Update (signed)
                 </Button>
@@ -313,6 +405,7 @@ function AgentCard({ agent, reload }: { agent: AgentDetail; reload: () => void }
           )}
         </>
       )}
+      {installingWindows && <WindowsInstallDialog agent={agent} onClose={() => { setInstallingWindows(false); reload(); }} />}
       {installing && (
         <InstallDialog
           agent={agent}

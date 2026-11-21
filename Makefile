@@ -42,11 +42,13 @@ agent/test: ## Agent: gofmt check, vet and tests
 	cd agent && $(GO) vet ./... && $(GO) test ./...
 
 .PHONY: agent/build
-agent/build: ## Agent: static binaries for amd64, arm64 and arm (32-bit Raspberry Pi) in agent/dist
+agent/build: ## Agent: static binaries for Linux amd64, arm64, arm (32-bit Raspberry Pi) and Windows amd64 in agent/dist
 	for arch in amd64 arm64 arm; do \
 	  cd $(CURDIR)/agent && GOOS=linux GOARCH=$$arch GOARM=7 $(GO) build -trimpath -buildvcs=false \
 	    -ldflags "-s -w -X main.version=$(VERSION)" -o dist/janus-agent-linux-$$arch ./cmd/janus-agent; \
 	done
+	cd $(CURDIR)/agent && GOOS=windows GOARCH=amd64 $(GO) build -trimpath -buildvcs=false \
+	  -ldflags "-s -w -X main.version=$(VERSION)" -o dist/janus-agent-windows-amd64.exe ./cmd/janus-agent
 
 # The release key lives in secrets/release/release.pem: a git-ignored folder that is also outside
 # the Docker build context (see docs/AGENT_RELEASE.md). Never commit it, never mount it into the stack.

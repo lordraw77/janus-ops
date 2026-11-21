@@ -153,7 +153,8 @@ const MESSAGES: Record<string, string> = {
   no_ssh_capability: "This node has no SSH capability.",
   // agents
   no_agent_capability: "Enable the Janus agent capability on this node first.",
-  agent_binary_missing: "The agent binary for this architecture is not available on the server.",
+  agent_binary_missing: "The agent binary for this system is not available on the server.",
+  update_unsupported_os: "The signed update is only available for Linux agents. Reinstall the Windows agent instead.",
   agent_server_url_not_https: "Agents need an https:// server URL (JANUS_AGENT_SERVER_URL).",
   release_key_missing: "No release public key is configured on the server (JANUS_AGENT_RELEASE_PUBLIC_KEY).",
   release_key_invalid: "The release public key configured on the server is not valid.",

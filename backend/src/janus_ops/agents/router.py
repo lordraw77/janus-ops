@@ -74,6 +74,11 @@ class AgentDetail(AgentOut):
     facts_at: datetime | None
 
 
+def is_windows(row: Any) -> bool:
+    """The signed self-update ships Linux binaries only; a Windows agent is updated by reinstalling."""
+    return str(row.os or "").startswith("Windows")
+
+
 def status_of(row: Any, hub: AgentHub) -> Status:
     if hub.get(str(row.id)) is not None:
         return "online"
@@ -305,6 +310,8 @@ async def _update_row(request: Request, session: Session, row: Any) -> UpdateOut
         raise HTTPException(409, "agent_binary_missing")
     if row.arch is None:
         raise HTTPException(409, "agent_offline")
+    if is_windows(row):
+        raise HTTPException(409, "update_unsupported_os")
     key = str(row.id)
     if key in _busy(request):
         raise HTTPException(409, "bootstrap_running")
@@ -406,6 +413,8 @@ async def update_all_agents(
 
         if hub.get(str(row.id)) is None:
             return item("skipped", "agent_offline")
+        if is_windows(row):
+            return item("skipped", "update_unsupported_os")
         if row.arch not in versions:
             return item("skipped", "agent_binary_missing")
         if row.version == versions[row.arch]:

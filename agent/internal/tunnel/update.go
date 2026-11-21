@@ -150,6 +150,10 @@ func (u *updateSink) abort() {
 }
 
 func (m *mux) startUpdate(ctx context.Context, id uint32, req openRequest) error {
+	if runtime.GOOS != "linux" {
+		// the signed binaries are Linux builds: never replace another OS's agent with one
+		return m.refuse(ctx, id, "update_unsupported_os")
+	}
 	if len(m.updateKey) != ed25519.PublicKeySize {
 		return m.refuse(ctx, id, "update_not_configured")
 	}
