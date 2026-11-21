@@ -117,3 +117,17 @@ Goal: give the Copilot real tools (today it only gets a context bundle assembled
 - Not done, by decision: a wider scope (the hypervisor of a VM). The inventory has no VM-to-hypervisor
   link, so it needs a data-model change first (a `hypervisor` field on a node); until then a run sees
   only its own node.
+
+## 9. Operate (chat)
+
+- Sidebar entry **Operate** (permission `ai.operate`): pick up to 10 servers, then chat ("change the NTP
+  server to ..."). The assistant uses linux-mcp (one process, all picked SSH nodes, chosen with a
+  `server` parameter) and proxmox-mcp (one process per node, `cluster` parameter), looks first, changes
+  the minimum, verifies, and reports per server. It asks before risky changes (prompt rule).
+- Tables `ai_operate_session/_message/_step` (0035); audit `ai.operate.session.created`,
+  `ai.operate.instruction`, `ai.operate.call`. Sessions belong to their creator; only nodes in the
+  creator's scope can be picked. Budgets per message: 12 rounds, 30 calls, 10 write calls.
+- Read-only chat (with a notice) when the global switch is off or a picked node is in an environment set
+  to "action plan only". Note: `execute_command` is classified as a write tool even for a read-looking
+  command, so a harmless `systemctl status` shows as "can change".
+- Tried live on e2e-debian: a report on time sync (no change) and a write/verify/delete/confirm cycle.

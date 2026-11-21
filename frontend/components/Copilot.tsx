@@ -251,13 +251,13 @@ function DiagnosisView({
         <details className="text-xs text-fg-muted" open={(detail.steps ?? []).some((s) => s.mode === "write")}>
           <summary className="cursor-pointer">
             What the AI looked at and did ({(detail.steps ?? []).length} tool calls
-            {(detail.steps ?? []).some((s) => s.mode === "write") ? ", including changes" : ""})
+            {(detail.steps ?? []).some((s) => s.mode === "write") ? ", including tools that can change things" : ""})
           </summary>
           <ol className="mt-2 space-y-2">
             {(detail.steps ?? []).map((s) => (
               <li key={s.seq} className="rounded bg-elevated p-2">
                 <p className="font-mono">
-                  {s.mode === "write" && <span className="mr-1 rounded bg-warn/20 px-1 text-warn">changed</span>}
+                  {s.mode === "write" && <span className="mr-1 rounded bg-warn/20 px-1 text-warn">can change</span>}
                   {s.tool} {JSON.stringify(s.arguments)}
                   <span className="ml-2 text-fg-muted">{s.duration_ms ?? 0} ms</span>
                 </p>

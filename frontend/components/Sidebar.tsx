@@ -2,6 +2,7 @@
 
 import {
   Bell,
+  Bot,
   Boxes,
   GitBranch,
   GitFork,
@@ -59,6 +60,7 @@ export const NAV: NavItem[] = [
     target: { href: "/terminal/", permission: ["ssh.connect", "sftp.transfer", "audit.read"] },
   },
   { label: "Janus AI Copilot", icon: Sparkles, keywords: "ask diagnose ai", target: { href: "/ai/", permission: "ai.use" }, ai: true },
+  { label: "Operate", icon: Bot, keywords: "chat ai change configure ntp servers", target: { href: "/operate/", permission: "ai.operate" }, ai: true },
   { label: "Users & roles", icon: Users, target: { href: "/admin/users/", permission: "users.read" } },
   { label: "Audit log", icon: ScrollText, keywords: "history who did", target: { href: "/audit/", permission: "audit.read" } },
   { label: "Notifications", icon: Bell, target: { href: "/notifications/", permission: "notifications.manage" } },

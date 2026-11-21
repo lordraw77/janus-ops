@@ -16,9 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from janus_ops import audit
 from janus_ops.ai import tools
-from janus_ops.ai.llm import AIError, chat, complete
+from janus_ops.ai.llm import AIError, chat
 from janus_ops.ai.llm import review_settings as llm_review_settings
 from janus_ops.ai.mcp import loader
+from janus_ops.ai.mcp.loop import run_rounds
 from janus_ops.ai.mcp.runner import resolve_network
 from janus_ops.ai.mcp.toolbox import Step, Toolbox
 from janus_ops.config import Settings
@@ -65,7 +66,6 @@ You also have tools that inspect the node (and, when offered, change it):
   propose it as an action for a human instead.
 - Stop calling tools when you can answer, then reply with the JSON object described above."""
 MAX_ROUNDS = 8
-CALLS_PER_ROUND = 4
 
 
 def _data_block(name: str, body: str) -> str:
@@ -284,41 +284,9 @@ async def _converse(
             return await chat(settings, messages)
         messages[0] = {**messages[0], "content": messages[0]["content"] + TOOLS_PROMPT}
         try:
-            for _ in range(MAX_ROUNDS):
-                message = await complete(settings, messages, box.definitions)
-                calls = message.get("tool_calls") or []
-                if not calls:
-                    content = message.get("content")
-                    if not isinstance(content, str):
-                        raise AIError("ai_bad_response")
-                    return content
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": message.get("content") or "",
-                        "tool_calls": calls,
-                    }
-                )
-                for call in calls[:CALLS_PER_ROUND]:
-                    fn = call.get("function") or {}
-                    try:
-                        args = json.loads(fn.get("arguments") or "{}")
-                    except ValueError:
-                        args = {}
-                    result = await box.call(
-                        str(fn.get("name")), args if isinstance(args, dict) else {}
-                    )
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": str(call.get("id")),
-                            "content": _data_block(f"tool:{fn.get('name')}", result[:8000]),
-                        }
-                    )
-                for call in calls[CALLS_PER_ROUND:]:  # every call needs an answer
-                    messages.append(
-                        {"role": "tool", "tool_call_id": str(call.get("id")), "content": "skipped"}
-                    )
+            content = await run_rounds(settings, messages, box, MAX_ROUNDS)
+            if content is not None:
+                return content
         except AIError as exc:
             if exc.code != "ai_tools_unsupported" or box.steps:
                 raise

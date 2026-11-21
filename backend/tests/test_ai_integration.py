@@ -216,3 +216,46 @@ def test_mcp_settings_are_for_administrators_and_validate_environments() -> None
         assert saved["enabled"] is False and saved["enabled_source"] == "database"
         assert saved["allow_write"] is False and saved["plan_only_environments"] == [env]
         admin.put("/api/v1/ai/config/mcp", json={})  # back to the defaults
+
+
+def _node(name: str, address: str, ssh: bool) -> str:
+    node_id = str(
+        run_sql(
+            "INSERT INTO node (name, address) VALUES (:n, :a) RETURNING id",
+            {"n": name, "a": address},
+        )[0][0]
+    )
+    if ssh:
+        run_sql(
+            "INSERT INTO node_capability (node_id, kind, enabled, config)"
+            " VALUES (:n, 'ssh', true, '{}')",
+            {"n": node_id},
+        )
+    return node_id
+
+
+def test_operate_sessions_need_the_permission_and_pick_nodes_in_scope() -> None:
+    name = f"op-{uuid.uuid4().hex[:8]}"
+    node_id = _node(name, "10.9.9.8", ssh=True)
+    plain = _node(name + "x", "10.9.9.7", ssh=False)
+    base = "/api/v1/ai/operate"
+    with signed_in("bob") as operator:
+        assert operator.get(f"{base}/nodes").status_code == 403
+        assert operator.post(f"{base}/sessions", json={"node_ids": [node_id]}).status_code == 403
+    with signed_in("alice") as admin:
+        nodes = {n["name"]: n for n in admin.get(f"{base}/nodes").json()}
+        assert nodes[name]["linux"] == "no_credential" and name + "x" not in nodes
+        # a node without SSH or Proxmox cannot be picked; neither can an unknown one
+        for bad in (plain, str(uuid.uuid4())):
+            assert admin.post(f"{base}/sessions", json={"node_ids": [bad]}).status_code == 404
+        assert admin.post(f"{base}/sessions", json={"node_ids": []}).status_code == 422
+        created = admin.post(f"{base}/sessions", json={"node_ids": [node_id]})
+        assert created.status_code == 201
+        sid = created.json()["id"]
+        assert sid in [s["id"] for s in admin.get(f"{base}/sessions").json()]
+        detail = admin.get(f"{base}/sessions/{sid}").json()
+        assert detail["node_names"] == [name] and detail["messages"] == []
+        sent = admin.post(f"{base}/sessions/{sid}/messages", json={"content": "x"})
+        assert sent.status_code == 503 and sent.json()["detail"] == "ai_not_configured"
+        assert admin.delete(f"{base}/sessions/{sid}").status_code == 204
+        assert admin.get(f"{base}/sessions/{sid}").status_code == 404

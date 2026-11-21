@@ -19,11 +19,13 @@ from janus_ops.admin.common import record
 from janus_ops.agents import exec as node_exec
 from janus_ops.ai import config_store, diagnose, iac, llm
 from janus_ops.ai.config_router import router as config_router
+from janus_ops.ai.operate_router import router as operate_router
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 router.include_router(config_router)
+router.include_router(operate_router)
 EXEC_TIMEOUT_S = 60
 
 User = Annotated[Session, Depends(require_permission("ai.use"))]

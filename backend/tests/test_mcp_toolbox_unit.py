@@ -4,6 +4,7 @@ from typing import Any
 
 from janus_ops.ai import diagnose
 from janus_ops.ai.mcp import loader, toolbox
+from janus_ops.ai.mcp import loop as loop_module
 from janus_ops.ai.mcp.runner import McpError, Tool
 from janus_ops.ai.mcp.toolbox import Toolbox, _Entry
 from janus_ops.vault import Vault
@@ -149,7 +150,7 @@ def _run_loop(
 
     monkeypatch.setattr(loader, "specs_for_node", fake_specs)
     monkeypatch.setattr(Toolbox, "add", fake_add)
-    monkeypatch.setattr(diagnose, "complete", fake_complete)
+    monkeypatch.setattr(loop_module, "complete", fake_complete)
     monkeypatch.setattr(diagnose, "_record_step", fake_record)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": "S"},
@@ -250,3 +251,63 @@ def test_the_environment_rule_and_the_global_switch_withhold_write_tools(
             **extra,
         )
         assert session.calls == [] and recorded[0][1].error == "unknown_tool"
+
+
+# ------------------------------------------------------------------ several servers (Operate)
+def test_several_hosts_are_chosen_by_name_and_mapped_to_their_id() -> None:
+    entry, fixed = toolbox.definition("linux", TOOLS[0], "read", hosts=["web", "db"])
+    params = entry["function"]["parameters"]
+    assert params["properties"]["server"]["enum"] == ["web", "db"]
+    assert "server" in params["required"] and "server_id" not in params["properties"]
+    assert fixed == {}
+
+    async def go() -> tuple[str, str, FakeSession]:
+        s = FakeSession()
+        box = Toolbox(True)
+        box._entries["linux_disk_usage"] = _Entry(
+            "linux", "disk_usage", "read", s, {}, hosts={"web": "1", "db": "2"}
+        )
+        ok = await box.call("linux_disk_usage", {"server": "db", "path": "/"})
+        bad = await box.call("linux_disk_usage", {"server": "other"})
+        return ok, bad, s
+
+    ok, bad, s = asyncio.run(go())
+    assert ok == "ok disk_usage" and bad == "error: unknown_server"
+    assert s.calls == [("disk_usage", {"path": "/", "server_id": "2"})]
+
+
+def test_proxmox_nodes_are_chosen_by_cluster_name() -> None:
+    tool = Tool("vm_status", "Status", {"properties": {"vmid": {}}, "required": ["vmid"]})
+    entry, _ = toolbox.definition("proxmox", tool, "read", clusters=["pve1", "pve2"])
+    assert entry["function"]["parameters"]["properties"]["cluster"]["enum"] == ["pve1", "pve2"]
+
+    async def go() -> tuple[str, str, list[FakeSession]]:
+        a, b = FakeSession(), FakeSession()
+        box = Toolbox(True)
+        box._entries["pve_vm_status"] = _Entry(
+            "proxmox", "vm_status", "read", None, {}, clusters={"pve1": a, "pve2": b}
+        )
+        ok = await box.call("pve_vm_status", {"cluster": "pve2", "vmid": 100})
+        bad = await box.call("pve_vm_status", {"cluster": "nope", "vmid": 100})
+        return ok, bad, [a, b]
+
+    ok, bad, (a, b) = asyncio.run(go())
+    assert ok == "ok vm_status" and bad == "error: unknown_cluster"
+    assert a.calls == [] and b.calls == [("vm_status", {"vmid": 100})]
+
+
+def test_operate_is_read_only_unless_everything_allows_writing() -> None:
+    from janus_ops.ai import operate
+
+    on = make_settings(ai_mcp_enabled=True)
+    envs = {"web": "staging"}
+    assert operate.read_only_reason(on, True, envs) is None
+    assert operate.read_only_reason(on, False, envs) == "no_permission"
+    off = make_settings(ai_mcp_enabled=True, ai_mcp_allow_write=False)
+    assert operate.read_only_reason(off, True, envs) == "writes_disabled"
+    prod = make_settings(ai_mcp_enabled=True, ai_mcp_plan_only_environments="prod,dr")
+    assert operate.read_only_reason(prod, True, {"web": "staging", "db": "prod"}) == (
+        "environment_plan_only"
+    )
+    assert "READ-ONLY" in operate.system_prompt(["web"], True)
+    assert "READ-ONLY" not in operate.system_prompt(["web"], False)

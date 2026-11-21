@@ -35,6 +35,7 @@ class Step:
     result: str | None
     error: str | None
     duration_ms: int
+    target: str | None = None
 
 
 class Caller(Protocol):
@@ -46,8 +47,10 @@ class _Entry:
     server: str
     tool: str
     mode: str
-    session: Caller
+    session: Caller | None
     fixed: dict[str, Any]
+    hosts: dict[str, str] | None = None  # linux-mcp: host label -> its server_id
+    clusters: dict[str, Caller] | None = None  # proxmox-mcp: node name -> its session
 
 
 OnCall = Callable[[Step], Awaitable[None]]
@@ -63,15 +66,32 @@ def offered(server: str, tools: list[Tool], can_operate: bool) -> list[Tool]:
     return keep
 
 
-def definition(server: str, tool: Tool, mode: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """An OpenAI `tools` entry and the arguments filled in for the model (the host id)."""
+def definition(
+    server: str,
+    tool: Tool,
+    mode: str,
+    hosts: list[str] | None = None,
+    clusters: list[str] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """An OpenAI `tools` entry and the arguments filled in for the model (the host id).
+
+    One host: its id is fixed and hidden. Several (`hosts`, linux-mcp) or several Proxmox nodes
+    (`clusters`): the model must pick one by name, from a closed list."""
     schema = json.loads(json.dumps(tool.schema))  # deep copy
     props = schema.setdefault("properties", {})
+    required = [r for r in schema.get("required", []) if r != "server_id"]
     fixed: dict[str, Any] = {}
     if server == "linux" and "server_id" in props:
-        del props["server_id"]  # one host per run, always the first block
-        fixed["server_id"] = "1"
-        schema["required"] = [r for r in schema.get("required", []) if r != "server_id"]
+        del props["server_id"]
+        if hosts:
+            props["server"] = {"type": "string", "enum": hosts, "description": "Target server"}
+            required.append("server")
+        else:  # one host per run, always the first block
+            fixed["server_id"] = "1"
+    if clusters:
+        props["cluster"] = {"type": "string", "enum": clusters, "description": "Proxmox node"}
+        required.append("cluster")
+    schema["required"] = required
     suffix = " [changes the host]" if mode == "write" else ""
     entry = {
         "type": "function",
@@ -85,8 +105,16 @@ def definition(server: str, tool: Tool, mode: str) -> tuple[dict[str, Any], dict
 
 
 class Toolbox:
-    def __init__(self, can_operate: bool, on_call: OnCall | None = None) -> None:
+    def __init__(
+        self,
+        can_operate: bool,
+        on_call: OnCall | None = None,
+        max_calls: int = MAX_CALLS,
+        max_writes: int = MAX_WRITE_CALLS,
+    ) -> None:
         self.can_operate = can_operate
+        self._max_calls = max_calls
+        self._max_writes = max_writes
         self._on_call = on_call
         self._stack = AsyncExitStack()
         self._entries: dict[str, _Entry] = {}
@@ -102,6 +130,11 @@ class Toolbox:
         await self._stack.aclose()
 
     async def add(self, server: str, spec: McpSpec, **session_args: Any) -> None:
+        await self._add(server, spec, **session_args)
+
+    async def _add(
+        self, server: str, spec: McpSpec, hosts: dict[str, str] | None = None, **session_args: Any
+    ) -> None:
         try:
             session = await self._stack.enter_async_context(open_session(spec, **session_args))
             tools = await session.tools()
@@ -120,6 +153,34 @@ class Toolbox:
                 server, tool.name, mode, session, fixed
             )
 
+    async def add_hosts(self, spec: McpSpec, **session_args: Any) -> None:
+        """linux-mcp with several hosts in one process; the model names the host."""
+        hosts = {name: str(i + 1) for i, name in enumerate(spec.nodes)}
+        await self._add("linux", spec, hosts=hosts, **session_args)
+
+    async def add_clusters(self, specs: dict[str, McpSpec], **session_args: Any) -> None:
+        """proxmox-mcp: one process per Proxmox node; the model names the node."""
+        sessions: dict[str, Caller] = {}
+        tools: list[Tool] = []
+        for name, spec in specs.items():
+            try:
+                session = await self._stack.enter_async_context(open_session(spec, **session_args))
+                listed = await session.tools()
+            except Exception as exc:  # noqa: BLE001 - one broken node must not stop the others
+                self.unavailable[f"proxmox:{name}"] = getattr(exc, "code", "mcp_failed")
+                continue
+            sessions[name] = session
+            tools = tools or listed
+        if not sessions:
+            return
+        for tool in offered("proxmox", tools, self.can_operate):
+            mode = catalog.classify("proxmox", tool.name) or "read"
+            entry, fixed = definition("proxmox", tool, mode, clusters=list(sessions))
+            self.definitions.append(entry)
+            self._entries[entry["function"]["name"]] = _Entry(
+                "proxmox", tool.name, mode, None, fixed, clusters=sessions
+            )
+
     def __bool__(self) -> bool:
         return bool(self._entries)
 
@@ -130,17 +191,33 @@ class Toolbox:
         started = time.monotonic()
         result: str | None = None
         error: str | None = None
+        target: str | None = None
+        args = dict(arguments)
+        session: Caller | None = None
+        fixed: dict[str, Any] = {}
         if entry is None:
             error = "unknown_tool"
-        elif seq > MAX_CALLS:
+        elif seq > self._max_calls:
             error = "call_budget_exhausted"
-        elif entry.mode == "write" and self._writes >= MAX_WRITE_CALLS:
+        elif entry.mode == "write" and self._writes >= self._max_writes:
             error = "write_budget_exhausted"
         else:
+            session, fixed = entry.session, dict(entry.fixed)
+            if entry.hosts is not None:
+                target = str(args.pop("server", ""))
+                if target not in entry.hosts:
+                    error = "unknown_server"
+                fixed["server_id"] = entry.hosts.get(target, "")
+            if entry.clusters is not None:
+                target = str(args.pop("cluster", ""))
+                session = entry.clusters.get(target)
+                if session is None:
+                    error = "unknown_cluster"
+        if entry is not None and error is None and session is not None:
             if entry.mode == "write":
                 self._writes += 1
             try:
-                result = await entry.session.call(entry.tool, {**arguments, **entry.fixed})
+                result = await session.call(entry.tool, {**args, **fixed})
             except McpError as exc:
                 error = exc.code
             except Exception:
@@ -155,6 +232,7 @@ class Toolbox:
             result[:STEP_RESULT] if result is not None else None,
             error,
             int((time.monotonic() - started) * 1000),
+            target,
         )
         self.steps.append(step)
         if self._on_call is not None:
