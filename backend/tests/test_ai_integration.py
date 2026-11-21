@@ -257,5 +257,29 @@ def test_operate_sessions_need_the_permission_and_pick_nodes_in_scope() -> None:
         assert detail["node_names"] == [name] and detail["messages"] == []
         sent = admin.post(f"{base}/sessions/{sid}/messages", json={"content": "x"})
         assert sent.status_code == 503 and sent.json()["detail"] == "ai_not_configured"
+        # provider, model, title, archiving
+        assert detail["provider"] == "main" and detail["model"] is None and not detail["archived"]
+        assert admin.patch(f"{base}/sessions/{sid}", json={"provider": "other"}).status_code == 422
+        assert (
+            admin.patch(f"{base}/sessions/{sid}", json={"model": "bad model!"}).status_code == 422
+        )
+        patched = admin.patch(
+            f"{base}/sessions/{sid}",
+            json={"title": "NTP", "model": "m-2", "provider": "review", "archived": True},
+        )
+        assert patched.status_code == 204
+        detail = admin.get(f"{base}/sessions/{sid}").json()
+        assert (detail["title"], detail["model"], detail["provider"]) == ("NTP", "m-2", "review")
+        assert detail["archived"] is True
+        assert sid not in [s["id"] for s in admin.get(f"{base}/sessions").json()]
+        archived = admin.get(f"{base}/sessions", params={"archived": "true"}).json()
+        assert sid in [s["id"] for s in archived]
+        # the second provider is not set up here: sending says so (before the AI-off check)
+        providers = {p["slot"]: p for p in admin.get(f"{base}/providers").json()}
+        assert providers["main"]["available"] is False and providers["review"]["available"] is False
+        assert admin.get(f"{base}/providers/review/models").status_code == 422
+        assert admin.get(f"{base}/providers/nope/models").status_code == 404
+        assert admin.patch(f"{base}/sessions/{sid}", json={"clear_model": True}).status_code == 204
+        assert admin.get(f"{base}/sessions/{sid}").json()["model"] is None
         assert admin.delete(f"{base}/sessions/{sid}").status_code == 204
         assert admin.get(f"{base}/sessions/{sid}").status_code == 404

@@ -12,6 +12,7 @@ import {
   type OperateSession,
   type OperateSessionRow,
   type OperateStep,
+  type Provider,
   ready,
 } from "@/lib/operate";
 
@@ -119,6 +120,7 @@ function Bubble({ m }: { m: OperateMessage }) {
   }
   return (
     <div className="mr-auto max-w-[95%] rounded border border-border p-3 text-sm">
+      {m.model && <p className="mb-1 text-xs text-fg-muted">{m.model}</p>}
       {m.status === "pending" && <p className="text-fg-muted">Working… (it looks, changes if needed, then verifies)</p>}
       {m.status === "error" && <Alert>{message(m.error ?? "run_error")}{m.content ? ` — ${m.content}` : ""}</Alert>}
       {m.content && m.status !== "error" && <div className="whitespace-pre-wrap">{m.content}</div>}
@@ -134,7 +136,64 @@ function Bubble({ m }: { m: OperateMessage }) {
   );
 }
 
-function Chat({ id, onDeleted }: { id: string; onDeleted: () => void }) {
+function ModelPicker({ session, onChanged }: { session: OperateSession; onChanged: () => void }) {
+  const providers = useLoad<Provider[]>("/ai/operate/providers");
+  const [error, setError] = useState<string | null>(null);
+  const slot = session.provider;
+  const loaded = useLoad<string[]>(`/ai/operate/providers/${slot}/models`);
+  const models = loaded.data ?? (loaded.error ? [] : null);
+
+  async function patch(body: Record<string, unknown>) {
+    setError(null);
+    const r = await api(`/ai/operate/sessions/${session.id}`, { method: "PATCH", body });
+    if (!r.ok) return setError(message(r.code));
+    onChanged();
+  }
+
+  const current = providers.data?.find((p) => p.slot === slot);
+  const options = models ?? [];
+  const selected = session.model ?? current?.model ?? "";
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-fg-muted">Provider</span>
+      <select
+        className="rounded border border-border bg-surface px-1 py-1"
+        value={slot}
+        onChange={(e) => void patch({ provider: e.target.value, clear_model: true })}
+      >
+        {(providers.data ?? []).map((p) => (
+          <option key={p.slot} value={p.slot} disabled={!p.available}>
+            {p.label}
+            {p.host ? ` · ${p.host}` : ""}
+            {p.available ? "" : " (not set up)"}
+          </option>
+        ))}
+      </select>
+      <span className="text-fg-muted">Model</span>
+      <select
+        className="max-w-64 rounded border border-border bg-surface px-1 py-1"
+        value={selected}
+        onChange={(e) => void patch(e.target.value === (current?.model ?? "") ? { clear_model: true } : { model: e.target.value })}
+      >
+        {selected && !options.includes(selected) && <option value={selected}>{selected}</option>}
+        {current?.model && !options.includes(current.model) && selected !== current.model && (
+          <option value={current.model}>{current.model} (default)</option>
+        )}
+        {options.map((m) => (
+          <option key={m} value={m}>
+            {m}
+            {m === current?.model ? " (default)" : ""}
+          </option>
+        ))}
+      </select>
+      {models === null && <span className="text-fg-muted">loading models…</span>}
+      {error && <span className="text-crit">{error}</span>}
+      <span className="text-fg-muted">Applies from the next message.</span>
+    </div>
+  );
+}
+
+function Chat({ id, onDeleted, onChanged }: { id: string; onDeleted: () => void; onChanged: () => void }) {
   const session = useLoad<OperateSession>(`/ai/operate/sessions/${id}`);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -163,6 +222,24 @@ function Chat({ id, onDeleted }: { id: string; onDeleted: () => void }) {
     session.reload();
   }
 
+  async function setArchived(archived: boolean) {
+    const r = await api(`/ai/operate/sessions/${id}`, { method: "PATCH", body: { archived } });
+    if (r.ok) {
+      session.reload();
+      onChanged();
+    }
+  }
+
+  async function rename() {
+    const title = window.prompt("Chat name", session.data?.title ?? "");
+    if (!title?.trim()) return;
+    const r = await api(`/ai/operate/sessions/${id}`, { method: "PATCH", body: { title: title.trim() } });
+    if (r.ok) {
+      session.reload();
+      onChanged();
+    }
+  }
+
   async function remove() {
     if (!window.confirm("Delete this chat? The audit log keeps what was done.")) return;
     const r = await api(`/ai/operate/sessions/${id}`, { method: "DELETE" });
@@ -174,13 +251,19 @@ function Chat({ id, onDeleted }: { id: string; onDeleted: () => void }) {
     <Card
       title={d ? `Chat: ${d.node_names.join(", ")}` : "Chat"}
       actions={
-        <Button variant="danger" onClick={() => void remove()}>
-          Delete chat
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => void rename()}>Rename</Button>
+          <Button onClick={() => void setArchived(!d?.archived)}>{d?.archived ? "Unarchive" : "Archive"}</Button>
+          <Button variant="danger" onClick={() => void remove()}>
+            Delete
+          </Button>
+        </div>
       }
     >
       <div className="space-y-3">
         {session.error && <Alert>{session.error}</Alert>}
+        {d && <ModelPicker session={d} onChanged={() => { session.reload(); onChanged(); }} />}
+        {d?.archived && <Alert kind="info">This chat is archived. You can still read it and continue it; unarchive to bring it back to the list.</Alert>}
         <div className="max-h-[60vh] min-h-48 space-y-3 overflow-auto">
           {(d?.messages ?? []).length === 0 && (
             <div className="space-y-2 text-sm text-fg-secondary">
@@ -236,7 +319,8 @@ function Chat({ id, onDeleted }: { id: string; onDeleted: () => void }) {
 }
 
 export function OperateConsole() {
-  const sessions = useLoad<OperateSessionRow[]>("/ai/operate/sessions");
+  const [showArchived, setShowArchived] = useState(false);
+  const sessions = useLoad<OperateSessionRow[]>(`/ai/operate/sessions?archived=${showArchived}`);
   const [current, setCurrent] = useState<string | "new" | null>(null);
 
   const active = current ?? "new";
@@ -251,6 +335,18 @@ export function OperateConsole() {
         }
       >
         {sessions.error && <Alert>{sessions.error}</Alert>}
+        <div className="mb-2 flex gap-1 text-xs">
+          {[false, true].map((a) => (
+            <button
+              key={String(a)}
+              type="button"
+              className={`rounded px-2 py-1 ${showArchived === a ? "bg-elevated font-medium" : "text-fg-muted hover:bg-elevated"}`}
+              onClick={() => setShowArchived(a)}
+            >
+              {a ? "Archived" : "Active"}
+            </button>
+          ))}
+        </div>
         <ul className="space-y-1 text-sm">
           {(sessions.data ?? []).map((s) => (
             <li key={s.id}>
@@ -264,7 +360,9 @@ export function OperateConsole() {
               </button>
             </li>
           ))}
-          {sessions.data && sessions.data.length === 0 && <li className="text-fg-muted">No chats yet.</li>}
+          {sessions.data && sessions.data.length === 0 && (
+            <li className="text-fg-muted">{showArchived ? "No archived chats." : "No chats yet."}</li>
+          )}
         </ul>
       </Card>
       {active === "new" ? (
@@ -278,6 +376,7 @@ export function OperateConsole() {
         <Chat
           key={active}
           id={active}
+          onChanged={sessions.reload}
           onDeleted={() => {
             sessions.reload();
             setCurrent("new");

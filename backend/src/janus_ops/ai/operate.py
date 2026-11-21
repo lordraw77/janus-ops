@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from janus_ops import audit
-from janus_ops.ai.llm import AIError, chat
+from janus_ops.ai.llm import AIError, chat, review_settings
 from janus_ops.ai.mcp import loader
 from janus_ops.ai.mcp.loop import run_rounds
 from janus_ops.ai.mcp.runner import resolve_network
@@ -59,6 +59,15 @@ def system_prompt(servers: list[str], read_only: bool) -> str:
     return SYSTEM_PROMPT.format(
         servers="\n".join(f"- {s}" for s in servers), mode=READ_ONLY_NOTE if read_only else ""
     )
+
+
+def model_settings(settings: Settings, provider: str, model: str | None) -> Settings:
+    """The settings a chat uses: the chosen provider slot, and its model unless another is picked.
+    Raises AIError("ai_review_not_configured") when the second provider is not set up."""
+    chosen = review_settings(settings) if provider == "review" else settings
+    if model:
+        chosen = chosen.model_copy(update={"ai_model": model})
+    return chosen
 
 
 def plan_only(settings: Settings) -> set[str]:
@@ -173,7 +182,7 @@ async def run_message(
             sess = (
                 await conn.execute(
                     text(
-                        "SELECT created_by, node_ids FROM ai_operate_session"
+                        "SELECT created_by, node_ids, provider, model FROM ai_operate_session"
                         " WHERE id = CAST(:s AS uuid)"
                     ),
                     {"s": session_id},
@@ -186,6 +195,7 @@ async def run_message(
                 )
             )
         actor = str(sess.created_by)
+        settings = model_settings(settings, sess.provider, sess.model)
         fleet = await loader.specs_for_nodes(
             engine,
             vault,

@@ -18,8 +18,17 @@ export type OperateStep = {
   duration_ms: number | null;
 };
 
+export type Provider = {
+  slot: "main" | "review";
+  label: string;
+  host: string | null;
+  model: string | null;
+  available: boolean;
+};
+
 export type OperateMessage = {
   id: number;
+  model: string | null;
   role: "user" | "assistant";
   content: string;
   status: "pending" | "done" | "error";
@@ -33,6 +42,9 @@ export type OperateSessionRow = {
   id: string;
   title: string;
   node_names: string[];
+  archived: boolean;
+  provider: "main" | "review";
+  model: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -311,3 +311,24 @@ def test_operate_is_read_only_unless_everything_allows_writing() -> None:
     )
     assert "READ-ONLY" in operate.system_prompt(["web"], True)
     assert "READ-ONLY" not in operate.system_prompt(["web"], False)
+
+
+def test_a_chat_can_use_the_second_provider_and_its_own_model() -> None:
+    import pytest
+
+    from janus_ops.ai import operate
+    from janus_ops.ai.llm import AIError
+
+    base = make_settings(
+        ai_base_url="https://main/v1",
+        ai_model="big",
+        ai_review_base_url="https://second/v1",
+        ai_review_model="other",
+    )
+    assert operate.model_settings(base, "main", None).ai_model == "big"
+    assert operate.model_settings(base, "main", "small").ai_model == "small"
+    second = operate.model_settings(base, "review", None)
+    assert (second.ai_base_url, second.ai_model) == ("https://second/v1", "other")
+    assert operate.model_settings(base, "review", "x").ai_model == "x"
+    with pytest.raises(AIError):
+        operate.model_settings(make_settings(ai_base_url="https://main/v1"), "review", None)
