@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from alembic import command
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from janus_ops.agents.telemetry import RANGES, _chart_sql
@@ -36,18 +37,26 @@ def migrated() -> Iterator[None]:
 
 
 def refresh(view: str) -> None:
-    """A refresh cannot run inside a transaction."""
+    """A refresh cannot run inside a transaction. TimescaleDB's own refresh policy may be running on
+    the same view: the call then fails with `concurrent refresh`, so it is tried again."""
 
     async def _go() -> None:
         engine = create_async_engine(DB_URL, isolation_level="AUTOCOMMIT")
         try:
             async with engine.connect() as conn:
-                await conn.execute(
-                    text(
-                        f"CALL refresh_continuous_aggregate('{view}', NULL,"
-                        " now() - interval '1 minute')"
-                    )
-                )
+                for attempt in range(10):
+                    try:
+                        await conn.execute(
+                            text(
+                                f"CALL refresh_continuous_aggregate('{view}', NULL,"
+                                " now() - interval '1 minute')"
+                            )
+                        )
+                        return
+                    except DBAPIError as exc:
+                        if "concurrent refresh" not in str(exc) or attempt == 9:
+                            raise
+                        await asyncio.sleep(1)
         finally:
             await engine.dispose()
 
