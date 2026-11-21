@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AiHealthCard, AiProvidersCard, AiRoutesCard } from "@/components/AiProviders";
 import { AiSettingsCard, McpSettingsCard } from "@/components/AiSettings";
@@ -99,21 +99,72 @@ function SystemCard() {
   );
 }
 
+type TabId = "general" | "providers" | "routes" | "models";
+
+const TABS: { id: TabId; label: string; permission?: "ai.manage" }[] = [
+  { id: "general", label: "General" },
+  { id: "providers", label: "AI providers", permission: "ai.manage" },
+  { id: "routes", label: "Routes & health", permission: "ai.manage" },
+  { id: "models", label: "AI models & tools", permission: "ai.manage" },
+];
+
 function Settings() {
   const { can } = useAuth();
+  const tabs = TABS.filter((t) => !t.permission || can(t.permission));
+  const [tab, setTab] = useState<TabId>("general");
+
+  // the tab lives in the URL hash, so a reload or a shared link opens the same one
+  useEffect(() => {
+    const fromHash = window.location.hash.replace("#", "") as TabId;
+    if (tabs.some((t) => t.id === fromHash)) setTab(fromHash); // eslint-disable-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function open(id: TabId) {
+    setTab(id);
+    window.history.replaceState(null, "", `#${id}`);
+  }
+
+  const current = tabs.some((t) => t.id === tab) ? tab : "general";
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold">Settings</h1>
-      {can("environments.manage") && <EnvironmentsCard />}
-      {can("ai.manage") && <AiProvidersCard />}
-      {can("ai.manage") && <AiRoutesCard />}
-      {can("ai.manage") && <AiHealthCard />}
-      {can("ai.manage") && <AiSettingsCard />}
-      {can("ai.manage") && <McpSettingsCard />}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <AgentsCard />
-        <SystemCard />
+      <div className="flex flex-wrap gap-1 border-b border-line" role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={current === t.id}
+            onClick={() => open(t.id)}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-xs font-semibold ${current === t.id ? "border-primary text-primary" : "border-transparent text-fg-muted hover:text-fg"}`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
+      {current === "general" && (
+        <div className="space-y-4">
+          {can("environments.manage") && <EnvironmentsCard />}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <AgentsCard />
+            <SystemCard />
+          </div>
+        </div>
+      )}
+      {current === "providers" && <AiProvidersCard />}
+      {current === "routes" && (
+        <div className="space-y-4">
+          <AiRoutesCard />
+          <AiHealthCard />
+        </div>
+      )}
+      {current === "models" && (
+        <div className="space-y-4">
+          <AiSettingsCard />
+          <McpSettingsCard />
+        </div>
+      )}
     </div>
   );
 }
