@@ -7,6 +7,8 @@
 **One portal for your whole infrastructure lifecycle.**<br/>
 Monitoring · Containers · Virtualization · SSH · Automation · AI troubleshooting — in a single pane of glass.
 
+**[Website](https://lordraw77.github.io/janus-ops/)** · **[Docker Hub](https://hub.docker.com/r/lordraw/janus-ops)** · **[Roadmap](docs/PLAN.md)**
+
 ![Status](https://img.shields.io/badge/status-pre--alpha%200.1.0-F59E0B?style=flat-square)
 ![Backend](https://img.shields.io/badge/backend-FastAPI%20%C2%B7%20Python%203.12-10B981?style=flat-square)
 ![Frontend](https://img.shields.io/badge/frontend-Next.js%20%C2%B7%20TypeScript-22D3EE?style=flat-square)
