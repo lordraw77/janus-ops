@@ -75,7 +75,7 @@ class AgentDetail(AgentOut):
 
 
 def is_windows(row: Any) -> bool:
-    """The signed self-update ships Linux binaries only; a Windows agent is updated by reinstalling."""
+    """Signed self-update ships Linux binaries only; a Windows agent is updated by reinstalling."""
     return str(row.os or "").startswith("Windows")
 
 

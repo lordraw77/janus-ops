@@ -51,6 +51,21 @@ def _der(pem: str) -> bytes | None:
     return base64.b64decode("".join(m.group(1).split())) if m else None
 
 
+# A PowerShell scriptblock as TLS callback fails in Windows PowerShell 5.1: .NET calls it from a
+# thread without a runspace and the connection drops. A compiled static method has no such limit.
+PIN_TYPE = (
+    "using System.Net.Security;using System.Security.Cryptography.X509Certificates;"
+    "public static class JanusPin{public static X509Certificate2 Root;"
+    "public static RemoteCertificateValidationCallback Callback=Check;"
+    "static bool Check(object s,X509Certificate c,X509Chain h,SslPolicyErrors e){"
+    "var x=new X509Chain();x.ChainPolicy.ExtraStore.Add(Root);"
+    "x.ChainPolicy.RevocationMode=X509RevocationMode.NoCheck;"
+    "x.ChainPolicy.VerificationFlags=X509VerificationFlags.AllowUnknownCertificateAuthority;"
+    "x.Build(new X509Certificate2(c));"
+    "return x.ChainElements[x.ChainElements.Count-1].Certificate.Thumbprint==Root.Thumbprint;}}"
+)
+
+
 def pinning(pem: str | None) -> str:
     """PowerShell that accepts the server certificate only if its chain ends in this CA. Without a
     private CA (a certificate the node already trusts) nothing is needed."""
@@ -59,13 +74,10 @@ def pinning(pem: str | None) -> str:
         return ""
     b64 = base64.b64encode(der).decode()
     return (
-        "$ca=New-Object Security.Cryptography.X509Certificates.X509Certificate2(,"
-        f"[Convert]::FromBase64String('{b64}'));"
-        "[Net.ServicePointManager]::ServerCertificateValidationCallback={param($s,$c,$h,$e)"
-        "$x=New-Object Security.Cryptography.X509Certificates.X509Chain;"
-        "$x.ChainPolicy.ExtraStore.Add($ca)|Out-Null;$x.ChainPolicy.RevocationMode='NoCheck';"
-        "$x.ChainPolicy.VerificationFlags='AllowUnknownCertificateAuthority';[void]$x.Build($c);"
-        "$x.ChainElements[$x.ChainElements.Count-1].Certificate.Thumbprint -eq $ca.Thumbprint};"
+        f"Add-Type -TypeDefinition '{PIN_TYPE}';"
+        "[JanusPin]::Root=New-Object Security.Cryptography.X509Certificates.X509Certificate2("
+        f",[Convert]::FromBase64String('{b64}'));"
+        "[Net.ServicePointManager]::ServerCertificateValidationCallback=[JanusPin]::Callback;"
         "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;"
     )
 
