@@ -322,3 +322,10 @@ def test_keys_are_read_from_a_file_and_never_echoed() -> None:
     assert {"groq", "openrouter", "gemini", "cloudflare", "cerebras", "mistral", "nvidia",
             "huggingface", "ollama"} <= sources  # fmt: skip
     assert providers.PRESETS["gemini"].paid  # billed providers are created switched off
+
+
+def test_a_billed_provider_previews_as_disabled() -> None:
+    service = providers.ProviderService(None, None, None)  # type: ignore[arg-type]
+    data = {"type": "gemini", "slug": "gemini", "enabled": False}
+    preview = asyncio.run(service.preview(data))
+    assert preview.enabled is False and preview.slug == "gemini"

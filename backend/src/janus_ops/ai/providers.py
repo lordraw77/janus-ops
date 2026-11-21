@@ -419,11 +419,13 @@ class ProviderService:
         values = normalise(data, None)
         return Provider.from_row(
             _Row(
-                id=str(uuid.uuid4()),
-                enabled=True,
-                budget_tokens_daily=None,
-                budget_tokens_monthly=None,
-                **values,
+                **{
+                    "id": str(uuid.uuid4()),
+                    "enabled": True,
+                    "budget_tokens_daily": None,
+                    "budget_tokens_monthly": None,
+                    **values,
+                }
             )
         )
 
