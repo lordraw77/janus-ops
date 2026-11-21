@@ -5,6 +5,7 @@ ARG NODE_IMAGE=node:24.22.3-alpine3.24
 ARG PYTHON_IMAGE=python:3.12.16-slim-trixie
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.31
 ARG GO_IMAGE=golang:1.27.4-bookworm
+ARG DOCKER_CLI_IMAGE=docker:27.5.1-cli
 
 # ---------------------------------------------------------------- web UI (static export)
 FROM ${NODE_IMAGE} AS ui
@@ -74,6 +75,7 @@ COPY backend/ ./
 RUN uv sync --frozen --no-dev --no-editable
 
 # ---------------------------------------------------------------- runtime
+FROM ${DOCKER_CLI_IMAGE} AS dockercli
 FROM ${PYTHON_IMAGE} AS runtime
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="Janus-Ops" \
@@ -92,6 +94,9 @@ RUN groupadd --system --gid 10001 janus \
  && useradd --system --uid 10001 --gid janus --home-dir /app --shell /usr/sbin/nologin janus \
  && install -d -o 10001 -g 10001 -m 0700 /var/lib/janus-ops/recordings
 
+# docker CLI only: the Copilot starts the MCP servers (linux-mcp, proxmox-mcp) with `docker run -i`
+# when deploy/compose.mcp.yaml gives it a Docker socket; without it the CLI is unused
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=backend --chown=root:root /app/.venv /app/.venv
 COPY --from=ui --chown=root:root /src/frontend/out /app/static
 COPY --from=agent --chown=root:root /out /app/agent

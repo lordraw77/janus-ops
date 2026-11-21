@@ -93,3 +93,7 @@ Goal: give the Copilot real tools (today it only gets a context bundle assembled
 ## 8. Progress
 
 - Step 1 done: `ai/mcp/spec.py` (mapper) with unit tests; permission `ai.operate`.
+- Step 2 done: `ai/mcp/runner.py` (`docker run -i`, secrets only through the client's environment, keys
+  written into a tmpfs by a wrapper, cap-drop ALL; official `mcp` SDK stdio client). Tested against the
+  real images (91 Proxmox tools, 48 Linux tools). The image now carries the docker CLI; the socket comes
+  from the optional `deploy/compose.mcp.yaml`.
