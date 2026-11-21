@@ -1,13 +1,14 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Bubble } from "@/components/Operate";
 import { Player } from "@/components/SessionPlayer";
+import { SortTh } from "@/components/SortTh";
 import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import { api, message } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { nextSort, type SortState } from "@/lib/sort";
 import { type ArchivePage, type ChatItem, type RecordingItem, type Retention, whenExpires } from "@/lib/archive";
 import type { OperateMessage } from "@/lib/operate";
 
@@ -121,19 +122,6 @@ function duration(r: RecordingItem): string {
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 }
 
-function Th({ label, col, sort, onSort }: { label: string; col: string; sort: { col: string; dir: "asc" | "desc" } | null; onSort: (col: string) => void }) {
-  const active = sort?.col === col;
-  const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
-  return (
-    <th className="py-2 pr-3 font-medium" aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
-      <button type="button" onClick={() => onSort(col)} className={`inline-flex items-center gap-1 hover:text-fg ${active ? "text-fg" : ""}`}>
-        {label}
-        <Icon className={`h-3 w-3 ${active ? "" : "opacity-40"}`} aria-hidden />
-      </button>
-    </th>
-  );
-}
-
 function ArchiveList({ kind }: { kind: Kind }) {
   const { can } = useAuth();
   const manage = can("archive.manage");
@@ -146,7 +134,7 @@ function ArchiveList({ kind }: { kind: Kind }) {
   const [group, setGroup] = useState("");
   const [options, setOptions] = useState<{ hosts: string[]; groups: { id: string; name: string }[] }>({ hosts: [], groups: [] });
   const [applied, setApplied] = useState({ q: "", inContent: false, keep: "", since: "", until: "", host: "", group: "" });
-  const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
+  const [sort, setSort] = useState<SortState>(null);
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<ArchivePage<RecordingItem | ChatItem> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -201,7 +189,7 @@ function ArchiveList({ kind }: { kind: Kind }) {
 
   function toggleSort(col: string) {
     setOffset(0);
-    setSort((cur) => (cur?.col === col ? (cur.dir === "asc" ? { col, dir: "desc" } : null) : { col, dir: "asc" }));
+    setSort((cur) => nextSort(cur, col));
   }
 
   function search() {
@@ -320,23 +308,23 @@ function ArchiveList({ kind }: { kind: Kind }) {
               )}
               {kind === "recordings" ? (
                 <>
-                  <Th label="Started" col="started" sort={sort} onSort={toggleSort} />
-                  <Th label="User" col="user" sort={sort} onSort={toggleSort} />
-                  <Th label="Node" col="node" sort={sort} onSort={toggleSort} />
-                  <Th label="Remote user" col="remote_user" sort={sort} onSort={toggleSort} />
-                  <Th label="Duration" col="duration" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Started" col="started" sort={sort} onSort={toggleSort} />
+                  <SortTh label="User" col="user" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Node" col="node" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Remote user" col="remote_user" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Duration" col="duration" sort={sort} onSort={toggleSort} />
                 </>
               ) : (
                 <>
-                  <Th label="Last message" col="updated" sort={sort} onSort={toggleSort} />
-                  <Th label="Chat" col="title" sort={sort} onSort={toggleSort} />
-                  <Th label="User" col="user" sort={sort} onSort={toggleSort} />
-                  <Th label="Servers" col="servers" sort={sort} onSort={toggleSort} />
-                  <Th label="Messages" col="messages" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Last message" col="updated" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Chat" col="title" sort={sort} onSort={toggleSort} />
+                  <SortTh label="User" col="user" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Servers" col="servers" sort={sort} onSort={toggleSort} />
+                  <SortTh label="Messages" col="messages" sort={sort} onSort={toggleSort} />
                 </>
               )}
-              <Th label="Archived" col="archived" sort={sort} onSort={toggleSort} />
-              <Th label="Deleted" col="expires" sort={sort} onSort={toggleSort} />
+              <SortTh label="Archived" col="archived" sort={sort} onSort={toggleSort} />
+              <SortTh label="Deleted" col="expires" sort={sort} onSort={toggleSort} />
               <th />
             </tr>
           </thead>

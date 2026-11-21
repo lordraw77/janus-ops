@@ -22,16 +22,20 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
 import type { TerminalStatus } from "@/components/TerminalView";
 import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import { formatBytes, formatDuration } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { type Getters, useSortedRows } from "@/lib/sort";
 import {
   BACKUP_STYLE,
   type BackupAudit,
+  type BackupRow,
   type Cluster,
   type Guest,
   type GuestDetail,
@@ -627,6 +631,16 @@ function GuestsTab({
   );
 }
 
+type StorageGroup = { key: string; list: Overview["storage"] };
+const STORAGE_SORT: Getters<StorageGroup> = {
+  storage: (g) => g.list[0].storage,
+  nodes: (g) => (g.list[0].shared ? "shared" : g.list[0].node),
+  type: (g) => g.list[0].type,
+  content: (g) => g.list[0].content.join(","),
+  usage: (g) => (g.list[0].maxdisk ? (g.list[0].disk ?? 0) / g.list[0].maxdisk : null),
+  size: (g) => g.list[0].disk,
+};
+
 function NodesTab({ data, onShell }: { data: Overview; onShell: (node: string) => void }) {
   const { can } = useAuth();
   const shell = can("proxmox.console") && can("ssh.connect");
@@ -635,6 +649,8 @@ function NodesTab({ data, onShell }: { data: Overview; onShell: (node: string) =
     const key = s.shared ? s.storage : `${s.node}/${s.storage}`;
     storage.set(key, [...(storage.get(key) ?? []), s]);
   }
+  const storageRows = useMemo(() => [...storage.entries()].map(([key, list]) => ({ key, list })), [data.storage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { sorted: storageSorted, sort: storageSort, toggle: storageToggle } = useSortedRows(storageRows, STORAGE_SORT);
   return (
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -695,16 +711,16 @@ function NodesTab({ data, onShell }: { data: Overview; onShell: (node: string) =
           <table className="w-full text-xs">
             <thead className="text-left text-fg-muted">
               <tr>
-                <th className="py-1 pr-3 font-semibold">Storage</th>
-                <th className="py-1 pr-3 font-semibold">Nodes</th>
-                <th className="py-1 pr-3 font-semibold">Type</th>
-                <th className="py-1 pr-3 font-semibold">Content</th>
-                <th className="py-1 pr-3 font-semibold">Usage</th>
-                <th className="py-1 text-right font-semibold">Used / total</th>
+                <SortTh label="Storage" col="storage" sort={storageSort} onSort={storageToggle} className="py-1 pr-3 font-semibold" />
+                <SortTh label="Nodes" col="nodes" sort={storageSort} onSort={storageToggle} className="py-1 pr-3 font-semibold" />
+                <SortTh label="Type" col="type" sort={storageSort} onSort={storageToggle} className="py-1 pr-3 font-semibold" />
+                <SortTh label="Content" col="content" sort={storageSort} onSort={storageToggle} className="py-1 pr-3 font-semibold" />
+                <SortTh label="Usage" col="usage" sort={storageSort} onSort={storageToggle} className="py-1 pr-3 font-semibold" />
+                <SortTh label="Used / total" col="size" sort={storageSort} onSort={storageToggle} className="py-1 text-right font-semibold" />
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {[...storage.entries()].map(([key, list]) => {
+              {storageSorted.map(({ key, list }) => {
                 const s = list[0];
                 const down = list.some((x) => x.status !== "available");
                 return (
@@ -733,9 +749,38 @@ function NodesTab({ data, onShell }: { data: Overview; onShell: (node: string) =
   );
 }
 
+const BACKUP_SORT: Getters<BackupRow> = {
+  id: (g) => g.vmid,
+  guest: (g) => g.name,
+  node: (g) => g.node,
+  status: (g) => BACKUP_ORDER[g.status],
+  last: (g) => g.last_backup,
+  age: (g) => g.age_s,
+  size: (g) => g.size,
+  storage: (g) => g.storage,
+  archives: (g) => g.archives,
+  jobs: (g) => g.jobs.join(","),
+};
+const BACKUP_ORDER: Record<string, number> = { failed: 0, missing: 1, stale: 2, unscheduled: 3, ok: 4 };
+
 function BackupsTab({ clusterKey, onLog }: { clusterKey: string; onLog: (t: { node: string; upid: string; label: string }) => void }) {
   const [maxAge, setMaxAge] = useState("");
   const audit = useResource<BackupAudit>(`/proxmox/${clusterKey}/backups${maxAge ? `?max_age_h=${maxAge}` : ""}`);
+  const [bq, setBq] = useState("");
+  const [bNode, setBNode] = useState("");
+  const [bStatus, setBStatus] = useState("");
+  const guestsAll = useMemo(() => audit.data?.guests ?? [], [audit.data]);
+  const bNodes = useMemo(() => [...new Set(guestsAll.map((g) => g.node))].sort(), [guestsAll]);
+  const bShown = useMemo(() => {
+    const needle = bq.trim().toLowerCase();
+    return guestsAll.filter(
+      (g) =>
+        (!needle || String(g.vmid).includes(needle) || (g.name ?? "").toLowerCase().includes(needle) || (g.storage ?? "").toLowerCase().includes(needle)) &&
+        (!bNode || g.node === bNode) &&
+        (!bStatus || g.status === bStatus),
+    );
+  }, [guestsAll, bq, bNode, bStatus]);
+  const { sorted: bSorted, sort: bSort, toggle: bToggle } = useSortedRows(bShown, BACKUP_SORT);
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -764,24 +809,49 @@ function BackupsTab({ clusterKey, onLog }: { clusterKey: string; onLog: (t: { no
       {audit.data && audit.data.errors.length > 0 && <Alert kind="info">Partial result: {audit.data.errors.join("; ")}</Alert>}
       {audit.data && (
         <>
+          <FilterBar>
+            <Field label="Search">
+              <TextInput placeholder="ID, guest name, storage" value={bq} onChange={(e) => setBq(e.target.value)} />
+            </Field>
+            <Field label="Host (node)">
+              <Select value={bNode} onChange={(e) => setBNode(e.target.value)}>
+                <option value="">All nodes</option>
+                {bNodes.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Backup">
+              <Select value={bStatus} onChange={(e) => setBStatus(e.target.value)}>
+                <option value="">Any state</option>
+                {(["failed", "missing", "stale", "unscheduled", "ok"] as const).map((st) => (
+                  <option key={st} value={st}>
+                    {BACKUP_STYLE[st].label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </FilterBar>
           <div className="overflow-x-auto rounded-lg border border-line bg-surface">
             <table className="w-full text-xs">
               <thead className="bg-elevated text-left text-fg-secondary">
                 <tr>
-                  <th className="px-2 py-2 font-semibold">ID</th>
-                  <th className="px-2 py-2 font-semibold">Guest</th>
-                  <th className="px-2 py-2 font-semibold">Node</th>
-                  <th className="px-2 py-2 font-semibold">Backup</th>
-                  <th className="px-2 py-2 font-semibold">Last backup</th>
-                  <th className="px-2 py-2 text-right font-semibold">Age / allowed</th>
-                  <th className="px-2 py-2 text-right font-semibold">Size</th>
-                  <th className="px-2 py-2 font-semibold">Storage</th>
-                  <th className="px-2 py-2 text-right font-semibold">Archives</th>
-                  <th className="px-2 py-2 font-semibold">Jobs</th>
+                  <SortTh label="ID" col="id" sort={bSort} onSort={bToggle} className="px-2 py-2 font-semibold" />
+                  <SortTh label="Guest" col="guest" sort={bSort} onSort={bToggle} className="px-2 py-2 font-semibold" />
+                  <SortTh label="Node" col="node" sort={bSort} onSort={bToggle} className="px-2 py-2 font-semibold" />
+                  <SortTh label="Backup" col="status" sort={bSort} onSort={bToggle} className="px-2 py-2 font-semibold" />
+                  <SortTh label="Last backup" col="last" sort={bSort} onSort={bToggle} className="px-2 py-2 font-semibold" />
+                  <SortTh label="Age / allowed" col="age" sort={bSort} onSort={bToggle} className="px-2 py-2 text-right font-semibold" />
+                  <SortTh label="Size" col="size" sort={bSort} onSort={bToggle} className="px-2 py-2 text-right font-semibold" />
+                  <SortTh label="Storage" col="storage" sort={bSort} onSort={bToggle} className="px-2 py-2 font-semibold" />
+                  <SortTh label="Archives" col="archives" sort={bSort} onSort={bToggle} className="px-2 py-2 text-right font-semibold" />
+                  <SortTh label="Jobs" col="jobs" sort={bSort} onSort={bToggle} className="px-2 py-2 font-semibold" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
-                {audit.data.guests.map((g) => (
+                {bSorted.map((g) => (
                   <tr key={g.vmid}>
                     <td className="px-2 py-2 font-mono">{g.vmid}</td>
                     <td className="px-2 py-2 font-semibold">
@@ -864,12 +934,61 @@ function BackupsTab({ clusterKey, onLog }: { clusterKey: string; onLog: (t: { no
   );
 }
 
+const TASK_SORT: Getters<Task> = {
+  started: (t) => t.starttime,
+  node: (t) => t.node,
+  task: (t) => taskLabel(t.type, t.id),
+  user: (t) => t.user,
+  duration: (t) => (t.endtime ? t.endtime - t.starttime : null),
+  status: (t) => t.status ?? "running",
+};
+
 function TasksTab({ clusterKey, onLog }: { clusterKey: string; onLog: (t: { node: string; upid: string; label: string }) => void }) {
   const tasks = useResource<Task[]>(`/proxmox/${clusterKey}/tasks`);
+  const [tq, setTq] = useState("");
+  const [tNode, setTNode] = useState("");
+  const [tStatus, setTStatus] = useState("");
+  const all = useMemo(() => tasks.data ?? [], [tasks.data]);
+  const tNodes = useMemo(() => [...new Set(all.map((t) => t.node))].sort(), [all]);
+  const tShown = useMemo(() => {
+    const needle = tq.trim().toLowerCase();
+    return all.filter(
+      (t) =>
+        (!needle || [taskLabel(t.type, t.id), t.user, t.node].some((v) => v.toLowerCase().includes(needle))) &&
+        (!tNode || t.node === tNode) &&
+        (!tStatus || (tStatus === "running" ? !t.status : tStatus === "ok" ? t.status === "OK" : !!t.status && t.status !== "OK")),
+    );
+  }, [all, tq, tNode, tStatus]);
+  const { sorted: tSorted, sort: tSort, toggle: tToggle } = useSortedRows(tShown, TASK_SORT);
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
-        <Button onClick={tasks.reload}>
+      <div className="flex items-end gap-3">
+        <div className="min-w-0 flex-1">
+          <FilterBar>
+            <Field label="Search">
+              <TextInput placeholder="Task, user, node" value={tq} onChange={(e) => setTq(e.target.value)} />
+            </Field>
+            <Field label="Host (node)">
+              <Select value={tNode} onChange={(e) => setTNode(e.target.value)}>
+                <option value="">All nodes</option>
+                {tNodes.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select value={tStatus} onChange={(e) => setTStatus(e.target.value)}>
+                <option value="">Any</option>
+                <option value="running">Running</option>
+                <option value="ok">OK</option>
+                <option value="failed">Failed or warnings</option>
+              </Select>
+            </Field>
+          </FilterBar>
+        </div>
+        <Button className="mb-3 h-[34px]" onClick={tasks.reload}>
           <RefreshCw className="h-3 w-3" aria-hidden /> Refresh
         </Button>
       </div>
@@ -878,17 +997,17 @@ function TasksTab({ clusterKey, onLog }: { clusterKey: string; onLog: (t: { node
         <table className="w-full text-xs">
           <thead className="bg-elevated text-left text-fg-secondary">
             <tr>
-              <th className="px-2 py-2 font-semibold">Started</th>
-              <th className="px-2 py-2 font-semibold">Node</th>
-              <th className="px-2 py-2 font-semibold">Task</th>
-              <th className="px-2 py-2 font-semibold">User</th>
-              <th className="px-2 py-2 text-right font-semibold">Duration</th>
-              <th className="px-2 py-2 font-semibold">Status</th>
+              <SortTh label="Started" col="started" sort={tSort} onSort={tToggle} className="px-2 py-2 font-semibold" />
+              <SortTh label="Node" col="node" sort={tSort} onSort={tToggle} className="px-2 py-2 font-semibold" />
+              <SortTh label="Task" col="task" sort={tSort} onSort={tToggle} className="px-2 py-2 font-semibold" />
+              <SortTh label="User" col="user" sort={tSort} onSort={tToggle} className="px-2 py-2 font-semibold" />
+              <SortTh label="Duration" col="duration" sort={tSort} onSort={tToggle} className="px-2 py-2 text-right font-semibold" />
+              <SortTh label="Status" col="status" sort={tSort} onSort={tToggle} className="px-2 py-2 font-semibold" />
               <th className="px-2 py-2" />
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {(tasks.data ?? []).map((t) => (
+            {tSorted.map((t) => (
               <tr key={t.upid}>
                 <td className="whitespace-nowrap px-2 py-1.5 font-mono">{when(t.starttime)}</td>
                 <td className="px-2 py-1.5 font-mono">{t.node}</td>

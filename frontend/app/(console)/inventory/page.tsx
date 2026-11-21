@@ -14,6 +14,8 @@ import {
 } from "@/components/ServicesEditor";
 import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
+import { SortTh } from "@/components/SortTh";
+import { type Getters, useSortedRows } from "@/lib/sort";
 import { isOlder } from "@/lib/version";
 import { RequirePermission, useAuth } from "@/lib/auth";
 import { useEnvironments } from "@/lib/environments";
@@ -343,6 +345,18 @@ function NodeDialog({
 }
 
 // ---------------------------------------------------------------- nodes tab
+const NODE_SORT: Getters<InventoryNode> = {
+  name: (n) => n.name,
+  address: (n) => n.address,
+  env: (n) => n.environment,
+  caps: (n) => n.capabilities.filter((c) => c.enabled).length,
+  services: (n) => n.services.length,
+  agent: (n) => (n.agent ? (n.agent.version ?? "?") : null),
+  installed: (n) => (n.agent && !n.agent.revoked ? n.agent.install_path : null),
+  labels: (n) => [...n.tags, ...n.groups].join(" "),
+  parent: (n) => n.parent?.name,
+};
+
 function NodesTab({ groups }: { groups: Group[] }) {
   const { can } = useAuth();
   const manage = can("inventory.manage");
@@ -352,6 +366,7 @@ function NodesTab({ groups }: { groups: Group[] }) {
   const { names: environmentNames } = useEnvironments();
   const [env, setEnv] = useState("");
   const [cap, setCap] = useState("");
+  const [group, setGroup] = useState("");
   const { data: nodes, error, reload } = useResource<InventoryNode[]>("/nodes");
   const creds = useResource<Credential[]>("/credentials");
   const [editing, setEditing] = useState<InventoryNode | "new" | null>(null);
@@ -366,9 +381,11 @@ function NodesTab({ groups }: { groups: Group[] }) {
           n.address.toLowerCase().includes(needle) ||
           n.tags.some((t) => t.toLowerCase().includes(needle))) &&
         (!env || n.environment === env) &&
+        (!group || n.groups.includes(group)) &&
         (!cap || n.capabilities.some((c) => c.kind === cap && c.enabled)),
     );
-  }, [nodes, q, env, cap]);
+  }, [nodes, q, env, cap, group]);
+  const { sorted, sort, toggle } = useSortedRows(shown, NODE_SORT);
 
   const canUpdateAgents = can("agents.manage");
   // the signed agent is the one of the server's own version: an agent below it can be updated
@@ -433,6 +450,14 @@ function NodesTab({ groups }: { groups: Group[] }) {
             <option key={e}>{e}</option>
           ))}
         </select>
+        <select value={group} onChange={(e) => setGroup(e.target.value)} className={`${SELECT} max-w-[11rem]`} aria-label="Group">
+          <option value="">All groups</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.name}>
+              {g.name}
+            </option>
+          ))}
+        </select>
         <select value={cap} onChange={(e) => setCap(e.target.value)} className={`${SELECT} max-w-[11rem]`} aria-label="Capability">
           <option value="">All capabilities</option>
           {(Object.keys(CAPABILITIES) as CapabilityKind[]).map((k) => (
@@ -451,20 +476,20 @@ function NodesTab({ groups }: { groups: Group[] }) {
           <table className="w-full text-left text-xs">
             <thead className="border-b border-line text-fg-muted">
               <tr>
-                <th className="py-2 pr-3 font-medium">Node</th>
-                <th className="py-2 pr-3 font-medium">Address</th>
-                <th className="py-2 pr-3 font-medium">Env</th>
-                <th className="py-2 pr-3 font-medium">Capabilities</th>
-                <th className="py-2 pr-3 font-medium">Services</th>
-                <th className="py-2 pr-3 font-medium">Agent</th>
-                <th className="py-2 pr-3 font-medium">Installed at</th>
-                <th className="py-2 pr-3 font-medium">Tags / groups</th>
-                <th className="py-2 pr-3 font-medium">Depends on</th>
+                <SortTh label="Node" col="name" sort={sort} onSort={toggle} />
+                <SortTh label="Address" col="address" sort={sort} onSort={toggle} />
+                <SortTh label="Env" col="env" sort={sort} onSort={toggle} />
+                <SortTh label="Capabilities" col="caps" sort={sort} onSort={toggle} />
+                <SortTh label="Services" col="services" sort={sort} onSort={toggle} />
+                <SortTh label="Agent" col="agent" sort={sort} onSort={toggle} />
+                <SortTh label="Installed at" col="installed" sort={sort} onSort={toggle} />
+                <SortTh label="Tags / groups" col="labels" sort={sort} onSort={toggle} />
+                <SortTh label="Depends on" col="parent" sort={sort} onSort={toggle} />
                 <th />
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {shown.map((n) => (
+              {sorted.map((n) => (
                 <tr key={n.id}>
                   <td className="py-2 pr-3">
                     <Link href={`/nodes/?id=${n.id}`} className="flex items-center gap-1.5 font-semibold hover:text-primary">
@@ -641,11 +666,14 @@ function GroupDialog({ group, onClose, onSaved }: { group: Group | null; onClose
   );
 }
 
+const GROUP_SORT: Getters<Group> = { name: (g) => g.name, nodes: (g) => g.node_count, vars: (g) => JSON.stringify(g.ansible_vars) };
+
 function GroupsTab({ groups, reload }: { groups: Group[]; reload: () => void }) {
   const { can } = useAuth();
   const manage = can("inventory.manage");
   const [editing, setEditing] = useState<Group | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { sorted, sort, toggle } = useSortedRows(groups, GROUP_SORT);
 
   async function remove(g: Group) {
     if (!window.confirm(`Delete group "${g.name}"? Its nodes are not deleted.`)) return;
@@ -669,14 +697,14 @@ function GroupsTab({ groups, reload }: { groups: Group[]; reload: () => void }) 
       <table className="w-full text-left text-xs">
         <thead className="border-b border-line text-fg-muted">
           <tr>
-            <th className="py-2 pr-3 font-medium">Group</th>
-            <th className="py-2 pr-3 font-medium">Nodes</th>
-            <th className="py-2 pr-3 font-medium">Ansible variables</th>
+            <SortTh label="Group" col="name" sort={sort} onSort={toggle} />
+            <SortTh label="Nodes" col="nodes" sort={sort} onSort={toggle} />
+            <SortTh label="Ansible variables" col="vars" sort={sort} onSort={toggle} />
             <th />
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
-          {groups.map((g) => (
+          {sorted.map((g) => (
             <tr key={g.id}>
               <td className="py-2 pr-3">
                 <div className="font-semibold">{g.name}</div>

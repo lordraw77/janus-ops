@@ -3,9 +3,14 @@
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
-import { Alert, Button, Card, TextInput } from "@/components/ui";
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
+
+import { Alert, Button, Card, Field, Select, TextInput } from "@/components/ui";
 import { api, message } from "@/lib/api";
 import { RequirePermission } from "@/lib/auth";
+import type { Group, InventoryNode } from "@/lib/inventory";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 type Event = {
   id: number;
@@ -20,6 +25,16 @@ type Event = {
 type Page = { events: Event[]; next_before_id: number | null };
 type Chain = { intact: boolean; first_broken_id: number | null; events: number };
 
+const EVENT_SORT: Getters<Event> = {
+  id: (e) => e.id,
+  time: (e) => e.ts,
+  actor: (e) => e.actor_name,
+  action: (e) => e.action,
+  target: (e) => (e.target_id ? `${e.target_type}:${e.target_id}` : null),
+  source: (e) => e.source_ip,
+  details: (e) => (Object.keys(e.payload).length ? JSON.stringify(e.payload) : null),
+};
+
 function actionColor(action: string): string {
   if (action.endsWith("_failed") || action.includes("deleted")) return "text-crit";
   if (action.startsWith("auth.breakglass") || action.includes("reset")) return "text-warn";
@@ -33,7 +48,12 @@ function AuditLog() {
   const [chain, setChain] = useState<Chain | null>(null);
   const [action, setAction] = useState("");
   const [actor, setActor] = useState("");
+  const [host, setHost] = useState("");
+  const [group, setGroup] = useState("");
+  const [hosts, setHosts] = useState<string[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { sorted, sort, toggle } = useSortedRows(events, EVENT_SORT);
 
   const load = useCallback(
     async (before?: number) => {
@@ -41,13 +61,15 @@ function AuditLog() {
       if (before) params.set("before_id", String(before));
       if (action.trim()) params.set("action", action.trim());
       if (actor.trim()) params.set("actor", actor.trim());
+      if (host) params.set("host", host);
+      if (group) params.set("group", group);
       const r = await api<Page>(`/audit?${params}`);
       if (!r.ok) return setError(message(r.code));
       setError(null);
       setEvents((prev) => (before ? [...prev, ...r.data.events] : r.data.events));
       setNext(r.data.next_before_id);
     },
-    [action, actor],
+    [action, actor, host, group],
   );
 
   useEffect(() => {
@@ -60,6 +82,13 @@ function AuditLog() {
     });
     void api<Chain>("/audit/verify").then((r) => {
       if (!cancelled && r.ok) setChain(r.data);
+    });
+    // the choices for the host and group filters (an auditor without them just gets no list)
+    void api<InventoryNode[]>("/nodes").then((r) => {
+      if (!cancelled && r.ok) setHosts(r.data.map((n) => n.name).sort());
+    });
+    void api<Group[]>("/groups").then((r) => {
+      if (!cancelled && r.ok) setGroups(r.data);
     });
     return () => {
       cancelled = true;
@@ -87,29 +116,55 @@ function AuditLog() {
           ))}
       </div>
       <Card>
-        <form onSubmit={filter} className="mb-4 flex flex-wrap items-end gap-2">
-          <TextInput placeholder="Action prefix, e.g. auth.login" value={action} onChange={(e) => setAction(e.target.value)} className="max-w-xs" />
-          <TextInput placeholder="Actor" value={actor} onChange={(e) => setActor(e.target.value)} className="max-w-[12rem]" />
-          <Button type="submit" variant="primary">
-            Filter
-          </Button>
+        <form onSubmit={filter}>
+          <FilterBar>
+            <Field label="Action">
+              <TextInput placeholder="Prefix, e.g. auth.login" value={action} onChange={(e) => setAction(e.target.value)} />
+            </Field>
+            <Field label="Actor">
+              <TextInput placeholder="User name" value={actor} onChange={(e) => setActor(e.target.value)} />
+            </Field>
+            <Field label="Host">
+              <Select value={host} onChange={(e) => setHost(e.target.value)}>
+                <option value="">All hosts</option>
+                {hosts.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Group">
+              <Select value={group} onChange={(e) => setGroup(e.target.value)}>
+                <option value="">All groups</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button type="submit" variant="primary" className="h-[34px] px-5">
+              Filter
+            </Button>
+          </FilterBar>
         </form>
         {error && <Alert>{error}</Alert>}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="border-b border-line text-fg-muted">
               <tr>
-                <th className="py-2 pr-3 font-medium">#</th>
-                <th className="py-2 pr-3 font-medium">Time</th>
-                <th className="py-2 pr-3 font-medium">Actor</th>
-                <th className="py-2 pr-3 font-medium">Action</th>
-                <th className="py-2 pr-3 font-medium">Target</th>
-                <th className="py-2 pr-3 font-medium">Source</th>
-                <th className="py-2 font-medium">Details</th>
+                <SortTh label="#" col="id" sort={sort} onSort={toggle} />
+                <SortTh label="Time" col="time" sort={sort} onSort={toggle} />
+                <SortTh label="Actor" col="actor" sort={sort} onSort={toggle} />
+                <SortTh label="Action" col="action" sort={sort} onSort={toggle} />
+                <SortTh label="Target" col="target" sort={sort} onSort={toggle} />
+                <SortTh label="Source" col="source" sort={sort} onSort={toggle} />
+                <SortTh label="Details" col="details" sort={sort} onSort={toggle} className="py-2 font-medium" />
               </tr>
             </thead>
             <tbody className="divide-y divide-line font-mono">
-              {events.map((e) => (
+              {sorted.map((e) => (
                 <tr key={e.id}>
                   <td className="py-1.5 pr-3 text-fg-muted">{e.id}</td>
                   <td className="whitespace-nowrap py-1.5 pr-3 text-fg-secondary">{new Date(e.ts).toLocaleString()}</td>

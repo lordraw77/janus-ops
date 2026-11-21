@@ -1,5 +1,6 @@
 """/api/v1/audit: browse the audit log and verify its hash chain (permission audit.read)."""
 
+import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -46,6 +47,8 @@ async def list_events(
     before_id: Annotated[int | None, Query(ge=1)] = None,
     action: Annotated[str | None, Query(max_length=64)] = None,
     actor: Annotated[str | None, Query(max_length=128)] = None,
+    host: Annotated[str | None, Query(max_length=253)] = None,
+    group: uuid.UUID | None = None,
 ) -> AuditPage:
     # Newest first; keyset pagination on the id (stable while new events arrive)
     async with request.app.state.engine.connect() as conn:
@@ -56,6 +59,11 @@ async def list_events(
                 " WHERE (CAST(:before AS bigint) IS NULL OR id < :before)"
                 " AND (CAST(:action AS text) IS NULL OR action LIKE :action_prefix)"
                 " AND (CAST(:actor AS text) IS NULL OR lower(actor_name) = lower(:actor))"
+                " AND (CAST(:host AS text) IS NULL OR (target_type = 'node'"
+                " AND target_id = :host))"
+                " AND (CAST(:grp AS uuid) IS NULL OR (target_type = 'node' AND target_id IN"
+                " (SELECT n.name FROM node n JOIN node_group_member m ON m.node_id = n.id"
+                " WHERE m.group_id = CAST(:grp AS uuid))))"
                 " ORDER BY id DESC LIMIT :limit"
             ),
             {
@@ -63,6 +71,8 @@ async def list_events(
                 "action": action,
                 "action_prefix": f"{action}%" if action else None,
                 "actor": actor,
+                "host": host,
+                "grp": group,
                 "limit": limit + 1,
             },
         )

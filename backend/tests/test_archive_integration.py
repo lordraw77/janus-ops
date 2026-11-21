@@ -167,3 +167,12 @@ def test_two_steps_then_search_keep_and_delete() -> None:
             admin.post(f"{BASE}/delete", json={"kind": "chats", "ids": too_many}).status_code == 422
         )
     run_sql("DELETE FROM terminal_session WHERE id = CAST(:i AS uuid)", {"i": fresh})
+
+
+def test_audit_log_filters_by_host_and_group() -> None:
+    with signed_in("alice") as admin:
+        everything = admin.get("/api/v1/audit", params={"limit": 5}).json()["events"]
+        assert everything  # the archive tests above wrote some
+        for params in ({"host": "no-such-host"}, {"group": str(uuid.uuid4())}):
+            assert admin.get("/api/v1/audit", params=params).json()["events"] == []
+        assert admin.get("/api/v1/audit", params={"group": "not-a-uuid"}).status_code == 422

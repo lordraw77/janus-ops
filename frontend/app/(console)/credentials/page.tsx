@@ -1,12 +1,15 @@
 "use client";
 
 import { KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
-import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
+import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { RequirePermission, useAuth } from "@/lib/auth";
 import { type Credential, KIND_LABELS } from "@/lib/inventory";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 const USERNAME_HINT: Record<string, string> = {
   ssh_key: "Default SSH user, e.g. root",
@@ -213,10 +216,33 @@ function EditDialog({ cred, onClose, onDone }: { cred: Credential; onClose: () =
   );
 }
 
+const CRED_SORT: Getters<Credential> = {
+  name: (c) => c.name,
+  kind: (c) => KIND_LABELS[c.kind] ?? c.kind,
+  username: (c) => c.username,
+  key: (c) => c.public_info.key_type,
+  used: (c) => c.used_by.length,
+  updated: (c) => c.updated_at,
+};
+
 function CredentialsList() {
   const { can } = useAuth();
   const manage = can("credentials.manage");
   const { data, error, reload } = useResource<Credential[]>("/credentials");
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState("");
+  const [host, setHost] = useState("");
+  const hosts = useMemo(() => [...new Set((data ?? []).flatMap((c) => c.used_by.map((u) => u.node_name)))].sort(), [data]);
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (data ?? []).filter(
+      (c) =>
+        (!needle || [c.name, c.username ?? "", c.description ?? ""].some((v) => v.toLowerCase().includes(needle))) &&
+        (!kind || c.kind === kind) &&
+        (!host || c.used_by.some((u) => u.node_name === host)),
+    );
+  }, [data, q, kind, host]);
+  const { sorted, sort, toggle } = useSortedRows(shown, CRED_SORT);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -255,21 +281,48 @@ function CredentialsList() {
         {(error || actionError) && <Alert>{error ?? actionError}</Alert>}
         {data && data.length === 0 && <p className="text-sm text-fg-muted">No credentials yet.</p>}
         {data && data.length > 0 && (
+          <FilterBar>
+            <Field label="Search">
+              <TextInput placeholder="Name, user, description" value={q} onChange={(e) => setQ(e.target.value)} />
+            </Field>
+            <Field label="Type">
+              <Select value={kind} onChange={(e) => setKind(e.target.value)}>
+                <option value="">All types</option>
+                {[...new Set(data.map((c) => c.kind))].map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_LABELS[k] ?? k}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Used by host">
+              <Select value={host} onChange={(e) => setHost(e.target.value)}>
+                <option value="">Any host</option>
+                {hosts.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </FilterBar>
+        )}
+        {data && data.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="border-b border-line text-fg-muted">
                 <tr>
-                  <th className="py-2 pr-3 font-medium">Name</th>
-                  <th className="py-2 pr-3 font-medium">Type</th>
-                  <th className="py-2 pr-3 font-medium">Username</th>
-                  <th className="py-2 pr-3 font-medium">Key</th>
-                  <th className="py-2 pr-3 font-medium">Used by</th>
-                  <th className="py-2 pr-3 font-medium">Updated</th>
+                  <SortTh label="Name" col="name" sort={sort} onSort={toggle} />
+                  <SortTh label="Type" col="kind" sort={sort} onSort={toggle} />
+                  <SortTh label="Username" col="username" sort={sort} onSort={toggle} />
+                  <SortTh label="Key" col="key" sort={sort} onSort={toggle} />
+                  <SortTh label="Used by" col="used" sort={sort} onSort={toggle} />
+                  <SortTh label="Updated" col="updated" sort={sort} onSort={toggle} />
                   <th />
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
-                {data.map((c) => (
+                {sorted.map((c) => (
                   <tr key={c.id}>
                     <td className="py-2 pr-3">
                       <div className="font-semibold">{c.name}</div>

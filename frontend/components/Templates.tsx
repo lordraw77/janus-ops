@@ -12,9 +12,12 @@ import {
   TemplateApplyDialog,
   thresholds,
 } from "@/components/TemplateApply";
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
 import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 const CATEGORIES = ["proxmox", "database", "web", "server", "network", "nas", "ups", "generic"];
 const REQUIRES = ["ssh", "agent", "proxmox", "docker", "snmp", "fritzbox", "postgres"];
@@ -322,9 +325,17 @@ function DetectTab({ draft, readOnly, set }: { draft: Draft; readOnly: boolean; 
   );
 }
 
+const TEMPLATE_NODE_SORT: Getters<TemplateNode> = {
+  node: (n) => n.node_name,
+  checks: (n) => n.checks,
+  applied: (n) => n.applied_version,
+};
+
 function NodesTab({ template, onChanged }: { template: Template; onChanged: () => void }) {
   const { can } = useAuth();
   const nodes = useResource<TemplateNode[]>(`/templates/${template.id}/nodes`);
+  const nodeRows = useMemo(() => nodes.data ?? [], [nodes.data]);
+  const { sorted: nsorted, sort: nsort, toggle: ntoggle } = useSortedRows(nodeRows, TEMPLATE_NODE_SORT);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [applying, setApplying] = useState<string | null>(null);
@@ -362,15 +373,15 @@ function NodesTab({ template, onChanged }: { template: Template; onChanged: () =
         <table className="w-full text-left text-xs">
           <thead className="text-fg-muted">
             <tr>
-              <th className="py-1">Node</th>
-              <th className="py-1">Checks</th>
-              <th className="py-1">Macros</th>
-              <th className="py-1">Applied</th>
+              <SortTh label="Node" col="node" sort={nsort} onSort={ntoggle} className="py-1 pr-3" />
+              <SortTh label="Checks" col="checks" sort={nsort} onSort={ntoggle} className="py-1 pr-3" />
+              <th className="py-1 pr-3">Macros</th>
+              <SortTh label="Applied" col="applied" sort={nsort} onSort={ntoggle} className="py-1 pr-3" />
               <th className="py-1" />
             </tr>
           </thead>
           <tbody>
-            {nodes.data.map((n) => (
+            {nsorted.map((n) => (
               <tr key={n.node_id} className="border-t border-line align-top">
                 <td className="py-1.5">
                   {n.node_name}
@@ -612,6 +623,15 @@ function DuplicateDialog({
   );
 }
 
+const TEMPLATE_SORT: Getters<Template> = {
+  name: (t) => t.name,
+  category: (t) => t.category,
+  needs: (t) => t.requires,
+  checks: (t) => t.items.length,
+  nodes: (t) => t.node_count ?? 0,
+  version: (t) => t.version,
+};
+
 /** Monitoring templates: the list, the editor, and where each template is applied. */
 export function TemplatesView() {
   const { can } = useAuth();
@@ -630,6 +650,7 @@ export function TemplatesView() {
       (t) => !q || t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q),
     );
   }, [templates.data, search]);
+  const { sorted, sort, toggle } = useSortedRows(shown, TEMPLATE_SORT);
 
   async function remove(t: Template) {
     const note = t.node_count ? ` It is applied to ${t.node_count} node(s): their checks stay.` : "";
@@ -656,33 +677,33 @@ export function TemplatesView() {
       {error && <Alert>{error}</Alert>}
       {templates.error && <Alert>{templates.error}</Alert>}
       <Card>
-        <div className="mb-3 flex gap-3">
-          <div className="w-56">
-            <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
+        <FilterBar>
+          <Field label="Search">
+            <TextInput placeholder="Name or description" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </Field>
+          <Field label="Category">
+            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">All categories</option>
               {CATEGORIES.map((c) => (
                 <option key={c}>{c}</option>
               ))}
             </Select>
-          </div>
-          <div className="w-72">
-            <TextInput placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
-          </div>
-        </div>
+          </Field>
+        </FilterBar>
         <table className="w-full text-left text-xs">
           <thead className="text-fg-muted">
             <tr>
-              <th className="py-1">Template</th>
-              <th className="py-1">Category</th>
-              <th className="py-1">Needs</th>
-              <th className="py-1">Checks</th>
-              <th className="py-1">Nodes</th>
-              <th className="py-1">Version</th>
+              <SortTh label="Template" col="name" sort={sort} onSort={toggle} className="py-1 pr-3" />
+              <SortTh label="Category" col="category" sort={sort} onSort={toggle} className="py-1 pr-3" />
+              <SortTh label="Needs" col="needs" sort={sort} onSort={toggle} className="py-1 pr-3" />
+              <SortTh label="Checks" col="checks" sort={sort} onSort={toggle} className="py-1 pr-3" />
+              <SortTh label="Nodes" col="nodes" sort={sort} onSort={toggle} className="py-1 pr-3" />
+              <SortTh label="Version" col="version" sort={sort} onSort={toggle} className="py-1 pr-3" />
               <th className="py-1" />
             </tr>
           </thead>
           <tbody>
-            {shown.map((t) => (
+            {sorted.map((t) => (
               <tr key={t.id} className="border-t border-line align-top">
                 <td className="py-2">
                   <button type="button" onClick={() => setOpen(t)} className="text-left font-medium hover:text-primary">

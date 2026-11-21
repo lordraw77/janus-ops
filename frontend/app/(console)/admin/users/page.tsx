@@ -1,11 +1,14 @@
 "use client";
 
 import { Lock, Pencil, Plus, Trash2 } from "lucide-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 
-import { Alert, Button, Card, Field, Modal, RoleBadge, TextInput } from "@/components/ui";
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
+import { Alert, Button, Card, Field, Modal, RoleBadge, Select, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { RequirePermission, useAuth } from "@/lib/auth";
+import { type Getters, useSortedRows } from "@/lib/sort";
 import { type NodeScope, type ScopeRule, ScopeEditor } from "@/components/ScopeEditor";
 
 type User = {
@@ -29,6 +32,20 @@ type Role = {
   scope_rules: ScopeRule[];
 };
 type RoleList = { roles: Role[]; permissions: Record<string, string>; managed: boolean };
+
+const statusOf = (u: User) => (u.source === "breakglass" ? "break-glass" : u.disabled ? "disabled" : "active");
+const USER_SORT: Getters<User> = {
+  user: (u) => u.display_name || u.id,
+  roles: (u) => u.roles.join(" "),
+  totp: (u) => u.totp_enabled,
+  login: (u) => u.last_login_at,
+  status: statusOf,
+};
+const ROLE_SORT: Getters<Role> = {
+  role: (r) => r.name,
+  group: (r) => r.ldap_group,
+  nodes: (r) => r.node_scope,
+};
 
 function when(ts: string | null): string {
   return ts ? new Date(ts).toLocaleString() : "never";
@@ -79,6 +96,19 @@ function UsersTab({ roleList }: { roleList: RoleList }) {
   const { user: me, can } = useAuth();
   const { data, error, reload } = useResource<{ managed: boolean; users: User[] }>("/users");
   const users = data?.users ?? null;
+  const [q, setQ] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (users ?? []).filter(
+      (u) =>
+        (!needle || [u.id, u.display_name, u.email].some((v) => (v ?? "").toLowerCase().includes(needle))) &&
+        (!roleFilter || u.roles.includes(roleFilter)) &&
+        (!statusFilter || statusOf(u) === statusFilter),
+    );
+  }, [users, q, roleFilter, statusFilter]);
+  const { sorted, sort, toggle } = useSortedRows(shown, USER_SORT);
   const managed = data?.managed ?? false;
   const [dialog, setDialog] = useState<Dialog>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -126,20 +156,45 @@ function UsersTab({ roleList }: { roleList: RoleList }) {
       )}
       {error && <Alert>{error}</Alert>}
       {users && (
+        <FilterBar>
+          <Field label="Search">
+            <TextInput placeholder="Name, user id, email" value={q} onChange={(e) => setQ(e.target.value)} />
+          </Field>
+          <Field label="Role">
+            <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+              <option value="">All roles</option>
+              {roleList.roles.map((r) => (
+                <option key={r.name} value={r.name}>
+                  {r.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Status">
+            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">Any status</option>
+              <option value="active">Active</option>
+              <option value="disabled">Disabled</option>
+              <option value="break-glass">Break-glass</option>
+            </Select>
+          </Field>
+        </FilterBar>
+      )}
+      {users && (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="border-b border-line text-fg-muted">
               <tr>
-                <th className="py-2 pr-3 font-medium">User</th>
-                <th className="py-2 pr-3 font-medium">Roles</th>
-                <th className="py-2 pr-3 font-medium">2FA</th>
-                <th className="py-2 pr-3 font-medium">Last sign-in</th>
-                <th className="py-2 pr-3 font-medium">Status</th>
+                <SortTh label="User" col="user" sort={sort} onSort={toggle} />
+                <SortTh label="Roles" col="roles" sort={sort} onSort={toggle} />
+                <SortTh label="2FA" col="totp" sort={sort} onSort={toggle} />
+                <SortTh label="Last sign-in" col="login" sort={sort} onSort={toggle} />
+                <SortTh label="Status" col="status" sort={sort} onSort={toggle} />
                 <th className="py-2 font-medium" />
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {users.map((u) => (
+              {sorted.map((u) => (
                 <tr key={u.id} className={u.disabled ? "opacity-60" : ""}>
                   <td className="py-2 pr-3">
                     <div className="font-semibold">{u.display_name || u.id}</div>
@@ -411,6 +466,7 @@ function RolesTab({ roleList, reload }: { roleList: RoleList; reload: () => void
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Role | "new" | null>(null);
   const perms = Object.entries(roleList.permissions);
+  const { sorted: sortedRoles, sort: roleSort, toggle: toggleRole } = useSortedRows(roleList.roles, ROLE_SORT);
 
   async function patch(name: string, body: unknown): Promise<boolean> {
     setError(null);
@@ -450,9 +506,9 @@ function RolesTab({ roleList, reload }: { roleList: RoleList; reload: () => void
         <table className="w-full text-left text-xs">
           <thead className="border-b border-line text-fg-muted">
             <tr>
-              <th className="py-2 pr-3 font-medium">Role</th>
-              <th className="py-2 pr-3 font-medium">LDAP group</th>
-              <th className="py-2 pr-3 font-medium">Nodes</th>
+              <SortTh label="Role" col="role" sort={roleSort} onSort={toggleRole} />
+              <SortTh label="LDAP group" col="group" sort={roleSort} onSort={toggleRole} />
+              <SortTh label="Nodes" col="nodes" sort={roleSort} onSort={toggleRole} />
               {perms.map(([key, description]) => (
                 <th key={key} className="py-2 pr-3 text-center font-mono font-medium" title={description}>
                   {key}
@@ -462,7 +518,7 @@ function RolesTab({ roleList, reload }: { roleList: RoleList; reload: () => void
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {roleList.roles.map((r) => {
+            {sortedRoles.map((r) => {
               const fixed = r.name === "admin";
               return (
                 <tr key={r.name}>

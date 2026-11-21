@@ -2,17 +2,31 @@
 
 import { BellOff, Check as CheckIcon, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AckDialog, Flags } from "@/components/Checks";
-import { Alert, Button, Card, StateBadge } from "@/components/ui";
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
+import { Alert, Button, Card, Field, Select, StateBadge, TextInput } from "@/components/ui";
 import { ago, formatDuration } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type { InventoryNode } from "@/lib/inventory";
 import type { Downtime, Problem } from "@/lib/monitoring";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 type Tab = "open" | "history" | "downtimes";
 const POLL_MS = 15_000;
+
+const SEVERITY: Record<string, number> = { crit: 0, unknown: 1, warn: 2, ok: 3 };
+const PROBLEM_SORT: Getters<Problem> = {
+  state: (p) => SEVERITY[p.state] ?? 9,
+  node: (p) => `${p.node_name} / ${p.check_name}`,
+  env: (p) => p.environment,
+  output: (p) => p.last_output,
+  since: (p) => p.opened_at,
+  duration: (p) => (p.closed_at ? new Date(p.closed_at).getTime() - new Date(p.opened_at).getTime() : null),
+};
 
 function ProblemsTable({ status }: { status: "open" | "closed" }) {
   const { can } = useAuth();
@@ -20,6 +34,29 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
   const [version, setVersion] = useState(0);
   const [state, setState] = useState<{ data: Problem[] | null; error: string | null }>({ data: null, error: null });
   const [acking, setAcking] = useState<Problem | null>(null);
+  const [q, setQ] = useState("");
+  const [host, setHost] = useState("");
+  const [group, setGroup] = useState("");
+  const [env, setEnv] = useState("");
+  const [level, setLevel] = useState("");
+  const nodes = useResource<InventoryNode[]>("/nodes");
+  const groupsOf = useMemo(() => new Map((nodes.data ?? []).map((n) => [n.id, n.groups])), [nodes.data]);
+  const all = useMemo(() => state.data ?? [], [state.data]);
+  const hosts = useMemo(() => [...new Set(all.map((p) => p.node_name))].sort(), [all]);
+  const envs = useMemo(() => [...new Set(all.map((p) => p.environment))].sort(), [all]);
+  const groupNames = useMemo(() => [...new Set([...groupsOf.values()].flat())].sort(), [groupsOf]);
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return all.filter(
+      (p) =>
+        (!needle || [p.node_name, p.check_name, p.last_output ?? ""].some((v) => v.toLowerCase().includes(needle))) &&
+        (!host || p.node_name === host) &&
+        (!env || p.environment === env) &&
+        (!level || p.state === level) &&
+        (!group || (groupsOf.get(p.node_id) ?? []).includes(group)),
+    );
+  }, [all, q, host, env, level, group, groupsOf]);
+  const { sorted, sort, toggle } = useSortedRows(shown, PROBLEM_SORT);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,20 +81,71 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
   if (!state.data) return <p className="text-sm text-fg-muted">Loading…</p>;
   if (state.data.length === 0)
     return <p className="text-sm text-fg-muted">{status === "open" ? "No open problems." : "No problems yet."}</p>;
+  const th = "py-1 pr-3 font-medium";
   return (
     <>
+      <FilterBar>
+        <Field label="Search">
+          <TextInput placeholder="Node, check, output" value={q} onChange={(e) => setQ(e.target.value)} />
+        </Field>
+        <Field label="Host">
+          <Select value={host} onChange={(e) => setHost(e.target.value)}>
+            <option value="">All hosts</option>
+            {hosts.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Group">
+          <Select value={group} onChange={(e) => setGroup(e.target.value)}>
+            <option value="">All groups</option>
+            {groupNames.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Environment">
+          <Select value={env} onChange={(e) => setEnv(e.target.value)}>
+            <option value="">All environments</option>
+            {envs.map((e) => (
+              <option key={e} value={e}>
+                {e}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="State">
+          <Select value={level} onChange={(e) => setLevel(e.target.value)}>
+            <option value="">All states</option>
+            <option value="crit">Critical</option>
+            <option value="warn">Warning</option>
+            <option value="unknown">Unknown</option>
+          </Select>
+        </Field>
+      </FilterBar>
+      {shown.length === 0 && <p className="mb-2 text-sm text-fg-muted">Nothing matches.</p>}
       <table className="w-full text-sm">
         <thead className="text-left text-[11px] uppercase text-fg-muted">
           <tr>
-            <th className="py-1 font-medium">State</th>
-            <th className="py-1 font-medium">Node / check</th>
-            <th className="py-1 font-medium">Output</th>
-            <th className="py-1 text-right font-medium">{status === "open" ? "Since" : "Duration"}</th>
+            <SortTh label="State" col="state" sort={sort} onSort={toggle} className={th} />
+            <SortTh label="Node / check" col="node" sort={sort} onSort={toggle} className={th} />
+            <SortTh label="Output" col="output" sort={sort} onSort={toggle} className={th} />
+            <SortTh
+              label={status === "open" ? "Since" : "Duration"}
+              col={status === "open" ? "since" : "duration"}
+              sort={sort}
+              onSort={toggle}
+              className="py-1 pl-3 text-right font-medium"
+            />
             {status === "open" && manage && <th />}
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
-          {state.data.map((p) => (
+          {sorted.map((p) => (
             <tr key={p.id} className="align-top">
               <td className="py-2 pr-2">
                 <StateBadge state={p.state} />

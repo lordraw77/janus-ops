@@ -3,9 +3,11 @@
 import { FolderOpen, Server, Terminal } from "lucide-react";
 import Link from "next/link";
 
+import { SortTh } from "@/components/SortTh";
 import { StateBadge } from "@/components/ui";
 import { type Attention, type Dashboard, type NodeCardData, ago, formatDuration, formatValue } from "@/lib/agents";
 import { useAuth } from "@/lib/auth";
+import { type Getters, useSortedRows } from "@/lib/sort";
 import { EnvBadge } from "@/components/EnvBadge";
 
 const STATE_COLOR = {
@@ -197,7 +199,16 @@ export function NodeCard({ node }: { node: NodeCardData }) {
   );
 }
 
+const SEVERITY: Record<string, number> = { crit: 0, unknown: 1, warn: 2, ok: 3 };
+const ATTENTION_SORT: Getters<Attention> = {
+  state: (a) => SEVERITY[a.severity] ?? 9,
+  node: (a) => `${a.node_name} / ${a.check_name}`,
+  output: (a) => a.message,
+  since: (a) => a.since,
+};
+
 export function AttentionTable({ items, handled }: { items: Attention[]; handled: number }) {
+  const { sorted, sort, toggle } = useSortedRows(items, ATTENTION_SORT);
   return (
     <section className="rounded-lg border border-line bg-surface p-4">
       <div className="mb-2 flex items-center justify-between">
@@ -212,14 +223,14 @@ export function AttentionTable({ items, handled }: { items: Attention[]; handled
         <table className="w-full text-sm">
           <thead className="text-left text-[11px] uppercase text-fg-muted">
             <tr>
-              <th className="py-1 font-medium">State</th>
-              <th className="py-1 font-medium">Node / check</th>
-              <th className="py-1 font-medium">Output</th>
-              <th className="py-1 text-right font-medium">Since</th>
+              <SortTh label="State" col="state" sort={sort} onSort={toggle} className="py-1 pr-3 font-medium" />
+              <SortTh label="Node / check" col="node" sort={sort} onSort={toggle} className="py-1 pr-3 font-medium" />
+              <SortTh label="Output" col="output" sort={sort} onSort={toggle} className="py-1 pr-3 font-medium" />
+              <SortTh label="Since" col="since" sort={sort} onSort={toggle} className="py-1 text-right font-medium" />
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {items.map((a) => (
+            {sorted.map((a) => (
               <tr key={a.problem_id} className="align-top">
                 <td className="py-1.5 pr-2">
                   <StateBadge state={a.severity} />

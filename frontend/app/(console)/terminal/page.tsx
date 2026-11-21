@@ -15,10 +15,13 @@ import {
   type TerminalStatus,
   TerminalView,
 } from "@/components/TerminalView";
-import { Alert, Button, Card, Modal } from "@/components/ui";
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
+import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import { api, message, type Resource, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { InventoryNode } from "@/lib/inventory";
+import type { Group, InventoryNode } from "@/lib/inventory";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 type Via = "ssh" | "agent";
 type Tab = { key: string; nodeId: string; via: Via; status: TerminalStatus };
@@ -323,9 +326,40 @@ function duration(s: SessionRow): string {
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 }
 
+function sessionSeconds(s: SessionRow): number | null {
+  return s.ended_at ? (new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 1000 : null;
+}
+
+const SESSION_SORT: Getters<SessionRow> = {
+  started: (s) => s.started_at,
+  user: (s) => s.username,
+  node: (s) => s.node_name,
+  remote: (s) => s.remote_user,
+  duration: sessionSeconds,
+  end: (s) => s.end_reason,
+};
+
 function Sessions() {
   const { data, error } = useResource<SessionRow[]>("/terminal/sessions");
   const [playing, setPlaying] = useState<string | null>(null);
+  const nodesRes = useResource<InventoryNode[]>("/nodes");
+  const groupsRes = useResource<Group[]>("/groups");
+  const [q, setQ] = useState("");
+  const [host, setHost] = useState("");
+  const [group, setGroup] = useState("");
+  const rows = useMemo(() => data ?? [], [data]);
+  const hosts = useMemo(() => [...new Set(rows.map((r) => r.node_name ?? ""))].filter(Boolean).sort(), [rows]);
+  const groupNodes = useMemo(() => new Set((nodesRes.data ?? []).filter((n) => n.groups.includes(group)).map((n) => n.name)), [nodesRes.data, group]);
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return rows.filter(
+      (r) =>
+        (!needle || [r.username ?? "", r.node_name ?? "", r.target ?? "", r.remote_user ?? ""].some((v) => v.toLowerCase().includes(needle))) &&
+        (!host || r.node_name === host) &&
+        (!group || groupNodes.has(r.node_name ?? "")),
+    );
+  }, [rows, q, host, group, groupNodes]);
+  const { sorted, sort, toggle } = useSortedRows(shown, SESSION_SORT);
   return (
     <Card title="Recorded sessions">
       <p className="mb-2 text-xs text-fg-muted">
@@ -338,21 +372,48 @@ function Sessions() {
       {error && <Alert>{error}</Alert>}
       {data && data.length === 0 && <p className="text-sm text-fg-muted">No sessions yet.</p>}
       {data && data.length > 0 && (
+        <FilterBar>
+          <Field label="Search">
+            <TextInput placeholder="User, node, target, remote user" value={q} onChange={(e) => setQ(e.target.value)} />
+          </Field>
+          <Field label="Host">
+            <Select value={host} onChange={(e) => setHost(e.target.value)}>
+              <option value="">All hosts</option>
+              {hosts.map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Group">
+            <Select value={group} onChange={(e) => setGroup(e.target.value)}>
+              <option value="">All groups</option>
+              {(groupsRes.data ?? []).map((g) => (
+                <option key={g.id} value={g.name}>
+                  {g.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </FilterBar>
+      )}
+      {data && data.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="border-b border-line text-fg-muted">
               <tr>
-                <th className="py-2 pr-3 font-medium">Started</th>
-                <th className="py-2 pr-3 font-medium">User</th>
-                <th className="py-2 pr-3 font-medium">Node</th>
-                <th className="py-2 pr-3 font-medium">Remote user</th>
-                <th className="py-2 pr-3 font-medium">Duration</th>
-                <th className="py-2 pr-3 font-medium">End</th>
+                <SortTh label="Started" col="started" sort={sort} onSort={toggle} />
+                <SortTh label="User" col="user" sort={sort} onSort={toggle} />
+                <SortTh label="Node" col="node" sort={sort} onSort={toggle} />
+                <SortTh label="Remote user" col="remote" sort={sort} onSort={toggle} />
+                <SortTh label="Duration" col="duration" sort={sort} onSort={toggle} />
+                <SortTh label="End" col="end" sort={sort} onSort={toggle} />
                 <th />
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {data.map((s) => (
+              {sorted.map((s) => (
                 <tr key={s.id}>
                   <td className="whitespace-nowrap py-2 pr-3 text-fg-secondary">{new Date(s.started_at).toLocaleString()}</td>
                   <td className="py-2 pr-3">{s.username ?? "—"}</td>

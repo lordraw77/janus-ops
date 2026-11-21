@@ -22,11 +22,14 @@ import {
 import dynamic from "next/dynamic";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
+import { SortTh } from "@/components/SortTh";
 import type { TerminalStatus } from "@/components/TerminalView";
 import { Alert, Button, Modal } from "@/components/ui";
 import { formatBytes } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type { InventoryNode } from "@/lib/inventory";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 // xterm.js touches `window`: load it in the browser only
 const TerminalView = dynamic(
@@ -1116,6 +1119,21 @@ type HostData = {
   error: string | null;
 };
 
+type AllRow = { host: Host; c: Container; l: Live | undefined };
+const ALL_SORT: Getters<AllRow> = {
+  host: (r) => r.host.node_name,
+  name: (r) => r.c.name,
+  image: (r) => r.c.image,
+  state: (r) => r.c.state,
+  health: (r) => r.c.health,
+  uptime: (r) => (r.l?.started_at ? new Date(r.l.started_at).getTime() : null),
+  restarts: (r) => r.l?.restarts,
+  cpu: (r) => r.l?.cpu_pct,
+  mem: (r) => r.l?.mem_bytes,
+  ip: (r) => (r.c.ips[0] ?? "").split(".").map((p) => p.padStart(3, "0")).join("."),
+  stack: (r) => r.c.project,
+};
+
 /** Every container of every Docker host in one table, with a host column. */
 function AllHostsView({ hosts }: { hosts: Host[] }) {
   const { can } = useAuth();
@@ -1128,6 +1146,8 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState("");
   const [hostFilter, setHostFilter] = useState("");
+  const [groupFilter, setGroupFilter] = useState("");
+  const nodesRes = useResource<InventoryNode[]>("/nodes");
   const [dialog, setDialog] = useState<{
     kind: DialogKind;
     host: Host;
@@ -1206,8 +1226,11 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
     setTick((t) => t + 1);
   }
 
+  const groupsOf = new Map((nodesRes.data ?? []).map((n) => [n.id, n.groups]));
+  const groupNames = [...new Set([...groupsOf.values()].flat())].sort();
   const rows = hosts
     .filter((h) => !hostFilter || h.node_id === hostFilter)
+    .filter((h) => !groupFilter || (groupsOf.get(h.node_id) ?? []).includes(groupFilter))
     .flatMap((h) =>
       (data[h.node_id]?.containers ?? []).map((c) => ({
         host: h,
@@ -1229,6 +1252,7 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
           (v) => v.toLowerCase().includes(q),
         )),
   );
+  const { sorted, sort, toggle } = useSortedRows(visible, ALL_SORT);
   const total = rows.length;
   const states = [...new Set(rows.map((r) => r.c.state))].sort();
   const failed = hosts.filter((h) => data[h.node_id]?.error);
@@ -1274,6 +1298,19 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
             ))}
           </select>
           <select
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value)}
+            aria-label="Filter by group"
+            className="rounded border border-line bg-canvas px-2 py-1.5 text-xs"
+          >
+            <option value="">All groups</option>
+            {groupNames.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+          <select
             value={stateFilter}
             onChange={(e) => setStateFilter(e.target.value)}
             aria-label="Filter by state"
@@ -1304,30 +1341,33 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
           <table className="w-full text-xs">
             <thead className="bg-elevated text-left text-fg-secondary">
               <tr>
-                {[
-                  "Host",
-                  "Name",
-                  "Image",
-                  "State",
-                  "Health",
-                  "Uptime",
-                  "Restarts",
-                  "CPU",
-                  "Memory",
-                  "Net I/O",
-                  "Disk I/O",
-                  "IP",
-                  "Ports",
-                  "Stack",
-                  "Actions",
-                ].map((label) => (
-                  <th
-                    key={label}
-                    className="whitespace-nowrap px-2 py-2 font-semibold"
-                  >
-                    {label}
-                  </th>
-                ))}
+                {(
+                  [
+                    ["Host", "host"],
+                    ["Name", "name"],
+                    ["Image", "image"],
+                    ["State", "state"],
+                    ["Health", "health"],
+                    ["Uptime", "uptime"],
+                    ["Restarts", "restarts"],
+                    ["CPU", "cpu"],
+                    ["Memory", "mem"],
+                    ["Net I/O", null],
+                    ["Disk I/O", null],
+                    ["IP", "ip"],
+                    ["Ports", null],
+                    ["Stack", "stack"],
+                    ["Actions", null],
+                  ] as const
+                ).map(([label, col]) =>
+                  col ? (
+                    <SortTh key={label} label={label} col={col} sort={sort} onSort={toggle} className="whitespace-nowrap px-2 py-2 font-semibold" />
+                  ) : (
+                    <th key={label} className="whitespace-nowrap px-2 py-2 font-semibold">
+                      {label}
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -1343,7 +1383,7 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
                   </td>
                 </tr>
               )}
-              {visible.map(({ host: h, c, l }) => (
+              {sorted.map(({ host: h, c, l }) => (
                 <ContainerRow
                   key={`${h.node_id}/${c.id}`}
                   host={h}

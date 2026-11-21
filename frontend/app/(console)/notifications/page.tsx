@@ -1,12 +1,16 @@
 "use client";
 
 import { Pencil, Plus, Send, Trash2 } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
 import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { RequirePermission } from "@/lib/auth";
 import { useEnvironments } from "@/lib/environments";
+import type { Group, InventoryNode } from "@/lib/inventory";
+import { type Getters, useSortedRows } from "@/lib/sort";
 import {
   CHANNEL_LABEL,
   type Channel,
@@ -242,10 +246,42 @@ function RuleDialog({ rule, channels, onClose, onSaved }: { rule: Rule | null; c
   );
 }
 
+const DELIVERY_SORT: Getters<Delivery> = {
+  time: (d) => d.sent_at,
+  status: (d) => d.status,
+  event: (d) => (d.event === "recovery" ? "recovery" : (d.state ?? "")),
+  target: (d) => `${d.node_name} / ${d.check_name}`,
+  channel: (d) => d.channel_name,
+  error: (d) => d.error,
+};
+
 function NotificationsView() {
   const channels = useResource<Channel[]>("/notifications/channels");
   const rules = useResource<Rule[]>("/notifications/rules");
   const deliveries = useResource<Delivery[]>("/notifications/deliveries?limit=50");
+  const nodesRes = useResource<InventoryNode[]>("/nodes");
+  const groupsRes = useResource<Group[]>("/groups");
+  const [dq, setDq] = useState("");
+  const [dHost, setDHost] = useState("");
+  const [dGroup, setDGroup] = useState("");
+  const [dStatus, setDStatus] = useState("");
+  const [dChannel, setDChannel] = useState("");
+  const groupNodes = useMemo(() => new Set((nodesRes.data ?? []).filter((n) => n.groups.includes(dGroup)).map((n) => n.name)), [nodesRes.data, dGroup]);
+  const sent = useMemo(() => deliveries.data ?? [], [deliveries.data]);
+  const dHosts = useMemo(() => [...new Set(sent.map((d) => d.node_name))].sort(), [sent]);
+  const dChannels = useMemo(() => [...new Set(sent.map((d) => d.channel_name ?? ""))].filter(Boolean).sort(), [sent]);
+  const dShown = useMemo(() => {
+    const needle = dq.trim().toLowerCase();
+    return sent.filter(
+      (d) =>
+        (!needle || [d.node_name, d.check_name, d.channel_name ?? "", d.error ?? ""].some((v) => v.toLowerCase().includes(needle))) &&
+        (!dHost || d.node_name === dHost) &&
+        (!dGroup || groupNodes.has(d.node_name)) &&
+        (!dStatus || d.status === dStatus) &&
+        (!dChannel || d.channel_name === dChannel),
+    );
+  }, [sent, dq, dHost, dGroup, dStatus, dChannel, groupNodes]);
+  const { sorted: dSorted, sort: dSort, toggle: dToggle } = useSortedRows(dShown, DELIVERY_SORT);
   const [editChannel, setEditChannel] = useState<Channel | "new" | null>(null);
   const [editRule, setEditRule] = useState<Rule | "new" | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -342,9 +378,64 @@ function NotificationsView() {
       </Card>
       <Card title="Recent deliveries">
         {deliveries.data?.length === 0 && <p className="text-sm text-fg-muted">Nothing sent yet.</p>}
+        {sent.length > 0 && (
+          <FilterBar>
+            <Field label="Search">
+              <TextInput placeholder="Host, check, channel, error" value={dq} onChange={(e) => setDq(e.target.value)} />
+            </Field>
+            <Field label="Host">
+              <Select value={dHost} onChange={(e) => setDHost(e.target.value)}>
+                <option value="">All hosts</option>
+                {dHosts.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Group">
+              <Select value={dGroup} onChange={(e) => setDGroup(e.target.value)}>
+                <option value="">All groups</option>
+                {(groupsRes.data ?? []).map((g) => (
+                  <option key={g.id} value={g.name}>
+                    {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select value={dStatus} onChange={(e) => setDStatus(e.target.value)}>
+                <option value="">Any</option>
+                <option value="sent">Sent</option>
+                <option value="failed">Failed</option>
+              </Select>
+            </Field>
+            <Field label="Channel">
+              <Select value={dChannel} onChange={(e) => setDChannel(e.target.value)}>
+                <option value="">All channels</option>
+                {dChannels.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </FilterBar>
+        )}
+        {sent.length > 0 && dShown.length === 0 && <p className="mb-2 text-sm text-fg-muted">Nothing matches.</p>}
         <table className="w-full text-xs">
+          <thead className="border-b border-line text-left text-fg-muted">
+            <tr>
+              <SortTh label="Sent" col="time" sort={dSort} onSort={dToggle} className="py-1 pr-2 font-medium" />
+              <SortTh label="Status" col="status" sort={dSort} onSort={dToggle} className="py-1 pr-2 font-medium" />
+              <SortTh label="Event" col="event" sort={dSort} onSort={dToggle} className="py-1 pr-2 font-medium" />
+              <SortTh label="Node / check" col="target" sort={dSort} onSort={dToggle} className="py-1 pr-2 font-medium" />
+              <SortTh label="Channel" col="channel" sort={dSort} onSort={dToggle} className="py-1 pr-2 font-medium" />
+              <SortTh label="Error" col="error" sort={dSort} onSort={dToggle} className="py-1 font-medium" />
+            </tr>
+          </thead>
           <tbody className="divide-y divide-line">
-            {(deliveries.data ?? []).map((d) => (
+            {dSorted.map((d) => (
               <tr key={d.id}>
                 <td className="py-1 pr-2 font-mono text-fg-muted">{new Date(d.sent_at).toLocaleString()}</td>
                 <td className={`pr-2 font-mono ${d.status === "sent" ? "text-ok" : "text-crit"}`}>{d.status}</td>

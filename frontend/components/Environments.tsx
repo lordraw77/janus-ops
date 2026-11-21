@@ -3,12 +3,15 @@
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
+import { SortTh } from "@/components/SortTh";
+
 import { EnvBadge } from "@/components/EnvBadge";
 import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
 import { api, message } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { PRESET_COLORS, envHex, envStyle } from "@/lib/envColor";
 import { type Environment, useEnvironments } from "@/lib/environments";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 function EnvironmentDialog({ env, onClose, onSaved }: { env: Environment | null; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(env?.name ?? "");
@@ -102,10 +105,18 @@ function EnvironmentDialog({ env, onClose, onSaved }: { env: Environment | null;
   );
 }
 
+const ENV_SORT: Getters<Environment> = {
+  name: (e) => e.name,
+  label: (e) => e.label,
+  order: (e) => e.position,
+  nodes: (e) => e.nodes,
+};
+
 export function EnvironmentsCard() {
   const { can } = useAuth();
   const manage = can("environments.manage");
   const { list, reload } = useEnvironments();
+  const { sorted, sort, toggle } = useSortedRows(list, ENV_SORT);
   const [editing, setEditing] = useState<Environment | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -135,15 +146,15 @@ export function EnvironmentsCard() {
       <table className="w-full text-left text-xs">
         <thead className="border-b border-line text-fg-muted">
           <tr>
-            <th className="py-2 pr-3 font-medium">Name</th>
-            <th className="py-2 pr-3 font-medium">Label</th>
-            <th className="py-2 pr-3 font-medium">Order</th>
-            <th className="py-2 pr-3 text-right font-medium">Nodes</th>
+            <SortTh label="Name" col="name" sort={sort} onSort={toggle} />
+            <SortTh label="Label" col="label" sort={sort} onSort={toggle} />
+            <SortTh label="Order" col="order" sort={sort} onSort={toggle} />
+            <SortTh label="Nodes" col="nodes" sort={sort} onSort={toggle} className="py-2 pr-3 text-right font-medium" />
             <th />
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
-          {list.map((e) => (
+          {sorted.map((e) => (
             <tr key={e.name}>
               <td className="py-2 pr-3">
                 <EnvBadge env={e.name} />

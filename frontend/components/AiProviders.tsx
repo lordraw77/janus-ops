@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 
+import { SortTh } from "@/components/SortTh";
+
 import { Alert, Button, Card, Field, Select, TextInput } from "@/components/ui";
 import type { AiProvider, AiRoute, HealthRow, Preset, ProviderModel, UsageRow } from "@/lib/aiProviders";
 import { useLoad } from "@/lib/ansible";
 import { api, message } from "@/lib/api";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 type Notice = { kind: "ok" | "error"; text: string } | null;
 
@@ -473,9 +476,20 @@ export function AiRoutesCard() {
   );
 }
 
+const USAGE_SORT: Getters<UsageRow> = {
+  model: (u) => `${u.provider}/${u.model}`,
+  calls: (u) => u.calls,
+  ok: (u) => u.ok,
+  fallbacks: (u) => u.fallbacks,
+  tokens: (u) => u.tokens_in + u.tokens_out,
+  latency: (u) => u.latency_ms,
+};
+
 export function AiHealthCard() {
   const health = useLoad<HealthRow[]>("/ai/llm/health");
   const usage = useLoad<UsageRow[]>("/ai/llm/usage?days=7");
+  const usageRows = usage.data ?? [];
+  const { sorted: usageSorted, sort: usageSort, toggle: usageToggle } = useSortedRows(usageRows, USAGE_SORT);
   return (
     <Card title="Provider health and usage" actions={<Button onClick={() => { health.reload(); usage.reload(); }}>Refresh</Button>}>
       <div className="space-y-4 text-xs">
@@ -504,16 +518,16 @@ export function AiHealthCard() {
             <table className="w-full">
               <thead className="text-left text-fg-muted">
                 <tr>
-                  <th>Model</th>
-                  <th>Calls</th>
-                  <th>OK</th>
-                  <th>Fallbacks</th>
-                  <th>Tokens in / out</th>
-                  <th>Latency</th>
+                  <SortTh label="Model" col="model" sort={usageSort} onSort={usageToggle} className="py-1 pr-3 font-medium" />
+                  <SortTh label="Calls" col="calls" sort={usageSort} onSort={usageToggle} className="py-1 pr-3 font-medium" />
+                  <SortTh label="OK" col="ok" sort={usageSort} onSort={usageToggle} className="py-1 pr-3 font-medium" />
+                  <SortTh label="Fallbacks" col="fallbacks" sort={usageSort} onSort={usageToggle} className="py-1 pr-3 font-medium" />
+                  <SortTh label="Tokens in / out" col="tokens" sort={usageSort} onSort={usageToggle} className="py-1 pr-3 font-medium" />
+                  <SortTh label="Latency" col="latency" sort={usageSort} onSort={usageToggle} className="py-1 font-medium" />
                 </tr>
               </thead>
               <tbody>
-                {(usage.data ?? []).map((u) => (
+                {usageSorted.map((u) => (
                   <tr key={`${u.provider}/${u.model}`}>
                     <td className="font-mono">
                       {u.provider} / {u.model}

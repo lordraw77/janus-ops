@@ -1,8 +1,10 @@
 "use client";
 
 import { Play, Plus, RefreshCw, Save, Trash2, Upload } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { FilterBar } from "@/components/FilterBar";
+import { SortTh } from "@/components/SortTh";
 import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import {
   ACTIVE,
@@ -21,6 +23,8 @@ import {
 } from "@/lib/ansible";
 import { api, message } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type { InventoryNode } from "@/lib/inventory";
+import { type Getters, useSortedRows } from "@/lib/sort";
 
 type Notice = { kind: "ok" | "error" | "info"; text: string };
 
@@ -57,6 +61,15 @@ function skippedText(skipped: { node?: string; path?: string; reason: string }[]
     .join(" ");
 }
 
+const RUN_SORT: Getters<Run> = {
+  started: (r) => r.created_at,
+  status: (r) => r.status,
+  playbook: (r) => `${r.source_name}:${r.path}`,
+  nodes: (r) => Object.values(r.node_names).join(", "),
+  mode: (r) => (r.check_mode ? "dry run" : "apply"),
+  by: (r) => r.started_by,
+};
+
 export function AnsibleConsole() {
   const { can } = useAuth();
   const manage = can("ansible.manage");
@@ -82,6 +95,30 @@ export function AnsibleConsole() {
   );
 
   const runs = useLoad<Run[]>("/ansible/runs?limit=30");
+  const nodesRes = useLoad<InventoryNode[]>("/nodes");
+  const [rq, setRq] = useState("");
+  const [rHost, setRHost] = useState("");
+  const [rGroup, setRGroup] = useState("");
+  const [rStatus, setRStatus] = useState("");
+  const [rMode, setRMode] = useState("");
+  const runRows = useMemo(() => runs.data ?? [], [runs.data]);
+  const rHosts = useMemo(() => [...new Set(runRows.flatMap((r) => Object.values(r.node_names)))].sort(), [runRows]);
+  const rGroupNames = useMemo(() => [...new Set((nodesRes.data ?? []).flatMap((n) => n.groups))].sort(), [nodesRes.data]);
+  const rShown = useMemo(() => {
+    const needle = rq.trim().toLowerCase();
+    const inGroup = new Set((nodesRes.data ?? []).filter((n) => n.groups.includes(rGroup)).map((n) => n.name));
+    return runRows.filter((r) => {
+      const hosts = Object.values(r.node_names);
+      return (
+        (!needle || [`${r.source_name}:${r.path}`, r.started_by, ...hosts].some((v) => v.toLowerCase().includes(needle))) &&
+        (!rHost || hosts.includes(rHost)) &&
+        (!rGroup || hosts.some((h) => inGroup.has(h))) &&
+        (!rStatus || r.status === rStatus) &&
+        (!rMode || (rMode === "dry" ? r.check_mode : !r.check_mode))
+      );
+    });
+  }, [runRows, rq, rHost, rGroup, rStatus, rMode, nodesRes.data]);
+  const { sorted: rSorted, sort: rSort, toggle: rToggle } = useSortedRows(rShown, RUN_SORT);
   const hasActive = (runs.data ?? []).some((r) => ACTIVE.includes(r.status));
   const runDetail = useLoad<Run>(pickedRun ? `/ansible/runs/${pickedRun}` : null);
   const runIsActive = runDetail.data !== null && ACTIVE.includes(runDetail.data.status);
@@ -287,20 +324,64 @@ export function AnsibleConsole() {
         {runs.error && <Alert>{runs.error}</Alert>}
         {runs.data?.length === 0 && <p className="text-xs text-fg-muted">No runs yet.</p>}
         {runs.data && runs.data.length > 0 && (
+          <FilterBar>
+            <Field label="Search">
+              <TextInput placeholder="Playbook, user, host" value={rq} onChange={(e) => setRq(e.target.value)} />
+            </Field>
+            <Field label="Host">
+              <Select value={rHost} onChange={(e) => setRHost(e.target.value)}>
+                <option value="">All hosts</option>
+                {rHosts.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Group">
+              <Select value={rGroup} onChange={(e) => setRGroup(e.target.value)}>
+                <option value="">All groups</option>
+                {rGroupNames.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select value={rStatus} onChange={(e) => setRStatus(e.target.value)}>
+                <option value="">Any</option>
+                {(["queued", "running", "succeeded", "failed", "error"] as const).map((st) => (
+                  <option key={st} value={st}>
+                    {st}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Mode">
+              <Select value={rMode} onChange={(e) => setRMode(e.target.value)}>
+                <option value="">Any</option>
+                <option value="dry">Dry run</option>
+                <option value="apply">Apply</option>
+              </Select>
+            </Field>
+          </FilterBar>
+        )}
+        {runs.data && runs.data.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="border-b border-line text-fg-muted">
                 <tr>
-                  <th className="py-2 pr-3 font-medium">Started</th>
-                  <th className="py-2 pr-3 font-medium">Status</th>
-                  <th className="py-2 pr-3 font-medium">Playbook</th>
-                  <th className="py-2 pr-3 font-medium">Nodes</th>
-                  <th className="py-2 pr-3 font-medium">Mode</th>
-                  <th className="py-2 font-medium">By</th>
+                  <SortTh label="Started" col="started" sort={rSort} onSort={rToggle} />
+                  <SortTh label="Status" col="status" sort={rSort} onSort={rToggle} />
+                  <SortTh label="Playbook" col="playbook" sort={rSort} onSort={rToggle} />
+                  <SortTh label="Nodes" col="nodes" sort={rSort} onSort={rToggle} />
+                  <SortTh label="Mode" col="mode" sort={rSort} onSort={rToggle} />
+                  <SortTh label="By" col="by" sort={rSort} onSort={rToggle} className="py-2 font-medium" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
-                {runs.data.map((r) => (
+                {rSorted.map((r) => (
                   <tr
                     key={r.id}
                     onClick={() => setPickedRun(r.id)}
