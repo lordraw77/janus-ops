@@ -935,5 +935,5 @@ STATE
                AC-04 on Rocky; E2E behind squid (NFR-02); load test (NFR-05);
                continuous aggregates; manual agent installation without SSH; manual browser tests of the F8 interfaces;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        release key off the server (done as a download procedure: see §5.11), then the visual workflow editor
+  Next:        manual browser tests of the F8 interfaces, GitOps web UI (the visual workflow editor and resume after a restart are done)
 ```

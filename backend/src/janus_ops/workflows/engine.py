@@ -483,17 +483,52 @@ async def cancel(engine: AsyncEngine, run_id: str, actor: str) -> bool:
     return True
 
 
-async def recover(engine: AsyncEngine) -> int:
-    """At startup, a run that was running is marked failed: its step may have half happened, and a
-    person decides whether to start it again. Returns how many runs were marked."""
+async def recover(
+    engine: AsyncEngine,
+    hub: AgentHub | None = None,
+    jobs: set[asyncio.Task[None]] | None = None,
+    vault: Vault | None = None,
+) -> int:
+    """At startup, runs left `running` by a restart are dealt with. A run whose command step was in
+    flight is marked failed (the command may have half happened: a person decides whether to start
+    it again). Any other run is resumed from its first unfinished step, which is safe because steps
+    already done are never run again. Without `hub` and `jobs` nothing is resumed and every
+    interrupted run is marked failed. Returns how many runs were marked failed."""
+    resume = hub is not None and jobs is not None
     async with engine.begin() as conn:
         rows = await conn.execute(
             text(
-                "UPDATE workflow_run SET status = 'failed', error = 'server_restarted',"
-                " finished_at = now() WHERE status = 'running' RETURNING id"
-            )
+                "UPDATE workflow_run r SET status = 'failed', error = 'server_restarted',"
+                " finished_at = now() WHERE r.status = 'running' AND (:all OR EXISTS ("
+                "  SELECT 1 FROM workflow_step_run s WHERE s.run_id = r.id"
+                "  AND s.action = 'exec' AND s.status = 'running')) RETURNING r.id"
+            ),
+            {"all": not resume},
         )
-        return len(list(rows))
+        failed = [str(r.id) for r in rows]
+        if failed:
+            await conn.execute(
+                text(
+                    "UPDATE workflow_step_run SET status = 'failed', finished_at = now(),"
+                    " output = 'server_restarted' WHERE status = 'running'"
+                    " AND run_id = ANY(CAST(:ids AS uuid[]))"
+                ),
+                {"ids": failed},
+            )
+        pending = (
+            [
+                str(r.id)
+                for r in await conn.execute(
+                    text("SELECT id FROM workflow_run WHERE status = 'running'")
+                )
+            ]
+            if resume
+            else []
+        )
+    if hub is not None and jobs is not None:
+        for run_id in pending:
+            _spawn(jobs, advance(engine, hub, run_id, vault))
+    return len(failed)
 
 
 async def tick(

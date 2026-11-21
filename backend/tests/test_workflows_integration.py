@@ -501,3 +501,52 @@ def test_changing_the_trigger_adds_and_removes_the_secret(channel: str) -> None:
             json={"definition": {"trigger": {"type": "manual"}, "steps": steps}},
         ).json()
         assert removed["has_webhook"] is False and "webhook_secret" not in removed
+
+
+def test_a_restart_resumes_a_run_between_steps_and_fails_one_with_a_command_in_flight(
+    channel: str,
+) -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)
+        resumable = _workflow(admin, [_notify("a", channel, "one"), _notify("b", channel, "two")])
+        in_flight = _workflow(admin, [_exec("x", node, "systemctl restart foo")])
+
+    def interrupted(workflow_id: str, step_id: str, action: str, status: str) -> str:
+        rid = str(uuid.uuid4())
+        run_sql(
+            "INSERT INTO workflow_run (id, workflow_id, trigger, status, requested_by)"
+            " VALUES (CAST(:r AS uuid), CAST(:w AS uuid), 'manual', 'running', 'alice')",
+            {"r": rid, "w": workflow_id},
+        )
+        run_sql(
+            "INSERT INTO workflow_step_run (run_id, step_id, position, action, status)"
+            " VALUES (CAST(:r AS uuid), :s, 0, :a, :st)",
+            {"r": rid, "s": step_id, "a": action, "st": status},
+        )
+        return rid
+
+    resumed_id = interrupted(resumable["id"], "a", "notify", "done")
+    failed_id = interrupted(in_flight["id"], "x", "exec", "running")
+
+    async def restart() -> int:
+        db = create_async_engine(DB_URL)
+        jobs: set[asyncio.Task[None]] = set()
+        try:
+            failed = await wf_engine.recover(db, AgentHub(), jobs)
+            await asyncio.gather(*jobs)
+            return failed
+        finally:
+            await db.dispose()
+
+    assert asyncio.run(restart()) >= 1
+    states = {
+        str(r[0]): (r[1], r[2])
+        for r in run_sql(
+            "SELECT id, status, error FROM workflow_run WHERE id IN"
+            " (CAST(:a AS uuid), CAST(:b AS uuid))",
+            {"a": resumed_id, "b": failed_id},
+        )
+    }
+    assert states[resumed_id][0] == "done"
+    assert states[failed_id] == ("failed", "server_restarted")
+    assert _notify_count(resumed_id) == 1  # step "a" was already done: only "b" ran

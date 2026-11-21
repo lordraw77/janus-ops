@@ -102,10 +102,13 @@ def create_app(
         app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
         app.state.gitops_jobs = set()  # GitOps deploys running in the background
         app.state.workflow_jobs = set()  # workflow runs advancing in the background
-        # a run interrupted by a restart is marked failed: a person decides whether to rerun it
-        # (skipped when the schema is not migrated yet: /ready reports that)
+        # a run interrupted by a restart is resumed, unless a command step was in flight: then it is
+        # marked failed and a person decides (skipped when the schema is not migrated yet: /ready
+        # reports that)
         with contextlib.suppress(Exception):
-            await workflow_engine.recover(engine)
+            await workflow_engine.recover(
+                engine, app.state.agents, app.state.workflow_jobs, app.state.vault
+            )
         # the check templates shipped with the product (same: needs the migrated schema)
         with contextlib.suppress(Exception):
             await templates.sync_builtin(engine)
