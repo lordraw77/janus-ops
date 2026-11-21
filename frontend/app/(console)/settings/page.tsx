@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { AiHealthCard, AiProvidersCard, AiRoutesCard } from "@/components/AiProviders";
 import { AiSettingsCard, McpSettingsCard } from "@/components/AiSettings";
 import { EnvironmentsCard } from "@/components/Environments";
 import { Alert, Button, Card } from "@/components/ui";
@@ -104,6 +105,9 @@ function Settings() {
     <div className="space-y-4">
       <h1 className="text-lg font-semibold">Settings</h1>
       {can("environments.manage") && <EnvironmentsCard />}
+      {can("ai.manage") && <AiProvidersCard />}
+      {can("ai.manage") && <AiRoutesCard />}
+      {can("ai.manage") && <AiHealthCard />}
       {can("ai.manage") && <AiSettingsCard />}
       {can("ai.manage") && <McpSettingsCard />}
       <div className="grid gap-4 lg:grid-cols-2">

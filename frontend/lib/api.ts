@@ -197,6 +197,9 @@ const MESSAGES: Record<string, string> = {
   ai_unreachable: "The AI endpoint cannot be reached from the server.",
   ai_http_error: "The AI endpoint answered with an error (check the model name and the key).",
   ai_bad_response: "The AI endpoint answered in an unexpected format.",
+  ai_route_exhausted: "Every model on the route failed. See Settings → AI providers → Health for why.",
+  ai_context_too_long: "The conversation is too long for the models on the route. Start a new chat.",
+  route_not_found: "That route or model does not exist any more.",
   mcp_disabled: "Copilot tools are off: enable them in Settings → Copilot tools (and add deploy/compose.mcp.yaml to the stack).",
   operate_busy: "The assistant is still working on the previous message.",
   no_reachable_server: "None of the chosen servers can be reached by the tools (check the credential or the jump host).",
@@ -263,6 +266,7 @@ export function message(code: string, retryAfter?: number): string {
     pve_forbidden: "Proxmox permission",
     pve_console_failed: "Proxmox console",
   };
+  if (prefix === "invalid_provider" && rest) return `${rest}.`;
   if (rest !== undefined && DETAILED[prefix]) return `${DETAILED[prefix]}: ${rest}.`;
   if (code.startsWith("unknown_permission:")) return `Unknown permission: ${code.slice(19)}.`;
   return MESSAGES[code] ?? `Request failed (${code}).`;

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, Button, Card, TextInput } from "@/components/ui";
 import { useLoad } from "@/lib/ansible";
+import type { LlmChoices } from "@/lib/aiProviders";
 import { api, message } from "@/lib/api";
 import {
   EXAMPLES,
@@ -137,10 +138,12 @@ function Bubble({ m }: { m: OperateMessage }) {
 }
 
 function ModelPicker({ session, onChanged }: { session: OperateSession; onChanged: () => void }) {
-  const providers = useLoad<Provider[]>("/ai/operate/providers");
+  const choices = useLoad<LlmChoices>("/ai/llm/choices");
+  const routed = choices.data?.configured ?? false;
+  const providers = useLoad<Provider[]>(choices.data && !routed ? "/ai/operate/providers" : null);
   const [error, setError] = useState<string | null>(null);
   const slot = session.provider;
-  const loaded = useLoad<string[]>(`/ai/operate/providers/${slot}/models`);
+  const loaded = useLoad<string[]>(choices.data && !routed ? `/ai/operate/providers/${slot}/models` : null);
   const models = loaded.data ?? (loaded.error ? [] : null);
 
   async function patch(body: Record<string, unknown>) {
@@ -148,6 +151,40 @@ function ModelPicker({ session, onChanged }: { session: OperateSession; onChange
     const r = await api(`/ai/operate/sessions/${session.id}`, { method: "PATCH", body });
     if (!r.ok) return setError(message(r.code));
     onChanged();
+  }
+
+  if (routed && choices.data) {
+    const value = session.spec ?? "default";
+    const known = choices.data.routes.some((r) => r.name === value) || choices.data.models.some((m) => m.spec === value);
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-fg-muted">Model</span>
+        <select
+          className="max-w-96 rounded border border-border bg-surface px-1 py-1"
+          value={value}
+          onChange={(e) => void patch(e.target.value === "default" ? { clear_spec: true } : { spec: e.target.value })}
+        >
+          {!known && <option value={value}>{value} (no longer available)</option>}
+          <optgroup label="Routes (with fallback)">
+            {choices.data.routes.map((r) => (
+              <option key={r.name} value={r.name}>
+                {r.name} — {r.entries.map((e) => `${e.provider}/${e.model}`).join(" → ")}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="One model (no fallback)">
+            {choices.data.models.map((m) => (
+              <option key={m.spec} value={m.spec}>
+                {m.spec}
+                {m.tools === false ? " (no tool calls)" : ""}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+        {error && <span className="text-crit">{error}</span>}
+        <span className="text-fg-muted">Applies from the next message. A route falls back to its next model when one fails.</span>
+      </div>
+    );
   }
 
   const current = providers.data?.find((p) => p.slot === slot);
@@ -176,9 +213,6 @@ function ModelPicker({ session, onChanged }: { session: OperateSession; onChange
         onChange={(e) => void patch(e.target.value === (current?.model ?? "") ? { clear_model: true } : { model: e.target.value })}
       >
         {selected && !options.includes(selected) && <option value={selected}>{selected}</option>}
-        {current?.model && !options.includes(current.model) && selected !== current.model && (
-          <option value={current.model}>{current.model} (default)</option>
-        )}
         {options.map((m) => (
           <option key={m} value={m}>
             {m}
@@ -188,7 +222,7 @@ function ModelPicker({ session, onChanged }: { session: OperateSession; onChange
       </select>
       {models === null && <span className="text-fg-muted">loading models…</span>}
       {error && <span className="text-crit">{error}</span>}
-      <span className="text-fg-muted">Applies from the next message.</span>
+      <span className="text-fg-muted">Applies from the next message. Set up providers and fallback routes in Settings.</span>
     </div>
   );
 }

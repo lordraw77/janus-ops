@@ -302,3 +302,23 @@ def test_a_real_http_error_body_becomes_a_classified_error() -> None:
             )
         )
     assert info.value.outcome is Outcome.QUOTA
+
+
+def test_keys_are_read_from_a_file_and_never_echoed() -> None:
+    from janus_ops.ai import providers_import
+
+    env = providers_import.read_env_file(
+        [
+            "# comment",
+            "smtp:",
+            "GROQ_API_KEY=gsk_abc",
+            "export NVIDIA_API_KEY='nv-1'",
+            "EMPTY=",
+            "x y",
+        ]
+    )
+    assert env == {"GROQ_API_KEY": "gsk_abc", "NVIDIA_API_KEY": "nv-1"}
+    sources = {s.type for s in providers_import.SOURCES}
+    assert {"groq", "openrouter", "gemini", "cloudflare", "cerebras", "mistral", "nvidia",
+            "huggingface", "ollama"} <= sources  # fmt: skip
+    assert providers.PRESETS["gemini"].paid  # billed providers are created switched off

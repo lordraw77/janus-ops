@@ -49,6 +49,11 @@ def _build_parser() -> argparse.ArgumentParser:
     vf.add_argument("--dir", required=True, help="directory with janus-agent-linux-<arch> + .sig")
     vf.add_argument("--public-key", required=True, help="base64 ed25519 release public key")
     vf.add_argument("--agent-version", help="also require exactly this version")
+    ip = sub.add_parser(
+        "ai-import-providers",
+        help="create AI providers from API keys in the environment or in a KEY=VALUE file",
+    )
+    ip.add_argument("--env-file", help="read KEY=VALUE lines from this file ('-' = standard input)")
     bg = sub.add_parser(
         "breakglass", help="create the break-glass admin account or rotate its password"
     )
@@ -216,6 +221,43 @@ def _secrets_command(args: argparse.Namespace, settings: Any) -> int:
     return asyncio.run(run())
 
 
+def _import_providers_command(args: argparse.Namespace, settings: Any) -> int:
+    import asyncio
+
+    from janus_ops.ai import providers_import
+    from janus_ops.db import create_engine
+    from janus_ops.transit import build_box, build_kv
+    from janus_ops.vault import Vault
+
+    if args.env_file:
+        raw = sys.stdin.read() if args.env_file == "-" else open(args.env_file).read()  # noqa: SIM115
+        env = providers_import.read_env_file(raw.splitlines())
+    else:
+        env = providers_import.environment()
+
+    async def run() -> int:
+        engine = create_engine(settings)
+        try:
+            vault = Vault(build_box(settings), build_kv(settings))
+            if not vault.available:
+                print(
+                    "janus-ops: the vault is not available: keys cannot be stored", file=sys.stderr
+                )
+                return 2
+            results = await providers_import.import_providers(engine, vault, env)
+        finally:
+            await engine.dispose()
+        for r in results:
+            extra = f" ({r.models} models)" if r.status == "created" else ""
+            note = f": {r.note}" if r.note else ""
+            print(f"{r.slug}: {r.status}{extra}{note}")
+        if not results:
+            print("no provider key found")
+        return 1 if any(r.status == "failed" for r in results) else 0
+
+    return asyncio.run(run())
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "version":
@@ -241,6 +283,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     configure_logging(settings.log_level)
+
+    if args.command == "ai-import-providers":
+        return _import_providers_command(args, settings)
 
     if args.command in ("migrate", "setup"):
         from alembic import command

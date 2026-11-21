@@ -45,6 +45,7 @@ export type OperateSessionRow = {
   archived: boolean;
   provider: "main" | "review";
   model: string | null;
+  spec: string | null;
   created_at: string;
   updated_at: string;
 };
