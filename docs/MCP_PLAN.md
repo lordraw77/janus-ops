@@ -109,5 +109,11 @@ Goal: give the Copilot real tools (today it only gets a context bundle assembled
   diagnosed the agent disconnections. Found and fixed: MCP containers need the backend's network
   (`JANUS_AI_MCP_NETWORK=self`), and the prompt now says a tool error is not evidence about the node.
   Write tools not exercised live (no permission needed to test the read path).
-- Left: an MCP settings page, wider scope (hypervisor of a VM), per
-  environment "Action Plan only" rule for production.
+- Write path tried live: with `ai.operate` the model is offered 46 tools, without it 28; a write tool
+  (create_directory, delete_path) ran on e2e-debian and was removed again.
+- Settings card (Settings > Copilot tools): on/off, global switch for operational tools, environments
+  where only an action plan is allowed, Docker status, per-node reachability (`ai_mcp_config`, 0034).
+  Saved values win over `JANUS_AI_MCP_*`.
+- Not done, by decision: a wider scope (the hypervisor of a VM). The inventory has no VM-to-hypervisor
+  link, so it needs a data-model change first (a `hypervisor` field on a node); until then a run sees
+  only its own node.

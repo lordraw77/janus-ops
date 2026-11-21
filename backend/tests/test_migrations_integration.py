@@ -31,7 +31,7 @@ EXPECTED_TABLES = {
     "ai_config",
     "ai_diagnosis",
     "ai_iac",
-    "ai_step",
+    "ai_step", "ai_mcp_config",
     "gitops_stack",
     "gitops_run",
     "snmp_oid",
