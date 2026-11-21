@@ -159,7 +159,7 @@ def me(c: TestClient) -> dict[str, Any]:
                 "workflow.run",
             ],
         ),
-        ("carol", ["auditor"], ["audit.read", "inventory.read", "users.read"]),
+        ("carol", ["auditor"], ["archive.read", "audit.read", "inventory.read", "users.read"]),
     ],
 )
 def test_login_roles_and_permissions(
