@@ -1,3 +1,5 @@
+//go:build !windows
+
 package collect
 
 import (
@@ -84,8 +86,6 @@ func (c *Collector) TopProcesses(n int, elapsed time.Duration) (byCPU, byMem []p
 	byMem = c.describe(all[:min(n, len(all))], users)
 	return byCPU, byMem
 }
-
-const maxCmd = 256
 
 // describe completes the selected processes with a readable name, command line and user.
 // Only the few shown processes are read, not the whole process table.
@@ -282,29 +282,4 @@ func (c *Collector) Listening() []proto.Listener {
 		return out[i].Proto+out[i].Addr < out[j].Proto+out[j].Addr
 	})
 	return out
-}
-
-// Facts gathers the slower-changing host state sent every minute.
-func (c *Collector) Facts(elapsed time.Duration) proto.FactsData {
-	var d proto.FactsData
-	d.UptimeS, _ = c.Uptime()
-	d.FailedUnits = []string{}
-	if c.FailedUnits != nil {
-		if units, err := c.FailedUnits(); err == nil {
-			d.FailedUnits = units
-		}
-	}
-	d.Units = []string{}
-	if c.RunningUnits != nil {
-		if units, err := c.RunningUnits(); err == nil {
-			d.Units = units
-		}
-	}
-	if len(d.Units) > 300 {
-		d.Units = d.Units[:300]
-	}
-	d.Services = c.Services()
-	d.Listening = c.Listening()
-	d.TopCPU, d.TopMem = c.TopProcesses(10, elapsed)
-	return d
 }

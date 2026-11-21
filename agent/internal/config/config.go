@@ -17,8 +17,6 @@ import (
 	"github.com/lordraw77/janus-ops/agent/internal/proto"
 )
 
-const DefaultPath = "/etc/janus-agent/config.yaml"
-
 type Config struct {
 	ServerURL   string       `yaml:"server_url"`
 	NodeID      string       `yaml:"node_id"`
@@ -87,10 +85,10 @@ func (c *Config) validate() error {
 		return errors.New("interval_s must be between 5 and 15")
 	}
 	if c.StateDir == "" {
-		c.StateDir = "/var/lib/janus-agent"
+		c.StateDir = defaultStateDir
 	}
 	if c.DockerSocket == "" {
-		c.DockerSocket = "/var/run/docker.sock"
+		c.DockerSocket = defaultDockerSocket
 	}
 	if c.ProcRoot == "" {
 		c.ProcRoot = "/proc"

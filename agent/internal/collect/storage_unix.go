@@ -1,3 +1,5 @@
+//go:build !windows
+
 package collect
 
 import (
@@ -5,12 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
-
-type diskCounters struct {
-	readSectors, writeSectors, ioMs uint64
-}
 
 // skipDisk filters pseudo devices out of /sys/block.
 func skipDisk(name string) bool {
@@ -75,10 +72,6 @@ var realFS = map[string]bool{
 	"ntfs3": true, "bcachefs": true,
 }
 
-type Mount struct {
-	Point, Source, FSType string
-}
-
 // unescapeMount decodes the octal escapes of mountinfo (\040 = space).
 func unescapeMount(s string) string {
 	if !strings.Contains(s, `\`) {
@@ -139,22 +132,6 @@ func (c *Collector) Mounts() ([]Mount, error) {
 	return out, nil
 }
 
-type FSStat struct {
-	Size, Free, Avail, Files, FilesFree uint64
-}
-
-func statfs(path string) (FSStat, error) {
-	var s syscall.Statfs_t
-	if err := syscall.Statfs(path, &s); err != nil {
-		return FSStat{}, err
-	}
-	bs := uint64(s.Bsize)
-	return FSStat{
-		Size: s.Blocks * bs, Free: s.Bfree * bs, Avail: s.Bavail * bs,
-		Files: s.Files, FilesFree: s.Ffree,
-	}, nil
-}
-
 func (c *Collector) fsMetrics(p *points) {
 	mounts, err := c.Mounts()
 	if err != nil {
@@ -175,8 +152,6 @@ func (c *Collector) fsMetrics(p *points) {
 		}
 	}
 }
-
-type netCounters struct{ rx, tx uint64 }
 
 // Per-container and per-VM plumbing (Docker, Kubernetes CNIs, Proxmox firewall bridges):
 // many short-lived interfaces with no meaning of their own.

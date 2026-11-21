@@ -37,7 +37,7 @@ type Collector struct {
 }
 
 func New(proc, sys string) *Collector {
-	return &Collector{Proc: proc, Sys: sys, FS: statfs, FailedUnits: systemdFailed, RunningUnits: systemdRunning, Root: "/"}
+	return newCollector(proc, sys)
 }
 
 type points struct{ list []proto.Point }
@@ -60,18 +60,7 @@ func (c *Collector) Sample(now time.Time) proto.Sample {
 	first := c.last.IsZero()
 	c.last = now
 
-	c.cpuMetrics(&p, first)
-	c.loadMetrics(&p)
-	c.memMetrics(&p)
-	c.diskMetrics(&p, elapsed, first)
-	c.fsMetrics(&p)
-	c.netMetrics(&p, elapsed, first)
-	if up, err := c.Uptime(); err == nil {
-		p.add("system.uptime_s", up)
-	}
-	if pids, err := c.pids(); err == nil {
-		p.add("proc.count", float64(len(pids)))
-	}
+	c.platformMetrics(&p, elapsed, first)
 	if c.FailedUnits != nil {
 		if units, err := c.FailedUnits(); err == nil {
 			p.add("systemd.failed_units", float64(len(units)))
@@ -131,4 +120,29 @@ func delta(now, before uint64) float64 {
 		return 0
 	}
 	return float64(now - before)
+}
+
+// Facts gathers the slower-changing host state sent every minute.
+func (c *Collector) Facts(elapsed time.Duration) proto.FactsData {
+	var d proto.FactsData
+	d.UptimeS, _ = c.Uptime()
+	d.FailedUnits = []string{}
+	if c.FailedUnits != nil {
+		if units, err := c.FailedUnits(); err == nil {
+			d.FailedUnits = units
+		}
+	}
+	d.Units = []string{}
+	if c.RunningUnits != nil {
+		if units, err := c.RunningUnits(); err == nil {
+			d.Units = units
+		}
+	}
+	if len(d.Units) > 300 {
+		d.Units = d.Units[:300]
+	}
+	d.Services = c.Services()
+	d.Listening = c.Listening()
+	d.TopCPU, d.TopMem = c.TopProcesses(10, elapsed)
+	return d
 }

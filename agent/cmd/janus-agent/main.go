@@ -29,6 +29,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `usage: janus-agent [run] [-config PATH]
        janus-agent collect [-config PATH]   print one sample and the facts as JSON
        janus-agent version
+       janus-agent install [-config PATH]   Windows: install and start the service (administrator)
+       janus-agent uninstall                Windows: stop and remove the service
 `)
 }
 
@@ -43,6 +45,9 @@ func main() {
 	fs.Usage = usage
 	_ = fs.Parse(args)
 
+	if extra, ok := extraCommands[cmd]; ok {
+		os.Exit(extra(*path, args))
+	}
 	switch cmd {
 	case "version":
 		fmt.Println(version)
@@ -56,7 +61,17 @@ func main() {
 	}
 }
 
+// extraCommands are the subcommands of one platform (install and uninstall on Windows).
+var extraCommands = map[string]func(configPath string, args []string) int{}
+
 func run(path string) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return runContext(ctx, path)
+}
+
+// runContext runs the agent until ctx is cancelled (a signal, or the service manager on Windows).
+func runContext(ctx context.Context, path string) int {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg, err := config.Load(path)
 	if err != nil {
@@ -75,8 +90,6 @@ func run(path string) int {
 	}
 	defer buf.Close()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	col := collect.New(cfg.ProcRoot, cfg.SysRoot)
 	log.Info("starting", "version", version, "node_id", cfg.NodeID, "server", cfg.ServerURL,
 		"interval_s", cfg.IntervalS, "policy", cfg.Policy)
