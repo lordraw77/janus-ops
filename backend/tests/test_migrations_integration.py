@@ -30,7 +30,8 @@ pytestmark = [
 EXPECTED_TABLES = {
     "ai_config",
     "ai_diagnosis",
-    "ai_iac", "ai_step",
+    "ai_iac",
+    "ai_step",
     "gitops_stack",
     "gitops_run",
     "snmp_oid",
