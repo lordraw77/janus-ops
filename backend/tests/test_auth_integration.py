@@ -378,6 +378,7 @@ def test_union_of_permissions_for_several_roles() -> None:
                 "agents.manage",
                 "ai.approve",
                 "ai.use",
+                "archive.read",
                 "ansible.read",
                 "ansible.run",
                 "audit.read",
