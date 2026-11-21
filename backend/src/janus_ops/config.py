@@ -123,6 +123,9 @@ class Settings(BaseSettings):
     ai_mcp_enabled: bool = False
     ai_mcp_docker: str = Field(default="docker", max_length=200)
     ai_mcp_docker_host: str | None = Field(default=None, max_length=500)
+    # Network of the MCP containers: "self" = this container's (same routes as the backend), or a
+    # Docker network name; unset = Docker's default bridge
+    ai_mcp_network: str | None = Field(default=None, max_length=200)
     ai_mcp_linux_image: str = Field(default="lordraw/linux-mcp:latest", max_length=300)
     ai_mcp_proxmox_image: str = Field(default="lordraw/proxmox-mcp:latest", max_length=300)
 

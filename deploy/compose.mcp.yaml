@@ -9,5 +9,6 @@ services:
       - ${JANUS_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     environment:
       JANUS_AI_MCP_ENABLED: "true"
+      JANUS_AI_MCP_NETWORK: self
     group_add:
       - ${JANUS_DOCKER_GID:-0}

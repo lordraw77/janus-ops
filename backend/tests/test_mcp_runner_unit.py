@@ -32,3 +32,13 @@ def test_process_env_carries_values_only_for_the_client() -> None:
     spec = McpSpec("i", {"A": "1"}, {"/k": "body"})
     env = runner.process_env(spec, "unix:///x.sock")
     assert env["A"] == "1" and env["JANUS_FILE_0"] == "body" and env["DOCKER_HOST"]
+
+
+def test_network_option() -> None:
+    spec = McpSpec("img:1", {}, {})
+    assert "--network" not in runner.docker_args(spec, [], [], "n")
+    args = runner.docker_args(spec, [], [], "n", "container:abc")
+    assert args[args.index("--network") + 1] == "container:abc"
+    assert runner.resolve_network(None) is None
+    assert runner.resolve_network("lan") == "lan"
+    assert runner.resolve_network("self").startswith("container:")  # type: ignore[union-attr]

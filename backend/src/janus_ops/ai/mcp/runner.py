@@ -26,6 +26,16 @@ FILE_VAR = "JANUS_FILE_"
 RESULT_CHARS = 20000
 
 
+def resolve_network(setting: str | None) -> str | None:
+    """`self` = the network of this very container, so the servers reach the nodes the way the
+    backend does (same routes, same DNS). Anything else is a Docker network name."""
+    if setting == "self":
+        import socket
+
+        return f"container:{socket.gethostname()}"
+    return setting or None
+
+
 class McpError(Exception):
     """A server could not be started or answered badly; `code` is stable."""
 
@@ -52,13 +62,17 @@ def build_script(paths: list[str]) -> str:
     return "; ".join(steps)
 
 
-def docker_args(spec: McpSpec, entrypoint: list[str], cmd: list[str], name: str) -> list[str]:
+def docker_args(
+    spec: McpSpec, entrypoint: list[str], cmd: list[str], name: str, network: str | None = None
+) -> list[str]:
     """The argv of `docker run`. Contains names of variables only, never their values."""
     args = [
         "run", "--rm", "-i", "--name", name,
         "--cap-drop=ALL", "--security-opt", "no-new-privileges",
         "--tmpfs", f"{KEY_DIR}:rw,mode=0700,size=1m",
     ]  # fmt: skip
+    if network:
+        args += ["--network", network]
     for key in spec.env:
         args += ["-e", key]
     paths = list(spec.files)
@@ -136,7 +150,10 @@ class McpSession:
 
 @asynccontextmanager
 async def open_session(
-    spec: McpSpec, docker: str = "docker", docker_host: str | None = None
+    spec: McpSpec,
+    docker: str = "docker",
+    docker_host: str | None = None,
+    network: str | None = None,
 ) -> AsyncIterator[McpSession]:
     """Start the container, initialise MCP, and stop the container when the block ends."""
     import secrets
@@ -145,7 +162,7 @@ async def open_session(
     name = f"janus-mcp-{secrets.token_hex(6)}"
     params = StdioServerParameters(
         command=docker,
-        args=docker_args(spec, entrypoint, cmd, name),
+        args=docker_args(spec, entrypoint, cmd, name, network),
         env=process_env(spec, docker_host),
     )
     try:

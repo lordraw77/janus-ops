@@ -104,5 +104,10 @@ Goal: give the Copilot real tools (today it only gets a context bundle assembled
   server starts), `ai_step` table (0033), audit `ai.mcp.call`, trace in the Copilot page. v1 scope: the
   servers see only the node of the problem (its `ssh` and `proxmox` capabilities).
 - Enable with `JANUS_AI_MCP_ENABLED=true` (set by `deploy/compose.mcp.yaml`).
-- Left: live test with the real model, an MCP settings page, wider scope (hypervisor of a VM), per
+- Live test done (stack on 0.9.0 built from source + `compose.mcp.yaml`, NVIDIA model, node e2e-debian):
+  the model read the node's journal, processes and ports through linux-mcp (8 calls, 140-1100 ms each) and
+  diagnosed the agent disconnections. Found and fixed: MCP containers need the backend's network
+  (`JANUS_AI_MCP_NETWORK=self`), and the prompt now says a tool error is not evidence about the node.
+  Write tools not exercised live (no permission needed to test the read path).
+- Left: an MCP settings page, wider scope (hypervisor of a VM), per
   environment "Action Plan only" rule for production.
