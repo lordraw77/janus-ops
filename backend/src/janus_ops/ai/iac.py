@@ -20,8 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from janus_ops import audit
 from janus_ops.ai import tools
 from janus_ops.ai.diagnose import _data_block
-from janus_ops.ai.llm import AIError, chat
+from janus_ops.ai.gateway import Gateway
+from janus_ops.ai.llm import AIError
 from janus_ops.config import Settings
+from janus_ops.vault import Vault
 
 log = logging.getLogger(__name__)
 
@@ -217,7 +219,9 @@ async def _finish(
             )
 
 
-async def execute(engine: AsyncEngine, settings: Settings, iac_id: str) -> None:
+async def execute(
+    engine: AsyncEngine, settings: Settings, iac_id: str, vault: Vault | None = None
+) -> None:
     """Background task: one generation from `pending` to `done` or `error`. Never raises."""
     prompt = ""
     content: str | None = None
@@ -238,7 +242,7 @@ async def execute(engine: AsyncEngine, settings: Settings, iac_id: str) -> None:
             row.node_name, row.kind, row.request, await _gather(engine, str(row.node_id))
         )
         prompt = json.dumps(messages, ensure_ascii=False)
-        content = await chat(settings, messages)
+        content = await Gateway(engine, vault, settings).text("default", messages, source="iac")
         code, notes = parse_output(content)
     except AIError as exc:
         await _finish(
@@ -264,8 +268,8 @@ async def execute(engine: AsyncEngine, settings: Settings, iac_id: str) -> None:
     )
 
 
-def start(engine: AsyncEngine, settings: Settings, iac_id: str) -> None:
-    task = asyncio.create_task(execute(engine, settings, iac_id))
+def start(engine: AsyncEngine, settings: Settings, iac_id: str, vault: Vault | None = None) -> None:
+    task = asyncio.create_task(execute(engine, settings, iac_id, vault))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
 

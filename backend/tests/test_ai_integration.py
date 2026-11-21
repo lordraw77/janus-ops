@@ -283,3 +283,75 @@ def test_operate_sessions_need_the_permission_and_pick_nodes_in_scope() -> None:
         assert admin.get(f"{base}/sessions/{sid}").json()["model"] is None
         assert admin.delete(f"{base}/sessions/{sid}").status_code == 204
         assert admin.get(f"{base}/sessions/{sid}").status_code == 404
+
+
+def test_providers_keys_models_and_routes_over_the_api() -> None:
+    base = "/api/v1/ai"
+    slug = f"lab{uuid.uuid4().hex[:6]}"
+    with signed_in("bob") as operator:
+        assert operator.get(f"{base}/providers").status_code == 403
+        assert operator.get(f"{base}/routes").status_code == 403
+    with signed_in("alice") as admin:
+        presets = {p["type"]: p for p in admin.get(f"{base}/providers/presets").json()}
+        assert {"groq", "nvidia", "openrouter", "cloudflare", "ollama", "mistral"} <= set(presets)
+        assert presets["cloudflare"]["config_fields"] == ["account_id"]
+        made = admin.post(
+            f"{base}/providers",
+            json={"type": "custom", "slug": slug, "base_url": "https://llm.test/v1"},
+        )
+        assert made.status_code == 201, made.text
+        pid = made.json()["id"]
+        dup = admin.post(
+            f"{base}/providers", json={"type": "custom", "slug": slug, "base_url": "https://x/v1"}
+        )
+        assert dup.status_code == 422 and dup.json()["detail"].startswith("invalid_provider:")
+        bad = admin.post(f"{base}/providers", json={"type": "nope", "slug": "zz"})
+        assert bad.status_code == 422
+        # a key is sealed: only its last four characters come back
+        key = admin.post(
+            f"{base}/providers/{pid}/keys", json={"value": "sk-secret-value-1234", "label": "main"}
+        )
+        assert key.status_code == 201
+        shown = admin.get(f"{base}/providers").text
+        assert "sk-secret-value" not in shown and "1234" in shown
+        # models are added by hand, and only a tested chat model can go on a route
+        models = admin.put(f"{base}/providers/{pid}/models", json=[{"model_id": "m-1"}])
+        assert models.status_code == 200 and models.json()[0]["manual"] is True
+        untested = admin.put(
+            f"{base}/routes/default", json={"entries": [{"provider": slug, "model": "m-1"}]}
+        )
+        assert (
+            untested.status_code == 422 and "has not passed the test" in untested.json()["detail"]
+        )
+        run_sql(
+            "UPDATE ai_provider_model SET test_ok = true, tools = true"
+            " WHERE provider_id = CAST(:p AS uuid)",
+            {"p": pid},
+        )
+        ok = admin.put(
+            f"{base}/routes/default", json={"entries": [{"provider": slug, "model": "m-1"}]}
+        )
+        assert ok.status_code == 204
+        routes = {r["name"]: r for r in admin.get(f"{base}/routes").json()}
+        assert (
+            routes["default"]["entries"][0]["provider"] == slug and routes["default"]["protected"]
+        )
+        # the Copilot is on, and shows the route's first model
+        status = admin.get(f"{base}/status").json()
+        assert status["enabled"] is True and status["model"] == f"{slug}/m-1"
+        choices = admin.get(f"{base}/llm/choices").json()
+        assert choices["configured"] is True
+        assert any(m["spec"] == f"{slug}/m-1" for m in choices["models"])
+        assert any(h["provider"] == slug for h in admin.get(f"{base}/llm/health").json())
+        assert admin.get(f"{base}/llm/usage").status_code == 200
+        # custom routes, and the two that cannot be deleted
+        assert admin.put(f"{base}/routes/Bad Name", json={"entries": []}).status_code in (404, 422)
+        assert admin.put(f"{base}/routes/fast", json={"entries": []}).status_code == 204
+        assert admin.delete(f"{base}/routes/fast").status_code == 204
+        assert admin.delete(f"{base}/routes/default").status_code == 422
+        # disabling and deleting a provider takes its models off the routes
+        assert admin.put(f"{base}/providers/{pid}", json={"enabled": False}).status_code == 200
+        assert admin.delete(f"{base}/providers/{pid}").status_code == 204
+        after = {r["name"]: r for r in admin.get(f"{base}/routes").json()}
+        assert after["default"]["entries"] == []
+        assert admin.get(f"{base}/providers/{pid}/models/refresh").status_code in (404, 405)

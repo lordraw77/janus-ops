@@ -16,7 +16,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from janus_ops import audit
-from janus_ops.ai.llm import AIError, chat, review_settings
+from janus_ops.ai.gateway import Gateway
+from janus_ops.ai.llm import AIError, review_settings
 from janus_ops.ai.mcp import loader
 from janus_ops.ai.mcp.loop import run_rounds
 from janus_ops.ai.mcp.runner import resolve_network
@@ -127,15 +128,21 @@ async def _record_step(
 
 
 async def _finish(
-    engine: AsyncEngine, message_id: int, content: str, error: str | None, read_only: bool
+    engine: AsyncEngine,
+    message_id: int,
+    content: str,
+    error: str | None,
+    read_only: bool,
+    model: str | None = None,
 ) -> None:
     async with engine.begin() as conn:
         await conn.execute(
             text(
                 "UPDATE ai_operate_message SET content = :c, status = :s, error = :e,"
-                " read_only = :ro WHERE id = :id"
+                " read_only = :ro, model = coalesce(:m, model) WHERE id = :id"
             ),
             {
+                "m": model,
                 "c": content,
                 "s": "error" if error else "done",
                 "e": error,
@@ -182,7 +189,7 @@ async def run_message(
             sess = (
                 await conn.execute(
                     text(
-                        "SELECT created_by, node_ids, provider, model FROM ai_operate_session"
+                        "SELECT created_by, node_ids, provider, model, spec FROM ai_operate_session"
                         " WHERE id = CAST(:s AS uuid)"
                     ),
                     {"s": session_id},
@@ -195,7 +202,20 @@ async def run_message(
                 )
             )
         actor = str(sess.created_by)
-        settings = model_settings(settings, sess.provider, sess.model)
+        gateway = Gateway(engine, vault, settings)
+        # routes win once configured; before that the chat's provider slot and model are used
+        spec = sess.spec or ("review" if sess.provider == "review" else "default")
+        legacy = (
+            None
+            if await gateway.configured()
+            else model_settings(settings, sess.provider, sess.model)
+        )
+
+        async def ask(
+            msgs: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
+        ) -> dict[str, Any]:
+            return await gateway.ask(spec, msgs, tools, source="operate", legacy=legacy)
+
         fleet = await loader.specs_for_nodes(
             engine,
             vault,
@@ -235,7 +255,7 @@ async def run_message(
                 *await _history(engine, session_id, user_message_id),
                 {"role": "user", "content": instruction},
             ]
-            content = await run_rounds(settings, messages, box, MAX_ROUNDS)
+            content = await run_rounds(ask, messages, box, MAX_ROUNDS)
             if content is None:  # rounds used up: ask for the report without tools
                 messages.append(
                     {
@@ -243,8 +263,10 @@ async def run_message(
                         "content": "Stop now and report what you did and what is left.",
                     }
                 )
-                content = await chat(settings, messages)
-        await _finish(engine, message_id, content, None, read_only)
+                content = await gateway.text(spec, messages, source="operate", legacy=legacy)
+        await _finish(
+            engine, message_id, content, None, read_only, gateway.used[-1] if gateway.used else None
+        )
     except AIError as exc:
         await _finish(engine, message_id, "", exc.code, read_only)
     except Exception:

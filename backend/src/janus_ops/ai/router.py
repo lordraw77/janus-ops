@@ -20,12 +20,14 @@ from janus_ops.agents import exec as node_exec
 from janus_ops.ai import config_store, diagnose, iac, llm
 from janus_ops.ai.config_router import router as config_router
 from janus_ops.ai.operate_router import router as operate_router
+from janus_ops.ai.providers_router import router as providers_router
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 router.include_router(config_router)
 router.include_router(operate_router)
+router.include_router(providers_router)
 EXEC_TIMEOUT_S = 60
 
 User = Annotated[Session, Depends(require_permission("ai.use"))]
@@ -305,7 +307,7 @@ async def start_second_opinion(
         row.node_name,
         {"diagnosis": str(diagnosis_id), "models": [row.model, settings.ai_review_model]},
     )
-    diagnose.start_second_opinion(engine, settings, str(diagnosis_id))
+    diagnose.start_second_opinion(engine, settings, str(diagnosis_id), request.app.state.vault)
     return {"id": str(diagnosis_id), "second_status": "pending"}
 
 
@@ -348,7 +350,7 @@ async def start_iac(body: IacRequest, request: Request, session: User) -> dict[s
         node.name,
         {"iac": str(iac_id), "kind": body.kind, "model": settings.ai_model},
     )
-    iac.start(engine, settings, str(iac_id))
+    iac.start(engine, settings, str(iac_id), request.app.state.vault)
     return {"id": str(iac_id), "status": "pending"}
 
 

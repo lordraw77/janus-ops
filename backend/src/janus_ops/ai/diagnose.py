@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from janus_ops import audit
 from janus_ops.ai import tools
-from janus_ops.ai.llm import AIError, chat
-from janus_ops.ai.llm import review_settings as llm_review_settings
+from janus_ops.ai.gateway import Gateway
+from janus_ops.ai.llm import AIError
 from janus_ops.ai.mcp import loader
 from janus_ops.ai.mcp.loop import run_rounds
 from janus_ops.ai.mcp.runner import resolve_network
@@ -246,11 +246,19 @@ async def _converse(
     node_id: str | None,
     vault: Vault | None,
     can_operate: bool,
+    gateway: Gateway | None = None,
 ) -> str:
     """The model's final answer. With MCP tools the model may call them for a few rounds first;
     when they are off, unavailable or unsupported by the model, it is one plain request."""
+    gw = gateway or Gateway(engine, vault, settings)
+
+    async def ask(
+        msgs: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        return await gw.ask("default", msgs, tools, source="diagnosis")
+
     if not (settings.ai_mcp_enabled and vault is not None and node_id is not None):
-        return await chat(settings, messages)
+        return await gw.text("default", messages, source="diagnosis")
     async with engine.connect() as conn:
         actor = str(
             await conn.scalar(
@@ -281,10 +289,10 @@ async def _converse(
                 network=resolve_network(settings.ai_mcp_network),
             )
         if not box:
-            return await chat(settings, messages)
+            return await gw.text("default", messages, source="diagnosis")
         messages[0] = {**messages[0], "content": messages[0]["content"] + TOOLS_PROMPT}
         try:
-            content = await run_rounds(settings, messages, box, MAX_ROUNDS)
+            content = await run_rounds(ask, messages, box, MAX_ROUNDS)
             if content is not None:
                 return content
         except AIError as exc:
@@ -294,10 +302,10 @@ async def _converse(
                 **messages[0],
                 "content": messages[0]["content"].replace(TOOLS_PROMPT, ""),
             }
-            return await chat(settings, messages)
+            return await gw.text("default", messages, source="diagnosis")
     # rounds used up: ask for the answer without tools
     messages.append({"role": "user", "content": "Answer now with the JSON object."})
-    return await chat(settings, messages)
+    return await gw.text("default", messages, source="diagnosis")
 
 
 async def execute(
@@ -310,6 +318,7 @@ async def execute(
     """Background task: one diagnosis from `pending` to `done` or `error`. Never raises."""
     prompt = ""
     content: str | None = None
+    gateway = Gateway(engine, vault, settings)
     try:
         problem, sections = await _gather(engine, diagnosis_id)
         node_id = problem.get("node_id")
@@ -321,7 +330,7 @@ async def execute(
                 {"p": prompt, "id": diagnosis_id},
             )
         content = await _converse(
-            engine, settings, diagnosis_id, messages, node_id, vault, can_operate
+            engine, settings, diagnosis_id, messages, node_id, vault, can_operate, gateway
         )
         summary, actions = parse_plan(content)
     except AIError as exc:
@@ -338,13 +347,14 @@ async def execute(
                 text(
                     "UPDATE ai_diagnosis SET status = 'done', summary = :s,"
                     " actions = CAST(:a AS jsonb),"
-                    " response = :r, finished_at = now() WHERE id = CAST(:id AS uuid)"
-                    " RETURNING requested_by, node_name, model"
+                    " response = :r, finished_at = now(), model = coalesce(:m, model)"
+                    " WHERE id = CAST(:id AS uuid) RETURNING requested_by, node_name, model"
                 ),
                 {
                     "s": summary,
                     "a": json.dumps(actions),
                     "r": content,
+                    "m": gateway.used[-1] if gateway.used else None,
                     "id": diagnosis_id,
                 },
             )
@@ -442,13 +452,13 @@ async def _second_fail(engine: AsyncEngine, diagnosis_id: str, code: str, raw: s
 
 
 async def execute_second_opinion(
-    engine: AsyncEngine, settings: Settings, diagnosis_id: str
+    engine: AsyncEngine, settings: Settings, diagnosis_id: str, vault: Vault | None = None
 ) -> None:
     """Background task: a second model answers the same prompt, then the main model compares
     the two. The first diagnosis is never touched. Never raises."""
     raw: str | None = None
+    gw = Gateway(engine, vault, settings)
     try:
-        reviewer = llm_review_settings(settings)
         async with engine.connect() as conn:
             row = (
                 await conn.execute(
@@ -460,19 +470,21 @@ async def execute_second_opinion(
                 )
             ).one()
         messages = json.loads(row.prompt)
-        raw = await chat(reviewer, messages)
+        raw = await gw.text("review", messages, source="second-opinion")
+        reviewer_model = gw.used[-1] if gw.used else ""
         second_summary, second_actions = parse_plan(raw)
         comparison: dict[str, Any]
         try:
-            judged = await chat(
-                settings,
+            judged = await gw.text(
+                "default",
                 build_judge_messages(
                     (row.model, row.summary or "", list(row.actions or [])),
-                    (reviewer.ai_model or "", second_summary, second_actions),
+                    (reviewer_model, second_summary, second_actions),
                 ),
+                source="second-opinion",
             )
             comparison = parse_comparison(judged)
-            comparison["judge"] = settings.ai_model
+            comparison["judge"] = gw.used[-1] if gw.used else settings.ai_model
         except AIError as exc:
             # the second opinion is still worth showing when only the comparison failed
             comparison = {"error": exc.code}
@@ -506,7 +518,7 @@ async def execute_second_opinion(
             target_id=row.node_name,
             payload={
                 "diagnosis": diagnosis_id,
-                "models": [row.model, reviewer.ai_model],
+                "models": [row.model, reviewer_model],
                 "agreement": comparison.get("agreement"),
                 "comparison_error": comparison.get("error"),
                 "response_sha256": sha256(raw),
@@ -514,7 +526,9 @@ async def execute_second_opinion(
         )
 
 
-def start_second_opinion(engine: AsyncEngine, settings: Settings, diagnosis_id: str) -> None:
-    task = asyncio.create_task(execute_second_opinion(engine, settings, diagnosis_id))
+def start_second_opinion(
+    engine: AsyncEngine, settings: Settings, diagnosis_id: str, vault: Vault | None = None
+) -> None:
+    task = asyncio.create_task(execute_second_opinion(engine, settings, diagnosis_id, vault))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)

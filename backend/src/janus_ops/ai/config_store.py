@@ -121,11 +121,35 @@ def apply_mcp(settings: Settings, row: McpRow | None) -> Settings:
     return settings.model_copy(update=update)
 
 
+async def route_heads(conn: AsyncConnection) -> dict[str, tuple[str, str]]:
+    """First entry of the `default` and `review` routes: name -> (`provider/model`, base URL)."""
+    rows = await conn.execute(
+        text(
+            "SELECT DISTINCT ON (e.route) e.route, p.slug, e.model_id, p.base_url"
+            " FROM ai_route_entry e JOIN ai_provider p ON p.id = e.provider_id"
+            " WHERE e.route IN ('default', 'review') ORDER BY e.route, e.position"
+        )
+    )
+    return {r.route: (f"{r.slug}/{r.model_id}", r.base_url) for r in rows}
+
+
+def apply_routes(settings: Settings, heads: dict[str, tuple[str, str]]) -> Settings:
+    """Once models are on a route the Copilot is on, and the status shows the route's first model.
+    (Calls go through the route; these fields only say that, and what, to show.)"""
+    update: dict[str, Any] = {}
+    if "default" in heads:
+        update["ai_model"], update["ai_base_url"] = heads["default"]
+    if "review" in heads:
+        update["ai_review_model"], update["ai_review_base_url"] = heads["review"]
+    return settings.model_copy(update=update) if update else settings
+
+
 async def effective(engine: AsyncEngine, settings: Settings, vault: Vault) -> Settings:
     async with engine.connect() as conn:
         rows = await load_rows(conn)
         mcp = await load_mcp(conn)
-    return apply_mcp(overlay(settings, rows, vault), mcp)
+        heads = await route_heads(conn)
+    return apply_routes(apply_mcp(overlay(settings, rows, vault), mcp), heads)
 
 
 def new_row_id() -> str:

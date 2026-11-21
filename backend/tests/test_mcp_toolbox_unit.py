@@ -3,8 +3,8 @@ import json
 from typing import Any
 
 from janus_ops.ai import diagnose
+from janus_ops.ai import gateway as gateway_module
 from janus_ops.ai.mcp import loader, toolbox
-from janus_ops.ai.mcp import loop as loop_module
 from janus_ops.ai.mcp.runner import McpError, Tool
 from janus_ops.ai.mcp.toolbox import Toolbox, _Entry
 from janus_ops.vault import Vault
@@ -145,12 +145,16 @@ def _run_loop(
         seen.append([dict(m) for m in messages])
         return answers.pop(0)
 
+    async def fake_configured(self: Any) -> bool:
+        return False  # the single-endpoint path: no routes in this test
+
     async def fake_record(engine: Any, did: str, actor: str, step: Any) -> None:
         recorded.append((actor, step))
 
     monkeypatch.setattr(loader, "specs_for_node", fake_specs)
     monkeypatch.setattr(Toolbox, "add", fake_add)
-    monkeypatch.setattr(loop_module, "complete", fake_complete)
+    monkeypatch.setattr(gateway_module, "complete", fake_complete)
+    monkeypatch.setattr(gateway_module.LLMRouter, "configured", fake_configured)
     monkeypatch.setattr(diagnose, "_record_step", fake_record)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": "S"},

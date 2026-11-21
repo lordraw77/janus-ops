@@ -1,11 +1,11 @@
 """The model/tool rounds shared by the diagnosis and the Operate chat."""
 
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
-from janus_ops.ai.llm import AIError, complete
+from janus_ops.ai.llm import AIError
 from janus_ops.ai.mcp.toolbox import Toolbox
-from janus_ops.config import Settings
 
 CALLS_PER_ROUND = 4
 RESULT_CHARS = 8000
@@ -16,13 +16,16 @@ def data_block(name: str, body: str) -> str:
     return f'<operational_data source="{name}">\n{safe}\n</operational_data>'
 
 
+Ask = Callable[[list[dict[str, Any]], list[dict[str, Any]] | None], Awaitable[dict[str, Any]]]
+
+
 async def run_rounds(
-    settings: Settings, messages: list[dict[str, Any]], box: Toolbox, rounds: int
+    ask: Ask, messages: list[dict[str, Any]], box: Toolbox, rounds: int
 ) -> str | None:
     """Ask, run the tool calls, repeat. The model's final text, or None when `rounds` ran out.
     `messages` grows with the exchange."""
     for _ in range(rounds):
-        message = await complete(settings, messages, box.definitions)
+        message = await ask(messages, box.definitions)
         calls = message.get("tool_calls") or []
         if not calls:
             content = message.get("content")

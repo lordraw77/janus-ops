@@ -37,8 +37,11 @@ UPDATE_TITLE = "UPDATE ai_operate_session SET title = :v WHERE id = :id"
 UPDATE_ARCHIVED = "UPDATE ai_operate_session SET archived = :v WHERE id = :id"
 UPDATE_PROVIDER = "UPDATE ai_operate_session SET provider = :v WHERE id = :id"
 UPDATE_MODEL = "UPDATE ai_operate_session SET model = :v WHERE id = :id"
+UPDATE_SPEC = "UPDATE ai_operate_session SET spec = :v WHERE id = :id"
+UPDATE_SPEC_NULL = "UPDATE ai_operate_session SET spec = NULL WHERE id = :id"
 UPDATE_MODEL_NULL = "UPDATE ai_operate_session SET model = NULL WHERE id = :id"
 MODEL_RE = r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$"
+SPEC_RE = r"^[a-z0-9][a-z0-9_-]{0,31}(/[^\s\x00-\x1f]{1,200})?$"
 
 
 class SessionIn(BaseModel):
@@ -46,6 +49,7 @@ class SessionIn(BaseModel):
     title: str | None = Field(default=None, max_length=120)
     provider: Literal["main", "review"] = "main"
     model: str | None = Field(default=None, pattern=MODEL_RE)
+    spec: str | None = Field(default=None, pattern=SPEC_RE)  # a route name or provider/model
 
 
 class SessionPatch(BaseModel):
@@ -54,6 +58,8 @@ class SessionPatch(BaseModel):
     provider: Literal["main", "review"] | None = None
     model: str | None = Field(default=None, pattern=MODEL_RE)
     clear_model: bool = False  # back to the provider's default model
+    spec: str | None = Field(default=None, pattern=SPEC_RE)
+    clear_spec: bool = False  # back to the default route
 
 
 class ProviderOut(BaseModel):
@@ -99,6 +105,7 @@ class SessionOut(BaseModel):
     archived: bool
     provider: str
     model: str | None
+    spec: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -175,6 +182,7 @@ async def create_session(body: SessionIn, request: Request, session: Operator) -
                 "names": names,
                 "p": body.provider,
                 "m": body.model,
+                "sp": body.spec,
             },
         )
     await record(
@@ -192,12 +200,13 @@ def _session_out(r: Any) -> SessionOut:
         archived=r.archived,
         provider=r.provider,
         model=r.model,
+        spec=r.spec,
         created_at=r.created_at,
         updated_at=r.updated_at,
     )
 
 
-COLUMNS = "id, title, node_names, archived, provider, model, created_at, updated_at"
+COLUMNS = "id, title, node_names, archived, provider, model, spec, created_at, updated_at"
 
 
 @router.get("/sessions", response_model=list[SessionOut])
@@ -349,14 +358,14 @@ async def send_message(
                 "INSERT INTO ai_operate_message (session_id, role, status, model) VALUES"
                 " (:id, 'assistant', 'pending', :m) RETURNING id"
             ),
-            {"id": session_id, "m": chosen.ai_model},
+            {"id": session_id, "m": row.spec or chosen.ai_model},
         )
     await record(
         request, session, "ai.operate.instruction", "ai_operate_session", str(session_id),
         {
             "instruction": body.content.strip()[:500],
             "provider": row.provider,
-            "model": chosen.ai_model,
+            "model": row.spec or chosen.ai_model,
         },
     )  # fmt: skip
     operate.start(
@@ -387,6 +396,12 @@ async def patch_session(
     elif "model" in given and body.model is not None:
         updates.append((UPDATE_MODEL, {"v": body.model}))
         changes["model"] = body.model
+    if body.clear_spec:
+        updates.append((UPDATE_SPEC_NULL, {}))
+        changes["spec"] = None
+    elif "spec" in given and body.spec is not None:
+        updates.append((UPDATE_SPEC, {"v": body.spec}))
+        changes["spec"] = body.spec
     async with request.app.state.engine.begin() as conn:
         await _own(conn, session, session_id)
         for sql, params in updates:
