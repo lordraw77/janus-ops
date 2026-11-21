@@ -14,6 +14,7 @@ type Stack = {
   repo_url: string;
   branch: string;
   compose_file: string;
+  credential_id: string | null;
   enabled: boolean;
   last_run_at: string | null;
   last_status: string | null;
@@ -63,6 +64,8 @@ function SecretDialog({ secret, onClose }: { secret: string; onClose: () => void
 
 function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (secret: string) => void }) {
   const nodes = useResource<SnmpNode[]>("/nodes");
+  const credentials = useResource<{ id: string; name: string; kind: string }[]>("/credentials");
+  const [credentialId, setCredentialId] = useState("");
   const [name, setName] = useState("");
   const [nodeId, setNodeId] = useState("");
   const [repo, setRepo] = useState("https://");
@@ -77,7 +80,7 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (secre
     setError(null);
     const r = await api<{ webhook_secret: string }>("/gitops/stacks", {
       method: "POST",
-      body: { name: name.trim(), node_id: nodeId, repo_url: repo.trim(), branch: branch.trim(), compose_file: composeFile.trim() },
+      body: { name: name.trim(), node_id: nodeId, repo_url: repo.trim(), branch: branch.trim(), compose_file: composeFile.trim(), credential_id: credentialId || null },
     });
     setBusy(false);
     if (!r.ok) return setError(message(r.code));
@@ -103,6 +106,18 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: (secre
         </Field>
         <Field label="Repository (https)" hint="No credentials in the URL">
           <TextInput required value={repo} onChange={(e) => setRepo(e.target.value)} />
+        </Field>
+        <Field label="Access token" hint="For a private repository: a credential of kind “Git access token”. The token is sent as a header, never written to the checkout.">
+          <Select value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
+            <option value="">None (public repository)</option>
+            {(credentials.data ?? [])
+              .filter((c) => c.kind === "git_token")
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+          </Select>
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Branch">
@@ -247,6 +262,7 @@ export function GitOpsView() {
               <div className="space-y-1 text-xs">
                 <div className="text-sm font-semibold">{stack.name}</div>
                 <div className="font-mono text-fg-muted">{stack.repo_url}</div>
+                {stack.credential_id && <div className="text-fg-muted">private repository (access token)</div>}
                 <div className="text-fg-muted">
                   branch {stack.branch} · file {stack.compose_file} · node {stack.node_name}
                 </div>

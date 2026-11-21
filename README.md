@@ -388,7 +388,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 | **F5** Proxmox | Cluster overview, VM/LXC lifecycle, snapshots, backup audit, console |
 | **F6** Ansible | Dynamic inventory, playbook catalog, live runs |
 | **F7** AI Copilot | RCA on alerts, action plans with human approval |
-| **F8** In progress | Commands via agent and approved actions, GitOps with signed webhooks, SNMP v2c/v3 checks (done); visual workflows, resume after restart, GitOps web UI (done); private Git repositories (next) |
+| **F8** In progress | Commands via agent and approved actions, GitOps with signed webhooks, SNMP v2c/v3 checks (done); visual workflows, resume after restart, GitOps web UI, private Git repositories over https with a vault token (done); Agent PTY and Windows agent (next) |
 | **F8+** | Agent PTY & auto-update, Windows agent, external secret manager (OpenBao / HashiCorp Vault) |
 
 Details, acceptance criteria and open decisions: [docs/PLAN.md](docs/PLAN.md).

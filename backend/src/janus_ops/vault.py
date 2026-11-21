@@ -34,6 +34,7 @@ KINDS = (
     "proxmox_password",
     "fritzbox_password",
     "postgres_password",
+    "git_token",
     "docker_registry",
     "snmp_v3",
     "notification_secret",

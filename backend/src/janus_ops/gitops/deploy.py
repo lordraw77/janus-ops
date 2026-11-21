@@ -7,6 +7,7 @@ command that fails. Its output is kept, capped, in the run row.
 """
 
 import asyncio
+import base64
 import logging
 import re
 import uuid
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from janus_ops import audit
 from janus_ops.agents import exec as node_exec
 from janus_ops.agents.hub import AgentHub
+from janus_ops.vault import Vault
 
 GITOPS_ROOT = "/var/lib/janus-ops/gitops"
 OUTPUT_KEEP = 64 * 1024
@@ -51,6 +53,7 @@ class Stack:
     repo_url: str
     branch: str
     compose_file: str
+    credential_id: str | None = None
 
 
 def validate_name(value: str) -> str:
@@ -106,8 +109,17 @@ def _env_no_prompt(*args: str) -> list[str]:
     return ["env", "GIT_TERMINAL_PROMPT=0", *args]
 
 
-def plan(stack: Stack, checkout_exists: bool) -> list[Step]:
-    """The commands of a deploy, in order. Only validated fields are used."""
+def auth_header(username: str | None, token: str) -> str:
+    """The HTTP header that carries a git token (Basic: GitHub, GitLab, Gitea, Forgejo accept it).
+    It is passed with `git -c`, so it is never written to the checkout's config."""
+    raw = f"{username or 'git'}:{token}".encode()
+    return "Authorization: Basic " + base64.b64encode(raw).decode()
+
+
+def plan(stack: Stack, checkout_exists: bool, header: str | None = None) -> list[Step]:
+    """The commands of a deploy, in order. Only validated fields are used. `header` is the
+    authentication of a private repository, given only to the commands that reach the network."""
+    auth = ["-c", f"http.extraHeader={header}"] if header else []
     directory = checkout_dir(stack.id)
     steps = [Step("mkdir", ["mkdir", "-p", GITOPS_ROOT], GIT_SHORT_TIMEOUT_S)]
     if checkout_exists:
@@ -122,7 +134,15 @@ def plan(stack: Stack, checkout_exists: bool) -> list[Step]:
             Step(
                 "git fetch",
                 _env_no_prompt(
-                    "git", "-C", directory, "fetch", "--depth", "1", "origin", stack.branch
+                    "git",
+                    *auth,
+                    "-C",
+                    directory,
+                    "fetch",
+                    "--depth",
+                    "1",
+                    "origin",
+                    stack.branch,
                 ),
                 GIT_TIMEOUT_S,
             ),
@@ -138,6 +158,7 @@ def plan(stack: Stack, checkout_exists: bool) -> list[Step]:
                 "git clone",
                 _env_no_prompt(
                     "git",
+                    *auth,
                     "clone",
                     "--depth",
                     "1",
@@ -179,6 +200,7 @@ def stack_from_row(row: Any) -> Stack:
         repo_url=row.repo_url,
         branch=row.branch,
         compose_file=row.compose_file,
+        credential_id=str(row.credential_id) if row.credential_id else None,
     )
 
 
@@ -195,7 +217,37 @@ async def refusal(engine: AsyncEngine, hub: AgentHub, stack: Stack) -> str | Non
     return None
 
 
-async def execute(engine: AsyncEngine, hub: AgentHub, run_id: str, stack: Stack) -> None:
+async def _header(engine: AsyncEngine, vault: Vault | None, stack: Stack) -> str | None:
+    """The authentication header of the stack's credential, or None for a public repository.
+    Raises GitopsError when the credential cannot be read."""
+    if stack.credential_id is None:
+        return None
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT username, ciphertext, nonce, dek_wrapped FROM credential"
+                    " WHERE id = CAST(:id AS uuid) AND kind = 'git_token'"
+                ),
+                {"id": stack.credential_id},
+            )
+        ).first()
+    if row is None or vault is None:
+        raise GitopsError("credential_unavailable")
+    try:
+        secret = vault.reveal(stack.credential_id, row.ciphertext, row.nonce, row.dek_wrapped)
+    except Exception:  # noqa: BLE001 - sealed vault, wrong key, KV down: the run is refused
+        raise GitopsError("credential_unavailable") from None
+    return auth_header(row.username, str(secret["secret"]))
+
+
+async def execute(
+    engine: AsyncEngine,
+    hub: AgentHub,
+    run_id: str,
+    stack: Stack,
+    vault: Vault | None = None,
+) -> None:
     """Runs the deploy of an already recorded `running` run and records the outcome."""
     output: list[str] = []
     size = 0
@@ -205,6 +257,7 @@ async def execute(engine: AsyncEngine, hub: AgentHub, run_id: str, stack: Stack)
     exit_code: int | None = None
     commit: str | None = None
     try:
+        header = await _header(engine, vault, stack)
         probe = await node_exec.run(
             hub,
             stack.node_id,
@@ -212,10 +265,15 @@ async def execute(engine: AsyncEngine, hub: AgentHub, run_id: str, stack: Stack)
             GIT_SHORT_TIMEOUT_S,
         )
         exists = probe.exit_code == 0
-        for step in plan(stack, exists):
+        for step in plan(stack, exists, header):
             result = await node_exec.run(hub, stack.node_id, step.argv, step.timeout_s)
             ran = True
-            chunk = f"$ {step.label}\n{result.output}"
+            shown = result.output
+            if header:  # git may echo the command line in an error: the token never reaches the run
+                shown = shown.replace(header, "[redacted]").replace(
+                    header.removeprefix("Authorization: Basic "), "[redacted]"
+                )
+            chunk = f"$ {step.label}\n{shown}"
             if result.truncated:
                 chunk += "\n[output truncated]"
             if size < OUTPUT_KEEP:
@@ -228,6 +286,8 @@ async def execute(engine: AsyncEngine, hub: AgentHub, run_id: str, stack: Stack)
                 status = "failed"
                 reason = f"{step.label}: {result.reason}"
                 break
+    except GitopsError as exc:
+        status, reason = "refused", exc.code
     except node_exec.ExecError as exc:
         status = "failed" if ran else "refused"
         reason = exc.code

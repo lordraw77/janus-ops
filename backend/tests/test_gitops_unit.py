@@ -1,6 +1,7 @@
 """GitOps (F8): input validation, the command plan of a deploy and the webhook signature. No
 database and no agent: the deploy itself is tested in test_gitops_integration.py."""
 
+import base64
 import hashlib
 import hmac
 import uuid
@@ -174,3 +175,20 @@ def test_webhook_signature_is_checked_over_the_raw_body() -> None:
 def test_webhook_without_a_signature_is_refused() -> None:
     assert not _verify("s3cret", b"{}", "")
     assert not _verify("s3cret", b"{}", "sha256=")
+
+
+def test_a_private_repository_sends_the_token_only_with_the_commands_that_reach_the_network() -> (
+    None
+):
+    header = deploy.auth_header("ci", "tok3n")
+    assert header == "Authorization: Basic " + base64.b64encode(b"ci:tok3n").decode()
+    assert deploy.auth_header(None, "tok3n").endswith(base64.b64encode(b"git:tok3n").decode())
+    for exists, label in ((False, "git clone"), (True, "git fetch")):
+        carrying = [
+            s.label for s in deploy.plan(_stack(), exists, header) if header in " ".join(s.argv)
+        ]
+        assert carrying == [label]
+    # the header is a `-c` option of git: it is never stored in the checkout's config
+    clone = deploy.plan(_stack(), False, header)[1].argv
+    assert clone[clone.index("-c") + 1] == f"http.extraHeader={header}"
+    assert all("Authorization" not in " ".join(s.argv) for s in deploy.plan(_stack(), True))

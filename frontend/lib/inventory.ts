@@ -20,6 +20,7 @@ export const KIND_LABELS: Record<string, string> = {
   proxmox_password: "Proxmox user + password",
   fritzbox_password: "FRITZ!Box user + password",
   postgres_password: "PostgreSQL role + password",
+  git_token: "Git access token (https)",
   docker_registry: "Docker registry",
   snmp_v3: "SNMPv3",
   notification_secret: "Notification secret",

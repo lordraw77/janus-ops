@@ -931,9 +931,9 @@ STATE
                external secret manager (FR-86: OpenBao/Vault Transit and KV, OpenBao in the stack with auto-unseal)
   Open:        Ansible run on a real host (jump host included); SFTP sync on a real server; real Git clone (F6); real PBS test (F5); CSP for the exported UI; retention of the recordings;
                external AD/LDAP on a real AD; "by reference" credentials (KV, read-only); visual workflow editor and automatic resume after a restart;
-               GitOps private repositories; SNMP templates from the UI, traps, MIBs; OIDC; NTLM proxy; Windows agent;
+               SNMP templates from the UI, traps, MIBs; OIDC; NTLM proxy; Windows agent;
                AC-04 on Rocky; E2E behind squid (NFR-02); load test (NFR-05);
                continuous aggregates; manual agent installation without SSH; manual browser tests of the F8 interfaces;
                [VERIFY] Proxmoxer async, aiodocker ssh, NTLM Go, Taskiq
-  Next:        GitOps private repositories, manual browser tests of the F8 interfaces (visual workflow editor, resume after a restart and GitOps web UI are done)
+  Next:        manual browser tests of the F8 interfaces (visual workflow editor, resume after a restart and GitOps web UI are done)
 ```

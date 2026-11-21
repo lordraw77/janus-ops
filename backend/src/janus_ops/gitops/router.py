@@ -42,7 +42,7 @@ SIGNATURE_HEADER = "x-hub-signature-256"
 STACK_SELECT = (
     "SELECT s.id, s.name, s.node_id, n.name AS node_name, s.repo_url, s.branch, s.compose_file,"
     " s.enabled, s.last_run_at, s.last_status, s.created_by, s.created_at, s.secret_ciphertext,"
-    " s.secret_nonce, s.secret_dek, s.secret_kek_version FROM gitops_stack s"
+    " s.secret_nonce, s.secret_dek, s.secret_kek_version, s.credential_id FROM gitops_stack s"
     " JOIN node n ON n.id = s.node_id"
 )
 
@@ -53,6 +53,7 @@ class StackCreate(BaseModel):
     repo_url: str = Field(min_length=1, max_length=2048)
     branch: str = Field(default="main", min_length=1, max_length=200)
     compose_file: str = Field(default=deploy.DEFAULT_COMPOSE_FILE, min_length=1, max_length=255)
+    credential_id: uuid.UUID | None = None  # a `git_token` credential, for a private repository
 
 
 class StackPatch(BaseModel):
@@ -60,6 +61,7 @@ class StackPatch(BaseModel):
     branch: str | None = Field(default=None, min_length=1, max_length=200)
     compose_file: str | None = Field(default=None, min_length=1, max_length=255)
     enabled: bool | None = None
+    credential_id: uuid.UUID | None = None  # send null to go back to a public repository
 
 
 class StackOut(BaseModel):
@@ -70,6 +72,7 @@ class StackOut(BaseModel):
     repo_url: str
     branch: str
     compose_file: str
+    credential_id: str | None
     enabled: bool
     last_run_at: datetime | None
     last_status: str | None
@@ -111,6 +114,7 @@ def _stack_out(row: Any, **extra: Any) -> dict[str, Any]:
         "repo_url": row.repo_url,
         "branch": row.branch,
         "compose_file": row.compose_file,
+        "credential_id": str(row.credential_id) if row.credential_id else None,
         "enabled": row.enabled,
         "last_run_at": row.last_run_at,
         "last_status": row.last_status,
@@ -150,6 +154,18 @@ async def _scoped(request: Request, session: Session, stack_id: uuid.UUID) -> An
     row = await _load(request.app.state.engine, stack_id)
     await require_node(request, session, row.node_id)
     return row
+
+
+async def _check_credential(engine: AsyncEngine, credential_id: uuid.UUID | None) -> None:
+    """A stack's credential must exist and be a git token."""
+    if credential_id is None:
+        return
+    async with engine.connect() as conn:
+        kind = await conn.scalar(
+            text("SELECT kind FROM credential WHERE id = :id"), {"id": credential_id}
+        )
+    if kind != "git_token":
+        raise HTTPException(422, "invalid_credential")
 
 
 def _seal(request: Request, stack_id: str, secret_value: str) -> dict[str, Any]:
@@ -203,6 +219,7 @@ async def create_stack(body: StackCreate, request: Request, session: Manager) ->
     node_id = str(body.node_id)
     await require_node(request, session, node_id)
     engine = request.app.state.engine
+    await _check_credential(engine, body.credential_id)
     async with engine.connect() as conn:
         exists = await conn.scalar(text("SELECT 1 FROM node WHERE id = :id"), {"id": node_id})
     if not exists:
@@ -215,9 +232,10 @@ async def create_stack(body: StackCreate, request: Request, session: Manager) ->
             await conn.execute(
                 text(
                     "INSERT INTO gitops_stack (id, name, node_id, repo_url, branch, compose_file,"
-                    " secret_ciphertext, secret_nonce, secret_dek, secret_kek_version, created_by)"
+                    " secret_ciphertext, secret_nonce, secret_dek, secret_kek_version, created_by,"
+                    " credential_id)"
                     " VALUES (CAST(:id AS uuid), :name, CAST(:node AS uuid), :repo, :branch,"
-                    " :compose, :ct, :nonce, :dek, :kek, :by)"
+                    " :compose, :ct, :nonce, :dek, :kek, :by, :cred)"
                 ),
                 {
                     "id": stack_id,
@@ -231,6 +249,7 @@ async def create_stack(body: StackCreate, request: Request, session: Manager) ->
                     "dek": sealed["secret_dek"],
                     "kek": sealed["secret_kek_version"],
                     "by": session.username,
+                    "cred": body.credential_id,
                 },
             )
             await audit.append(
@@ -240,7 +259,12 @@ async def create_stack(body: StackCreate, request: Request, session: Manager) ->
                 actor_id=session.user_id,
                 target_type="gitops_stack",
                 target_id=name,
-                payload={"node_id": node_id, "repo_url": repo_url, "branch": branch},
+                payload={
+                    "node_id": node_id,
+                    "repo_url": repo_url,
+                    "branch": branch,
+                    "credential_id": str(body.credential_id) if body.credential_id else None,
+                },
             )
     except IntegrityError as exc:
         if "gitops_stack_name_idx" not in str(exc.orig):
@@ -272,9 +296,13 @@ async def update_stack(
         raise _invalid(exc) from None
     if body.enabled is not None:
         changes["enabled"] = body.enabled
+    engine = request.app.state.engine
+    set_credential = "credential_id" in body.model_fields_set
+    if set_credential:
+        await _check_credential(engine, body.credential_id)
+        changes["credential_id"] = str(body.credential_id) if body.credential_id else None
     if not changes:
         return _stack_out(row)
-    engine = request.app.state.engine
     async with engine.begin() as conn:
         # NULL means "unchanged": every patchable column is COALESCEd with its current value
         await conn.execute(
@@ -282,13 +310,17 @@ async def update_stack(
                 "UPDATE gitops_stack SET repo_url = coalesce(:repo, repo_url),"
                 " branch = coalesce(:branch, branch),"
                 " compose_file = coalesce(:compose, compose_file),"
-                " enabled = coalesce(:enabled, enabled), updated_at = now() WHERE id = :id"
+                " enabled = coalesce(:enabled, enabled),"
+                " credential_id = CASE WHEN :set_cred THEN CAST(:cred AS uuid)"
+                " ELSE credential_id END, updated_at = now() WHERE id = :id"
             ),
             {
                 "repo": changes.get("repo_url"),
                 "branch": changes.get("branch"),
                 "compose": changes.get("compose_file"),
                 "enabled": changes.get("enabled"),
+                "set_cred": set_credential,
+                "cred": changes.get("credential_id"),
                 "id": stack_id,
             },
         )
@@ -404,7 +436,7 @@ async def _start(request: Request, row: Any, trigger: str, actor: str) -> str:
     except IntegrityError:
         # the partial unique index: a deploy of this stack is already running
         raise HTTPException(409, "deploy_in_progress") from None
-    task = asyncio.create_task(deploy.execute(engine, hub, run_id, stack))
+    task = asyncio.create_task(deploy.execute(engine, hub, run_id, stack, request.app.state.vault))
     jobs: set[asyncio.Task[None]] = request.app.state.gitops_jobs
     jobs.add(task)
     task.add_done_callback(jobs.discard)
