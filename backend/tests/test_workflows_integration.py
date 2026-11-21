@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from janus_ops.agents.hub import AgentHub
 from janus_ops.db import alembic_config
 from janus_ops.monitoring import notify
+from janus_ops.vault import Vault
 from janus_ops.workflows import engine as wf_engine
 
 from ._it import CONFIGURED, DB_URL, make_client, run_sql, signed_in
@@ -532,7 +533,7 @@ def test_a_restart_resumes_a_run_between_steps_and_fails_one_with_a_command_in_f
         db = create_async_engine(DB_URL)
         jobs: set[asyncio.Task[None]] = set()
         try:
-            failed = await wf_engine.recover(db, AgentHub(), jobs)
+            failed = await wf_engine.recover(db, AgentHub(), jobs, Vault(None))
             await asyncio.gather(*jobs)
             return failed
         finally:
