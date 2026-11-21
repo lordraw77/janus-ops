@@ -416,7 +416,7 @@ janus-ops/
 - The agent **never listens** on a port; all traffic is outbound, authenticated and encrypted.
 - Private keys and secrets **never reach the browser**; they are decrypted server-side only when used.
 - Every privileged action (shell, restart, playbook, AI action plan) is **attributed and audited**.
-- The AI Copilot runs on **self-hosted models only**, is **read-only by default**, never sees vault
+- The AI Copilot runs on the provider you configure (self-hosted or hosted, OpenAI-compatible), is **read-only by default**, never sees vault
   secrets and never executes destructive actions on its own.
 
 ## License
