@@ -59,6 +59,8 @@ PIN_TYPE = (
     "public static RemoteCertificateValidationCallback Callback=Check;"
     "static bool Check(object s,X509Certificate c,X509Chain h,SslPolicyErrors e){"
     "var x=new X509Chain();x.ChainPolicy.ExtraStore.Add(Root);"
+    # the server sends the leaf and its intermediate: they are the links up to the pinned root
+    "foreach(var l in h.ChainElements)x.ChainPolicy.ExtraStore.Add(l.Certificate);"
     "x.ChainPolicy.RevocationMode=X509RevocationMode.NoCheck;"
     "x.ChainPolicy.VerificationFlags=X509VerificationFlags.AllowUnknownCertificateAuthority;"
     "x.Build(new X509Certificate2(c));"

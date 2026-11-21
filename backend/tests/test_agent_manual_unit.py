@@ -32,6 +32,7 @@ def test_the_command_carries_the_token_and_pins_the_ca() -> None:
     assert "Bearer tok-123" in cmd and f"install.ps1?node={NODE}" in cmd
     assert base64.b64encode(b"der-bytes").decode() in cmd
     assert "ServerCertificateValidationCallback=[JanusPin]::Callback" in cmd
+    assert "foreach(var l in h.ChainElements)" in cmd  # the intermediate the server sends
     assert "{param" not in cmd  # no scriptblock callback (it fails in PowerShell 5.1)
     assert cmd.count('"') == 2  # one quoted argument for cmd.exe: no inner double quotes
 
