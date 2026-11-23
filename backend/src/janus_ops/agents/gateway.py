@@ -114,7 +114,7 @@ class Facts(BaseModel):
     failed_units: list[str] = Field(default_factory=list, max_length=500)
     # absent from an agent that predates the service discovery: the server tells it from "none"
     units: list[str] | None = Field(default=None, max_length=500)
-    services: list[Service] | None = Field(default=None, max_length=50)
+    services: list[Service] | None = Field(default=None, max_length=100)
     listening: list[Listener] = Field(default_factory=list, max_length=2000)
     top_cpu: list[Process] = Field(default_factory=list, max_length=20)
     top_mem: list[Process] = Field(default_factory=list, max_length=20)

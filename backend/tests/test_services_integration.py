@@ -58,7 +58,7 @@ def test_the_service_types_are_listed_with_their_form() -> None:
     with signed_in("carol") as auditor:
         rows = auditor.get("/api/v1/service-types").json()
     types = {r["kind"]: r for r in rows}
-    assert set(types) == {"postgres", "fritzbox"}
+    assert {"postgres", "fritzbox", "mysql", "nginx"} <= set(types)
     pg = types["postgres"]
     assert pg["credentials"] == ["postgres_password"] and pg["credential_required"] is True
     assert pg["defaults"] == {"port": 5432, "database": "postgres", "sslmode": "prefer"}
@@ -118,7 +118,7 @@ def test_a_node_has_several_services_of_a_kind_each_with_its_own_name() -> None:
     [
         ([{"kind": "postgres", "name": "a"}, {"kind": "postgres", "name": "A"}], None),  # same name
         ([{"kind": "postgres"}, {"kind": "postgres"}], None),  # both called "postgres"
-        ([{"kind": "mysql"}], None),
+        ([{"kind": "no-such-kind"}], None),
         ([{"kind": "postgres", "name": "bad;name"}], None),
         ([{"kind": "postgres"}], "credential_required:postgres"),
     ],

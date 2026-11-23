@@ -34,7 +34,7 @@ from janus_ops import audit
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.inventory.services import has_requirement, missing_code
-from janus_ops.monitoring import probes
+from janus_ops.monitoring import probes, service_catalog
 from janus_ops.monitoring.checks import NEEDS_AGENT, PARAMS, THRESHOLDS, Kind
 from janus_ops.monitoring.template_auto import Auto, effective
 from janus_ops.scope import require_node
@@ -46,7 +46,22 @@ router = APIRouter(prefix="/templates", tags=["monitoring"])
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 Manager = Annotated[Session, Depends(require_permission("monitoring.manage"))]
 
-Category = Literal["proxmox", "database", "web", "server", "network", "nas", "ups", "generic"]
+Category = Literal[
+    "proxmox",
+    "database",
+    "web",
+    "messaging",
+    "container",
+    "monitoring",
+    "mail",
+    "infra",
+    "devops",
+    "server",
+    "network",
+    "nas",
+    "ups",
+    "generic",
+]
 Requires = Literal["ssh", "agent", "proxmox", "docker", "snmp", "fritzbox", "postgres"]
 MacroValue = str | int | float | bool
 
@@ -289,6 +304,9 @@ def builtin_files() -> list[dict[str, Any]]:
     ):
         if entry.name.endswith(".json"):
             found.append(json.loads(entry.read_text(encoding="utf-8")))
+    # the well-known server software: one table (service_catalog.py), a template each
+    shipped = {str(f["slug"]) for f in found}
+    found += [t for t in service_catalog.templates() if t["slug"] not in shipped]
     return found
 
 

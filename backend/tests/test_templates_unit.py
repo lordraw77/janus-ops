@@ -163,3 +163,51 @@ def test_a_kind_that_needs_a_capability_requires_it() -> None:
 def test_defaults_and_macro_model() -> None:
     macros = [Macro(name="A", default=1), Macro(name="B", default="x")]
     assert defaults(macros) == {"A": 1, "B": "x"}
+
+
+def test_the_server_software_catalog_ships_a_template_per_product() -> None:
+    from janus_ops.monitoring import service_catalog
+
+    shipped = {str(f["slug"]): f for f in builtin_files()}
+    products = service_catalog.PRODUCTS
+    assert len(products) >= 120
+    assert len({p.slug for p in products}) == len(products)
+    assert len({p.name for p in products}) == len(products)
+    for product in products:
+        raw = shipped[product.slug]
+        assert raw["requires"] == "agent"
+        # a product is found by something that is its own: a unit, a process or a port
+        detect = raw["detect"]
+        assert detect["units"] or detect["processes"] or detect["ports"], product.slug
+    # PostgreSQL and Apache keep their own files, with their probes
+    assert "postgresql" in shipped
+    assert "apache-httpd" in shipped
+    assert "postgresql" not in {p.slug for p in products}
+
+
+def test_every_product_is_a_service_kind_and_its_template_probes_exist() -> None:
+    from janus_ops.inventory.services import CAPABILITY_KINDS, SERVICE_TYPES, ServiceIn
+    from janus_ops.monitoring import probes, service_catalog
+
+    for product in service_catalog.PRODUCTS:
+        stype = SERVICE_TYPES[product.slug]
+        assert not stype.credentials
+        # the config defaults are valid and the form draws exactly the config's fields
+        config = stype.config().model_dump(mode="json")
+        assert {f["name"] for f in stype.fields} == set(config)
+        ServiceIn.model_validate({"kind": product.slug, "config": config})
+        for item in service_catalog.template(product)["items"]:
+            if item["kind"] == "probe":
+                assert item["params"]["probe"] in probes.CATALOG
+    with pytest.raises(ValidationError):
+        ServiceIn.model_validate({"kind": "no-such-product"})
+    assert "docker" in CAPABILITY_KINDS and "docker" in SERVICE_TYPES
+
+
+def test_the_service_probes_extract_numbers() -> None:
+    from janus_ops.monitoring import probes
+
+    tcp = probes.CATALOG["service_tcp.latency_ms"].extract({"tcp_ms": 12.5, "port": 6379}, {})
+    assert tcp[0] == 12.5 and "6379" in tcp[1]
+    http = probes.CATALOG["service_http.status"].extract({"http_status": 204, "http_ms": 3.0}, {})
+    assert http[0] == 204

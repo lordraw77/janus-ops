@@ -19,7 +19,22 @@ import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { type Getters, useSortedRows } from "@/lib/sort";
 
-const CATEGORIES = ["proxmox", "database", "web", "server", "network", "nas", "ups", "generic"];
+const CATEGORIES = [
+  "proxmox",
+  "database",
+  "web",
+  "messaging",
+  "container",
+  "monitoring",
+  "mail",
+  "infra",
+  "devops",
+  "server",
+  "network",
+  "nas",
+  "ups",
+  "generic",
+];
 const REQUIRES = ["ssh", "agent", "proxmox", "docker", "snmp", "fritzbox", "postgres"];
 const KINDS = ["host", "metric", "systemd", "service", "port", "tcp", "http", "backup", "snmp", "fritzbox", "probe"];
 const CHECKBOX = "h-4 w-4 accent-primary";

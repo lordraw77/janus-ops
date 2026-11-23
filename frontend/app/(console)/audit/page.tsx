@@ -101,7 +101,7 @@ function AuditLog() {
   }
 
   return (
-    <div className="max-w-6xl space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Audit log</h1>
         {chain &&

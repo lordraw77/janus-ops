@@ -2,15 +2,26 @@
 
 from typing import Any
 
-from janus_ops.monitoring.probes import httpd, postgres, proxmox
+from janus_ops.monitoring.probes import httpd, postgres, proxmox, service
 from janus_ops.monitoring.probes.base import Ctx, Probe, ProbeError, Target
 
 CONNECTORS = {
     "postgres": postgres.snapshot,
     "httpd": httpd.snapshot,
     "proxmox": proxmox.snapshot,
+    "service_tcp": service.tcp_snapshot,
+    "service_http": service.http_snapshot,
 }
-CATALOG: dict[str, Probe] = {p.name: p for p in [*postgres.PROBES, *httpd.PROBES, *proxmox.PROBES]}
+CATALOG: dict[str, Probe] = {
+    p.name: p
+    for p in [
+        *postgres.PROBES,
+        *httpd.PROBES,
+        *proxmox.PROBES,
+        *service.TCP_PROBES,
+        *service.HTTP_PROBES,
+    ]
+}
 
 
 async def read(

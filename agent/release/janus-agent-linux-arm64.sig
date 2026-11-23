@@ -1,6 +1,6 @@
 {
-  "version": "0.10.0",
+  "version": "0.10.1",
   "arch": "arm64",
-  "sha256": "d02bce035c7347f249d2f1a5efd7711c221a9a5f05abccb7864604cea21633c0",
-  "signature": "mw2EcqtTSDyLM3sMbS57MvBHObBmyyz/iL6jP5h3OAPEGAD7TP9yPz/t11KMxGiPdeDgpj4xp6EDs8Zv9XWCCQ=="
+  "sha256": "b92f413c0852c7864b85348b8eef4455373d366ca1f5ef6033504ca13c52ed19",
+  "signature": "eXV0mzO1IARRDHHGmhp8WXQjfOf3jeRs65raYQX4a54h5RN85I0ovtAEPoVh6ev38K4IrOBpGwiwAQ81gIA7Dg=="
 }

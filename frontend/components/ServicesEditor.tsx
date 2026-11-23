@@ -20,6 +20,7 @@ export type ServiceType = {
   description: string;
   credentials: string[];
   credential_required: boolean;
+  category?: string;
   fields: ServiceField[];
   defaults: Record<string, string | number>;
 };
@@ -116,10 +117,16 @@ export function ServicesEditor({
             className="rounded border border-line bg-elevated px-2 py-1 text-xs"
           >
             <option value="">+ Add a service…</option>
-            {types.map((t) => (
-              <option key={t.kind} value={t.kind}>
-                {t.label}
-              </option>
+            {Array.from(new Set(types.map((t) => t.category ?? "generic"))).map((cat) => (
+              <optgroup key={cat} label={cat}>
+                {types
+                  .filter((t) => (t.category ?? "generic") === cat)
+                  .map((t) => (
+                    <option key={t.kind} value={t.kind}>
+                      {t.label}
+                    </option>
+                  ))}
+              </optgroup>
             ))}
           </select>
         )}
@@ -149,6 +156,7 @@ export function ServicesEditor({
               <Field label="Name" hint={`Empty = ${type.kind}. Needed to tell two of the same kind apart.`}>
                 <TextInput value={s.name} onChange={(e) => patch(s.key, { name: e.target.value })} placeholder={type.kind} />
               </Field>
+              {type.credentials.length > 0 && (
               <Field label={`Credential (${type.credentials.join(" or ")})`}>
                 <select value={s.credential} onChange={(e) => patch(s.key, { credential: e.target.value })} className={SELECT}>
                   <option value="">{type.credential_required ? "— select —" : "—"}</option>
@@ -160,6 +168,7 @@ export function ServicesEditor({
                   ))}
                 </select>
               </Field>
+              )}
               {type.fields.map((f) => (
                 <Field key={f.name} label={f.label}>
                   {f.type === "select" ? (

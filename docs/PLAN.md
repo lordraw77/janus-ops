@@ -176,6 +176,10 @@
 > content in KV v2 (`openbao-kv`), `janus-ops secrets status|migrate|prune`, readiness that checks the secret
 > manager. ADR-011 implemented and tested against real OpenBao 2.4.1 and Vault 1.20.
 >
+> **v0.37** — **release 0.10.1** (migrations `0039`–`0041`): deeper service discovery on the agent (config files read from a fixed
+> list of keys, no secrets), host discovery of IPv4 networks (Inventory → Discovery), about 140 built-in templates from
+> `monitoring/service_catalog.py`, every product also a node service with TCP/HTTP probes. Agent signatures renewed.
+>
 > **v0.36** — **release 0.10.0** (migrations `0032`–`0038`):
 > - **Windows agent** (FR-85, now built): Windows service `JanusAgent` with recovery actions, metrics (CPU, memory, swap,
 >   file systems, network without filter interfaces, uptime, processes), one-time enrollment and a PowerShell install

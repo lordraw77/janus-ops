@@ -457,6 +457,31 @@ function Facts({ agent }: { agent: AgentDetail }) {
           </tbody>
         </table>
       </Card>
+      {(f.services?.length ?? 0) > 0 && (
+        <Card title={`Services found (${f.services?.length})`}>
+          <div className="max-h-72 space-y-3 overflow-auto">
+            {f.services?.map((s) => (
+              <div key={s.name}>
+                <div className="text-xs font-semibold">
+                  {s.name} <span className="font-mono font-normal text-fg-muted">{s.process}</span>
+                </div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 font-mono text-[11px]">
+                  {Object.entries(s.config ?? {})
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([k, v]) => (
+                      <div key={k} className="contents">
+                        <dt className="text-fg-muted">{k}</dt>
+                        <dd className="truncate text-fg-secondary" title={v}>
+                          {v}
+                        </dd>
+                      </div>
+                    ))}
+                </dl>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       <Card title={`Listening ports (${f.listening.length})`}>
         <div className="max-h-56 overflow-auto">
           <table className="w-full font-mono text-xs">

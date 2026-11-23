@@ -23,13 +23,17 @@ import (
 
 const (
 	maxServiceCmd = 512
-	maxServices   = 20
+	maxServices   = 60
 )
 
 type serviceDef struct {
 	id    string
 	procs []string // kernel command names of the main process
 	read  func(c *Collector, args []string) map[string]string
+	// the service has one port: when no file or flag gives it, the lowest one its process listens on
+	listenOwner bool
+	// the process name is shared (java, master, beam.smp): its command line must contain this
+	cmdHas string
 }
 
 var serviceCatalog = []serviceDef{
@@ -49,17 +53,24 @@ func (c *Collector) Services() []proto.Service {
 	}
 	sort.Ints(pids)
 	found := map[string]proto.Service{}
+	var listening []proto.Listener
 	for _, pid := range pids {
 		st, ok := c.readStat(pid)
 		if !ok {
 			continue
 		}
+		var args []string
 		for _, def := range serviceCatalog {
 			if _, done := found[def.id]; done || !contains(def.procs, st.name) {
 				continue
 			}
-			args := c.cmdline(pid)
+			if args == nil {
+				args = c.cmdline(pid)
+			}
 			cmd := strings.Join(args, " ")
+			if def.cmdHas != "" && !strings.Contains(cmd, def.cmdHas) {
+				continue
+			}
 			if len(cmd) > maxServiceCmd {
 				cmd = cmd[:maxServiceCmd]
 			}
@@ -67,6 +78,14 @@ func (c *Collector) Services() []proto.Service {
 			if def.read != nil {
 				for k, v := range def.read(c, args) {
 					svc.Config[k] = v
+				}
+			}
+			if def.listenOwner && svc.Config["port"] == "" {
+				if listening == nil {
+					listening = c.Listening()
+				}
+				if p := lowestPort(listening, st.name); p > 0 {
+					svc.Config["port"] = strconv.Itoa(p)
 				}
 			}
 			found[def.id] = svc
@@ -81,6 +100,17 @@ func (c *Collector) Services() []proto.Service {
 		out = out[:maxServices]
 	}
 	return out
+}
+
+// lowestPort is the lowest TCP port a process of that name listens on, or 0.
+func lowestPort(listening []proto.Listener, process string) int {
+	lowest := 0
+	for _, l := range listening {
+		if l.Proto == "tcp" && l.Process == process && (lowest == 0 || l.Port < lowest) {
+			lowest = l.Port
+		}
+	}
+	return lowest
 }
 
 func contains(list []string, s string) bool {

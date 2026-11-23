@@ -44,6 +44,8 @@ ERRORS: dict[str, tuple[State, str]] = {
     "auth_failed": ("crit", "the service refused the credential"),
     "denied": ("unknown", "the user has no right to read this (PostgreSQL: grant pg_monitor)"),
     "bad_response": ("unknown", "the service answered with something unexpected"),
+    "no_port": ("unknown", "the service has no port configured"),
+    "no_http": ("unknown", "the service has no health URL configured"),
     "proxmox_unavailable": ("unknown", "Proxmox access is not available"),
     "pve_error": ("unknown", "the Proxmox API refused or failed"),
 }
@@ -160,6 +162,27 @@ async def load_secret(
     except (VaultUnavailable, DecryptionError):
         raise ProbeError("vault_unavailable") from None
     return Secret(str(row.address), row.config or {}, row.username or "", str(secret["secret"]))
+
+
+_LOAD_PLAIN = """
+SELECT s.config, n.address FROM node_service s JOIN node n ON n.id = s.node_id
+WHERE s.node_id = CAST(:node AS uuid) AND s.kind = :kind AND s.enabled
+  AND (CAST(:name AS text) IS NULL OR lower(s.name) = lower(:name))
+ORDER BY s.name LIMIT 1
+"""
+
+
+async def load_service(
+    conn: AsyncConnection, node_id: str, kind: str, name: str | None = None
+) -> tuple[str, dict[str, Any]]:
+    """The node's address and the config of its service of this kind (the one called `name`, else
+    the first by name), for services that need no credential."""
+    row = (
+        await conn.execute(text(_LOAD_PLAIN), {"node": node_id, "kind": kind, "name": name})
+    ).first()
+    if row is None:
+        raise ProbeError("no_service")
+    return str(row.address), dict(row.config or {})
 
 
 def fmt(value: float) -> str:

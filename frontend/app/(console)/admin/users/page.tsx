@@ -696,7 +696,7 @@ export default function UsersAdminPage() {
 
   return (
     <RequirePermission permission="users.read">
-      <div className="max-w-6xl space-y-4">
+      <div className="space-y-4">
         <h1 className="text-lg font-semibold">Users & roles</h1>
         <div role="tablist" className="flex gap-1 border-b border-line text-xs">
           {(["users", "roles"] as const).map((t) => (

@@ -31,10 +31,14 @@ export type Agent = {
 export type Proc = { pid: number; name: string; cmd?: string; user?: string; cpu_pct: number; rss_bytes: number };
 export type Listener = { proto: string; addr: string; port: number; process: string };
 
+/** A well-known service the agent found, with the settings it read from the configuration. */
+export type FoundService = { name: string; process: string; cmd?: string; config?: Record<string, string> };
+
 export type AgentDetail = Agent & {
   facts: {
     uptime_s: number;
     failed_units: string[];
+    services?: FoundService[];
     listening: Listener[];
     top_cpu: Proc[];
     top_mem: Proc[];

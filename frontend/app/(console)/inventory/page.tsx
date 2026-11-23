@@ -4,6 +4,7 @@ import { Download, FolderOpen, Pencil, Plus, Server, SquareTerminal, Trash2 } fr
 import Link from "next/link";
 import { type FormEvent, useMemo, useState } from "react";
 
+import { DiscoveryTab } from "@/components/Discovery";
 import { EnvBadge } from "@/components/EnvBadge";
 import {
   type ServiceState,
@@ -32,10 +33,26 @@ import {
 const SELECT =
   "w-full rounded border border-line bg-canvas px-3 py-1.5 text-sm outline-none focus:border-primary";
 
-function Chip({ children, muted = false }: { children: string; muted?: boolean }) {
+const CHIP_TONES = {
+  neutral: "border-transparent bg-elevated text-fg-secondary",
+  cap: "border-telemetry/30 bg-telemetry/10 text-telemetry",
+  service: "border-ai/30 bg-ai/10 text-ai",
+  tag: "border-warn/30 bg-warn/10 text-warn",
+  group: "border-ok/30 bg-ok/10 text-ok",
+} as const;
+
+function Chip({
+  children,
+  muted = false,
+  tone = "neutral",
+}: {
+  children: string;
+  muted?: boolean;
+  tone?: keyof typeof CHIP_TONES;
+}) {
   return (
     <span
-      className={`inline-block rounded bg-elevated px-1.5 py-0.5 font-mono text-[10px] ${muted ? "text-fg-muted line-through" : "text-fg-secondary"}`}
+      className={`inline-block rounded border px-1.5 py-0.5 font-mono text-[10px] ${muted ? "border-transparent bg-elevated text-fg-muted line-through" : CHIP_TONES[tone]}`}
     >
       {children}
     </span>
@@ -352,7 +369,6 @@ const NODE_SORT: Getters<InventoryNode> = {
   caps: (n) => n.capabilities.filter((c) => c.enabled).length,
   services: (n) => n.services.length,
   agent: (n) => (n.agent ? (n.agent.version ?? "?") : null),
-  installed: (n) => (n.agent && !n.agent.revoked ? n.agent.install_path : null),
   labels: (n) => [...n.tags, ...n.groups].join(" "),
   parent: (n) => n.parent?.name,
 };
@@ -482,7 +498,6 @@ function NodesTab({ groups }: { groups: Group[] }) {
                 <SortTh label="Capabilities" col="caps" sort={sort} onSort={toggle} />
                 <SortTh label="Services" col="services" sort={sort} onSort={toggle} />
                 <SortTh label="Agent" col="agent" sort={sort} onSort={toggle} />
-                <SortTh label="Installed at" col="installed" sort={sort} onSort={toggle} />
                 <SortTh label="Tags / groups" col="labels" sort={sort} onSort={toggle} />
                 <SortTh label="Depends on" col="parent" sort={sort} onSort={toggle} />
                 <th />
@@ -505,7 +520,7 @@ function NodesTab({ groups }: { groups: Group[] }) {
                   <td className="py-2 pr-3">
                     <div className="flex flex-wrap gap-1">
                       {n.capabilities.map((c) => (
-                        <Chip key={c.kind} muted={!c.enabled}>
+                        <Chip key={c.kind} tone="cap" muted={!c.enabled}>
                           {c.kind}
                         </Chip>
                       ))}
@@ -514,7 +529,7 @@ function NodesTab({ groups }: { groups: Group[] }) {
                   <td className="py-2 pr-3">
                     <div className="flex flex-wrap gap-1">
                       {n.services.map((s) => (
-                        <Chip key={s.id} muted={!s.enabled}>
+                        <Chip key={s.id} tone="service" muted={!s.enabled}>
                           {s.name === s.kind ? s.kind : `${s.kind}:${s.name}`}
                         </Chip>
                       ))}
@@ -540,16 +555,13 @@ function NodesTab({ groups }: { groups: Group[] }) {
                       <span className="text-fg-muted">—</span>
                     )}
                   </td>
-                  <td className="py-2 pr-3 font-mono text-[11px] text-fg-secondary">
-                    {n.agent && !n.agent.revoked ? n.agent.install_path : <span className="text-fg-muted">—</span>}
-                  </td>
                   <td className="py-2 pr-3">
                     <div className="flex flex-wrap gap-1">
                       {n.tags.map((t) => (
-                        <Chip key={t}>{`#${t}`}</Chip>
+                        <Chip key={t} tone="tag">{`#${t}`}</Chip>
                       ))}
                       {n.groups.map((g) => (
-                        <Chip key={g}>{`@${g}`}</Chip>
+                        <Chip key={g} tone="group">{`@${g}`}</Chip>
                       ))}
                     </div>
                   </td>
@@ -790,13 +802,15 @@ function TagsTab() {
 }
 
 function Inventory() {
-  const [tab, setTab] = useState<"nodes" | "groups" | "tags">("nodes");
+  const [tab, setTab] = useState<"nodes" | "groups" | "tags" | "discovery">("nodes");
   const groups = useResource<Group[]>("/groups");
+  const { can } = useAuth();
+  const tabs = can("inventory.manage") ? (["nodes", "groups", "tags", "discovery"] as const) : (["nodes", "groups", "tags"] as const);
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold">Inventory</h1>
       <div role="tablist" className="flex gap-1 border-b border-line text-xs">
-        {(["nodes", "groups", "tags"] as const).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t}
             role="tab"
@@ -812,6 +826,7 @@ function Inventory() {
       {tab === "nodes" && <NodesTab groups={groups.data ?? []} />}
       {tab === "groups" && <GroupsTab groups={groups.data ?? []} reload={groups.reload} />}
       {tab === "tags" && <TagsTab />}
+      {tab === "discovery" && <DiscoveryTab groups={groups.data ?? []} />}
     </div>
   );
 }

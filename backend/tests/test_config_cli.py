@@ -68,7 +68,7 @@ def test_cli_rejects_unknown_command() -> None:
 
 
 def test_schema_head_is_latest_migration() -> None:
-    assert schema_head() == "0038"
+    assert schema_head() == "0041"
 
 
 @pytest.mark.parametrize("value", ["", "   "])

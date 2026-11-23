@@ -86,6 +86,8 @@ EXPECTED_TABLES = {
     "audit_event",
     "terminal_session",
     "snippet",
+    "discovered_host",
+    "discovery_subnet",
     "environment",
     "role_scope_rule",
 }

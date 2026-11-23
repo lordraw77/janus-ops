@@ -16,17 +16,31 @@ from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    create_model,
+    field_validator,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
+from janus_ops.monitoring import service_catalog
 
 router = APIRouter(prefix="/service-types", tags=["inventory"])
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 
-ServiceKind = Literal["postgres", "fritzbox"]
+# a kind is `postgres`, `fritzbox` or the slug of a product of monitoring/service_catalog.py;
+# ServiceIn checks it against SERVICE_TYPES, the database only checks its shape
+ServiceKind = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")]
+# kinds that are also capabilities (the `docker` capability is a socket, the `docker` service
+# is the engine): a template's `requires` of these means the capability
+CAPABILITY_KINDS = frozenset({"agent", "ssh", "proxmox", "docker", "snmp"})
 NAME = r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$"
 MAX_SERVICES = 20
 
@@ -58,6 +72,7 @@ class ServiceType:
     credential_required: bool
     # what the UI draws for the config: {name, label, type: number|text|select, options?, hint?}
     fields: list[dict[str, Any]] = field(default_factory=list)
+    category: str = "generic"
 
 
 SERVICE_TYPES: dict[str, ServiceType] = {
@@ -71,6 +86,7 @@ SERVICE_TYPES: dict[str, ServiceType] = {
         config=PostgresConfig,
         credentials=frozenset({"postgres_password"}),
         credential_required=True,
+        category="database",
         fields=[
             {"name": "port", "label": "Port", "type": "number"},
             {"name": "database", "label": "Database", "type": "text"},
@@ -93,10 +109,64 @@ SERVICE_TYPES: dict[str, ServiceType] = {
         config=FritzConfig,
         credentials=frozenset({"fritzbox_password"}),
         credential_required=True,
+        category="network",
         fields=[{"name": "port", "label": "TR-064 port", "type": "number"}],
     ),
 }
+
+
+def _product_type(product: service_catalog.Product) -> ServiceType:
+    """A well-known product as a service: its port (and health URL), read without a credential by
+    the `service.*` probes (monitoring/probes/service.py)."""
+    fields: list[dict[str, Any]] = []
+    model_fields: dict[str, Any] = {}
+    if product.ports:
+        default = product.ports[0][1]
+        model_fields["port"] = (int, Field(default=default, ge=1, le=65535))
+        fields.append({"name": "port", "label": f"Port ({product.ports[0][2]})", "type": "number"})
+    if product.http:
+        macro, path, _, scheme = product.http
+        port = next(p[1] for p in product.ports if p[0] == macro)
+        model_fields["http_port"] = (int, Field(default=port, ge=1, le=65535))
+        model_fields["http_path"] = (str, Field(default=path, pattern=r"^/\S{0,255}$"))
+        model_fields["scheme"] = (Literal["http", "https"], scheme)
+        model_fields["verify_tls"] = (bool, False)
+        fields += [
+            {"name": "http_port", "label": "Health URL port", "type": "number"},
+            {"name": "http_path", "label": "Health URL path", "type": "text"},
+            {
+                "name": "scheme",
+                "label": "Health URL scheme",
+                "type": "select",
+                "options": [
+                    {"value": "http", "label": "http"},
+                    {"value": "https", "label": "https"},
+                ],
+            },
+            {
+                "name": "verify_tls",
+                "label": "Verify the TLS certificate",
+                "type": "select",
+                "options": [{"value": "false", "label": "no"}, {"value": "true", "label": "yes"}],
+            },
+        ]
+    config = create_model(f"{product.slug}_config", __base__=_Config, **model_fields)
+    return ServiceType(
+        kind=product.slug,
+        label=product.name,
+        description=product.description,
+        config=config,
+        credentials=frozenset(),
+        credential_required=False,
+        fields=fields,
+        category=product.category,
+    )
+
+
+SERVICE_TYPES.update({p.slug: _product_type(p) for p in service_catalog.PRODUCTS})
 SERVICE_KINDS = frozenset(SERVICE_TYPES)
+# what a template's `requires` can name that is a service rather than a capability
+REQUIRABLE_SERVICES = SERVICE_KINDS - CAPABILITY_KINDS
 
 
 class ServiceIn(BaseModel):
@@ -106,6 +176,13 @@ class ServiceIn(BaseModel):
     enabled: bool = True
     config: dict[str, Any] = Field(default_factory=dict)
     credential_id: uuid.UUID | None = None
+
+    @field_validator("kind")
+    @classmethod
+    def _known(cls, value: str) -> str:
+        if value not in SERVICE_TYPES:
+            raise ValueError("unknown service kind")
+        return value
 
     @field_validator("name")
     @classmethod
@@ -181,7 +258,7 @@ async def has_requirement(
     conn: AsyncConnection, node_id: uuid.UUID | str, requirement: str
 ) -> bool:
     """The node has an enabled capability, or an enabled service, of this kind."""
-    table = "node_service" if requirement in SERVICE_KINDS else "node_capability"
+    table = "node_service" if requirement in REQUIRABLE_SERVICES else "node_capability"
     found = await conn.scalar(
         text(f"SELECT 1 FROM {table} WHERE node_id = :n AND kind = :k AND enabled"),  # noqa: S608
         {"n": node_id, "k": requirement},
@@ -191,7 +268,7 @@ async def has_requirement(
 
 def missing_code(requirement: str) -> str:
     """The API error for a node that lacks what a check or template needs."""
-    return f"no_{requirement}_{'service' if requirement in SERVICE_KINDS else 'capability'}"
+    return f"no_{requirement}_{'service' if requirement in REQUIRABLE_SERVICES else 'capability'}"
 
 
 @router.get("")
@@ -205,6 +282,7 @@ async def list_service_types(_: Reader) -> list[dict[str, Any]]:
             "credentials": sorted(t.credentials),
             "credential_required": t.credential_required,
             "fields": t.fields,
+            "category": t.category,
             "defaults": t.config().model_dump(mode="json"),
         }
         for t in SERVICE_TYPES.values()
