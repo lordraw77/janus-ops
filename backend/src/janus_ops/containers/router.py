@@ -541,7 +541,7 @@ async def stack_detail(
 ) -> dict[str, Any]:
     """Everything a Compose project owns, from labels: containers, networks, volumes, images."""
     _, opener = await _opener(request, node_id, session)
-    name = check_name(project)
+    name = _name(project)
     flt = {"filters": _label_filter(name)}
     try:
         rows, nets, vols = await asyncio.gather(
@@ -584,7 +584,7 @@ async def stack_down(
     """Like `docker compose down`: remove the containers and the networks of the project,
     and its volumes only when asked (they hold data)."""
     host, opener = await _opener(request, node_id, session)
-    name = check_name(project)
+    name = _name(project)
     flt = {"filters": _label_filter(name)}
     try:
         rows = await docker.call(opener, "GET", "/containers/json", {"all": True, **flt})
@@ -665,8 +665,15 @@ async def stack_action(
 
 def _ref(value: str) -> str:
     if not IMAGE_REF.match(value):
-        raise DockerError("invalid_name", 400)
+        raise HTTPException(422, "invalid_name")
     return value
+
+
+def _name(value: str) -> str:
+    try:
+        return check_name(value)
+    except DockerError:
+        raise HTTPException(422, "invalid_name") from None
 
 
 def _image_path(ref: str) -> str:
@@ -778,7 +785,7 @@ async def volume_remove(
     request: Request, node_id: uuid.UUID, volume: str, session: Manager, force: bool = False
 ) -> Response:
     host, opener = await _opener(request, node_id, session)
-    name = check_name(volume)
+    name = _name(volume)
     await _fail(docker.call(opener, "DELETE", path("volumes", name), {"force": force}))
     await record(request, session, "volumes.removed", "volume", f"{host.node_name}/{name}")
     return Response(status_code=204)
@@ -839,7 +846,7 @@ async def network_remove(
     request: Request, node_id: uuid.UUID, network: str, session: Manager
 ) -> Response:
     host, opener = await _opener(request, node_id, session)
-    ref = check_name(network)
+    ref = _name(network)
     await _fail(docker.call(opener, "DELETE", path("networks", ref)))
     await record(request, session, "networks.removed", "network", f"{host.node_name}/{ref}")
     return Response(status_code=204)
