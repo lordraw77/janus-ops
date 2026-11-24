@@ -31,7 +31,7 @@ var (
 )
 
 func newCollector(proc, sys string) *Collector {
-	return &Collector{Proc: proc, Sys: sys, FS: statfs, Root: `C:\`}
+	return &Collector{Proc: proc, Sys: sys, FS: statfs, Root: `C:\`, RunningUnits: runningServices}
 }
 
 func ft(f windows.Filetime) uint64 { return uint64(f.HighDateTime)<<32 | uint64(f.LowDateTime) }
@@ -315,9 +315,6 @@ func describeProcesses(list []proto.Process) []proto.Process {
 	return out
 }
 
-// Listening is not collected on Windows yet.
-func (c *Collector) Listening() []proto.Listener { return []proto.Listener{} }
-
 // Info describes the host for the hello message.
 func (c *Collector) Info() Info {
 	info := Info{OS: "Windows"}
@@ -340,6 +337,3 @@ func (c *Collector) Info() Info {
 	}
 	return info
 }
-
-// Services (service discovery by process and configuration files) is Linux-only for now.
-func (c *Collector) Services() []proto.Service { return []proto.Service{} }

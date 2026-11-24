@@ -36,6 +36,7 @@ admin = APIRouter(prefix="/agents", tags=["agents"])
 class InstallCommandIn(BaseModel):
     allow_exec: bool = False
     allow_docker: bool = False
+    allow_pty: bool = False
     proxy: str | None = None
 
 
@@ -189,7 +190,12 @@ async def install_command(
         "agent.install_command",
         "node",
         row.name,
-        {"os": "windows", "allow_exec": body.allow_exec, "allow_docker": body.allow_docker},
+        {
+            "os": "windows",
+            "allow_exec": body.allow_exec,
+            "allow_pty": body.allow_pty,
+            "allow_docker": body.allow_docker,
+        },
     )
     return InstallCommandOut(
         command=one_liner(server_url, key, token, _ca_pem(request)),
@@ -218,8 +224,8 @@ async def install_script(
         proxy=choices.get("proxy"),
         allow_docker=bool(choices.get("allow_docker")),
         allow_exec=bool(choices.get("allow_exec")),
-        allow_pty=False,
-        update_public_key=None,  # signed self-update is not available on Windows yet
+        allow_pty=bool(choices.get("allow_pty")),
+        update_public_key=settings.agent_release_public_key,  # signed self-update (0.10.2)
         ca_path=WIN_DIR + r"\ca.pem",
     )
     script = render_script(plan, _sha256(_binary(request)), token)

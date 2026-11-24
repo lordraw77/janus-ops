@@ -22,8 +22,7 @@ import (
 // secret (a password, a key, a connection string) is ever read into the result.
 
 const (
-	maxServiceCmd = 512
-	maxServices   = 60
+	maxServices = 60
 )
 
 type serviceDef struct {
@@ -100,26 +99,6 @@ func (c *Collector) Services() []proto.Service {
 		out = out[:maxServices]
 	}
 	return out
-}
-
-// lowestPort is the lowest TCP port a process of that name listens on, or 0.
-func lowestPort(listening []proto.Listener, process string) int {
-	lowest := 0
-	for _, l := range listening {
-		if l.Proto == "tcp" && l.Process == process && (lowest == 0 || l.Port < lowest) {
-			lowest = l.Port
-		}
-	}
-	return lowest
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 // argValue finds `flag value` or `flag=value` among the arguments.

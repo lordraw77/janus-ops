@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.0 — 2026-11-24
+
+**Added**
+- **Windows agent: interactive shell** in the web terminal (Terminal → the node, through the agent, no SSH credential). It
+  opens PowerShell on a pseudo console (ConPTY, Windows 10 1809 or later) as SYSTEM, only if the node's local policy
+  allows it: the install dialog has a new "Allow shell" option, off by default (a reinstall changes it).
+- **Windows agent: listening ports and service discovery**. The agent reads the listening TCP and UDP sockets with
+  their owning process, the running Windows services (the counterpart of the running systemd units) and finds the
+  catalog products by process name (PostgreSQL, Apache, nginx, HAProxy, MySQL, MariaDB, Redis, Valkey, MongoDB,
+  Memcached, Grafana, Prometheus, Docker, sshd, Mosquitto, InfluxDB) with their port. Template suggestions and
+  macros that follow a port, a process or a unit now work on Windows nodes. Configuration files are not read on
+  Windows. Needs the new agent.
+
+**Fixed**
+- The Windows install command did not give the agent the release public key, so a Windows agent installed that way
+  refused signed updates (`update_not_configured`). It does now. Agents installed before this fix must be
+  reinstalled once.
+
 ## 0.10.2 — 2026-11-24
 
 **Added**

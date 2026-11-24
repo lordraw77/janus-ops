@@ -229,7 +229,7 @@ recorded output too), filters by host, group, keep and date, sortable columns, r
 
 `janus-agent` also runs as a **Windows service** (`JanusAgent`, with recovery actions): metrics (CPU, memory, file
 systems, network, uptime, processes), the same outbound-only connection and one-time enrollment. On the node page, **Install
-on Windows** gives a PowerShell one-liner that pins the server's CA. The shell is Linux-only for now; signed updates work on Windows too (separate `windows-amd64` signature).
+on Windows** gives a PowerShell one-liner that pins the server's CA. Signed updates work on Windows too (separate `windows-amd64` signature), and so does the shell (ConPTY, opt-in at install).
 
 ### Alerting
 
@@ -433,7 +433,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 | **F6** Ansible | Dynamic inventory, playbook catalog, live runs |
 | **F7** AI Copilot | RCA on alerts, action plans with human approval |
 | **F8** In progress | Commands via agent and approved actions, GitOps with signed webhooks, SNMP v2c/v3 checks (done); visual workflows, resume after restart, GitOps web UI, private Git repositories over https with a vault token (done); Windows agent (service, metrics, PowerShell install), AI providers with fallback routes, MCP tools, Operate chat, archive and retention (done in 0.10) |
-| **F8+** | Agent PTY & auto-update (done), external secret manager (done); next: remote desktop (RDP), Windows shell, OIDC, a VM-to-hypervisor link for the Copilot |
+| **F8+** | Agent PTY & auto-update (done), external secret manager (done); next: remote desktop (RDP), OIDC, a VM-to-hypervisor link for the Copilot |
 
 Details, acceptance criteria and open decisions: [docs/PLAN.md](docs/PLAN.md).
 

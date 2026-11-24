@@ -224,7 +224,12 @@ function WindowsInstallDialog({ agent, onClose }: { agent: AgentDetail; onClose:
     setError(null);
     const r = await api<{ command: string; expires_in_s: number }>(`/agents/${agent.node_id}/install-command`, {
       method: "POST",
-      body: { proxy: proxy || null, allow_exec: form.get("allow_exec") === "on", allow_docker: false },
+      body: {
+        proxy: proxy || null,
+        allow_exec: form.get("allow_exec") === "on",
+        allow_pty: form.get("allow_pty") === "on",
+        allow_docker: false,
+      },
     });
     setBusy(false);
     if (!r.ok) return setError(message(r.code));
@@ -263,7 +268,14 @@ function WindowsInstallDialog({ agent, onClose }: { agent: AgentDetail; onClose:
               as SYSTEM. Written in the node&apos;s local policy; the server cannot change it later.
             </span>
           </label>
-          <p className="text-xs text-fg-muted">Not available on Windows yet: interactive shell, Docker, signed self-update.</p>
+          <label className="flex items-start gap-2 text-xs text-fg-secondary">
+            <input type="checkbox" name="allow_pty" defaultChecked={agent.policy?.allow_pty ?? false} className="mt-0.5" />
+            <span>
+              Allow shell: an interactive PowerShell (as SYSTEM) in the web terminal through the agent, without an SSH
+              credential. Needs Windows 10 1809 or later. Written in the node&apos;s local policy.
+            </span>
+          </label>
+          <p className="text-xs text-fg-muted">Not available on Windows yet: Docker.</p>
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
             <Button type="submit" variant="primary" disabled={busy}>

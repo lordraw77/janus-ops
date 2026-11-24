@@ -47,7 +47,7 @@ def test_the_script_writes_the_config_checks_the_hash_and_installs() -> None:
     assert 'enroll_token: "tok-123"' in script
     assert "ca_file: " in script and r"C:\\ProgramData\\janus-agent\\ca.pem" in script
     assert "allow_exec: true" in script and "allow_pty: false" in script
-    assert "update_public_key" not in script
+    assert "update_public_key" not in script  # this plan has no release key
     assert "'" + "a" * 64 + "'" in script and "checksum mismatch" in script
     assert script.index("icacls") < script.index("config.yaml")  # locked before the token lands
     assert "install -config" in script
@@ -55,3 +55,11 @@ def test_the_script_writes_the_config_checks_the_hash_and_installs() -> None:
 
 def test_powershell_quoting_doubles_single_quotes() -> None:
     assert manual.ps_quote("it's") == "'it''s'"
+
+
+def test_the_windows_config_carries_the_shell_policy_and_the_release_key() -> None:
+    script = manual.render_script(
+        _plan(allow_pty=True, update_public_key="a2V5"), "a" * 64, "tok-123"
+    )
+    assert "allow_pty: true" in script
+    assert 'update_public_key: "a2V5"' in script  # without it the agent refuses signed updates
