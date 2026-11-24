@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.1 — 2026-11-24
 
 **Added**
 - **Close a problem by hand** (Problems → Open, the new button on each row; `POST /problems/{id}/close`, needs
