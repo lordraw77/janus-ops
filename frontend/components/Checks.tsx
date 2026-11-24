@@ -449,6 +449,37 @@ export function AckDialog({ label, problemId, onClose, onSaved }: { label: strin
   );
 }
 
+export function CloseProblemDialog({ label, problemId, onClose, onSaved }: { label: string; problemId: string; onClose: () => void; onSaved: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const comment = String(new FormData(e.currentTarget).get("comment") ?? "").trim();
+    const r = await api(`/problems/${problemId}/close`, { method: "POST", body: { comment } });
+    if (!r.ok) return setError(message(r.code));
+    onSaved();
+  }
+  return (
+    <Modal title={`Close ${label}`} onClose={onClose}>
+      <form onSubmit={(e) => void submit(e)} className="space-y-3">
+        <p className="text-xs text-fg-secondary">
+          The problem moves to the history now and the check runs again. If it still fails, a new problem opens (and
+          notifies again): to silence a real problem use Acknowledge or a downtime instead.
+        </p>
+        {error && <Alert>{error}</Alert>}
+        <Field label="Comment" hint="Optional, kept in the audit log.">
+          <TextInput name="comment" maxLength={1000} autoFocus placeholder="Fixed by hand / obsolete" />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary">
+            Close problem
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function Flags({ c }: { c: { is_flapping: boolean; unreachable: boolean; in_downtime: boolean; acknowledged_at?: string | null } }) {
   const flags = [
     c.acknowledged_at && ["ACK", "border-telemetry/40 text-telemetry"],

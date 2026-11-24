@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**Added**
+- **Close a problem by hand** (Problems → Open, the new button on each row; `POST /problems/{id}/close`, needs
+  `monitoring.manage`). The problem moves to the history and the check runs again at once: if it still fails, a new
+  problem opens and notifies again, so to silence a real problem use Acknowledge or a downtime. An optional comment
+  is kept in the audit log (`monitoring.problem_closed`).
+
 ## 0.11.0 — 2026-11-24
 
 **Added**

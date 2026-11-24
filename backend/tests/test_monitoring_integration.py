@@ -353,6 +353,44 @@ def test_worse_state_clears_acknowledgement() -> None:
         finish(ws)
 
 
+def test_a_problem_can_be_closed_by_hand() -> None:
+    with client("alice", **SETTINGS) as admin:
+        node = make_node(admin, "mon-close")
+        ws, _ = FakeAgent(node, issue_token(node)).connect(admin)
+        check(
+            admin,
+            node_id=node,
+            name="CPU",
+            kind="metric",
+            params={"metric": "cpu.usage_pct"},
+            comparison="gt",
+            warn_threshold=80,
+            crit_threshold=90,
+        )
+        send_cpu(ws, 95, 1)
+        tick(admin)
+        p = admin.get("/api/v1/problems", params={"node_id": node}).json()[0]
+        r = admin.post(f"/api/v1/problems/{p['id']}/close", json={"comment": "stale"})
+        assert r.status_code == 204, r.text
+        assert admin.get("/api/v1/problems", params={"node_id": node}).json() == []
+        closed = admin.get("/api/v1/problems", params={"node_id": node, "status": "closed"}).json()
+        assert [c["id"] for c in closed] == [p["id"]]
+        # a second close is refused, an unknown problem is not found
+        assert admin.post(f"/api/v1/problems/{p['id']}/close", json={}).status_code == 409
+        missing = "00000000-0000-0000-0000-000000000000"
+        assert admin.post(f"/api/v1/problems/{missing}/close", json={}).status_code == 404
+        # still failing: the next run opens a new problem
+        send_cpu(ws, 96, 2)
+        tick(admin)
+        again = admin.get("/api/v1/problems", params={"node_id": node}).json()
+        assert len(again) == 1 and again[0]["id"] != p["id"]
+        finish(ws)
+    events = run_sql(
+        "SELECT payload->>'comment' FROM audit_event WHERE action = 'monitoring.problem_closed'"
+    )
+    assert ("stale",) in events
+
+
 def test_channels_keep_secrets() -> None:
     with client("alice", **SETTINGS) as admin:
         url = "https://hooks.example.invalid/very-secret-path"

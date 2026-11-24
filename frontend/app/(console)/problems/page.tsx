@@ -1,10 +1,10 @@
 "use client";
 
-import { BellOff, Check as CheckIcon, X } from "lucide-react";
+import { BellOff, Check as CheckIcon, CircleX, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { AckDialog, Flags } from "@/components/Checks";
+import { AckDialog, CloseProblemDialog, Flags } from "@/components/Checks";
 import { FilterBar } from "@/components/FilterBar";
 import { SortTh } from "@/components/SortTh";
 import { Alert, Button, Card, Field, Select, StateBadge, TextInput } from "@/components/ui";
@@ -34,6 +34,7 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
   const [version, setVersion] = useState(0);
   const [state, setState] = useState<{ data: Problem[] | null; error: string | null }>({ data: null, error: null });
   const [acking, setAcking] = useState<Problem | null>(null);
+  const [closing, setClosing] = useState<Problem | null>(null);
   const [q, setQ] = useState("");
   const [host, setHost] = useState("");
   const [group, setGroup] = useState("");
@@ -182,13 +183,27 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
                     <Button onClick={() => setAcking(p)} aria-label={`Acknowledge ${p.check_name}`} title="Acknowledge">
                       <CheckIcon className="h-3 w-3" aria-hidden />
                     </Button>
-                  )}
+                  )}{" "}
+                  <Button onClick={() => setClosing(p)} aria-label={`Close ${p.check_name}`} title="Close the problem">
+                    <CircleX className="h-3 w-3" aria-hidden />
+                  </Button>
                 </td>
               )}
             </tr>
           ))}
         </tbody>
       </table>
+      {closing && (
+        <CloseProblemDialog
+          label={`${closing.node_name} / ${closing.check_name}`}
+          problemId={closing.id}
+          onClose={() => setClosing(null)}
+          onSaved={() => {
+            setClosing(null);
+            setVersion((v) => v + 1);
+          }}
+        />
+      )}
       {acking && (
         <AckDialog
           label={`${acking.node_name} / ${acking.check_name}`}

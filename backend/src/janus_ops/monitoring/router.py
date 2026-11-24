@@ -572,6 +572,39 @@ async def acknowledge(
     return Response(status_code=204)
 
 
+class CloseIn(BaseModel):
+    comment: str = Field(default="", max_length=1000)
+
+
+@router.post("/problems/{problem_id}/close", status_code=204, responses={404: {}, 409: {}})
+async def close_problem(
+    request: Request, problem_id: uuid.UUID, body: CloseIn, session: Manager
+) -> Response:
+    """Close a problem by hand (an obsolete or stale one). Nothing is changed in the check: if it
+    still fails, the engine opens a new problem at its next run, which is woken now."""
+    p = await _problem(request, session, problem_id)
+    async with request.app.state.engine.begin() as conn:
+        closed = await conn.scalar(
+            text(
+                "UPDATE problem SET closed_at = now() WHERE id = :id AND closed_at IS NULL"
+                " RETURNING 1"
+            ),
+            {"id": problem_id},
+        )
+    if closed is None:
+        raise HTTPException(409, "problem_closed")
+    await record(
+        request,
+        session,
+        "monitoring.problem_closed",
+        "check",
+        f"{p.node_name}/{p.check_name}",
+        {"state": p.state, "comment": body.comment},
+    )
+    _wake(request)
+    return Response(status_code=204)
+
+
 @router.delete("/problems/{problem_id}/ack", status_code=204)
 async def unacknowledge(request: Request, problem_id: uuid.UUID, session: Manager) -> Response:
     p = await _problem(request, session, problem_id)
