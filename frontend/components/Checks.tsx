@@ -480,6 +480,42 @@ export function CloseProblemDialog({ label, problemId, onClose, onSaved }: { lab
   );
 }
 
+export function BulkProblemsDialog({ action, ids, onClose, onDone }: { action: "ack" | "close"; ids: string[]; onClose: () => void; onDone: (r: { done: number; skipped: number }) => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ack = action === "ack";
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const comment = String(new FormData(e.currentTarget).get("comment") ?? "").trim();
+    setBusy(true);
+    const r = await api<{ done: number; skipped: number }>("/problems/bulk", { method: "POST", body: { ids, action, comment } });
+    setBusy(false);
+    if (!r.ok) return setError(message(r.code));
+    onDone(r.data);
+  }
+  return (
+    <Modal title={`${ack ? "Acknowledge" : "Close"} ${ids.length} problem${ids.length === 1 ? "" : "s"}`} onClose={onClose}>
+      <form onSubmit={(e) => void submit(e)} className="space-y-3">
+        <p className="text-xs text-fg-secondary">
+          {ack
+            ? "No more notifications for these problems; a worse state clears the acknowledgement."
+            : "The problems move to the history and their checks run again. Those that still fail open a new problem (and notify again): to silence real problems use Acknowledge or a downtime."}
+        </p>
+        {error && <Alert>{error}</Alert>}
+        <Field label="Comment" hint={ack ? undefined : "Optional, kept in the audit log."}>
+          <TextInput name="comment" required={ack} maxLength={1000} autoFocus placeholder={ack ? "Looking into it" : "Fixed by hand / obsolete"} />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={busy}>
+            {ack ? "Acknowledge" : "Close"} {ids.length}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function Flags({ c }: { c: { is_flapping: boolean; unreachable: boolean; in_downtime: boolean; acknowledged_at?: string | null } }) {
   const flags = [
     c.acknowledged_at && ["ACK", "border-telemetry/40 text-telemetry"],

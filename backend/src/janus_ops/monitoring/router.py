@@ -605,6 +605,74 @@ async def close_problem(
     return Response(status_code=204)
 
 
+class BulkIn(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+    action: Literal["ack", "close"]
+    comment: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def _ack_needs_a_comment(self) -> "BulkIn":
+        if self.action == "ack" and not self.comment.strip():
+            raise ValueError("comment_required")
+        return self
+
+
+class BulkOut(BaseModel):
+    done: int
+    skipped: int  # already closed, unknown, or on a node outside the user's scope
+
+
+@router.post("/problems/bulk", response_model=BulkOut)
+async def bulk_problems(request: Request, body: BulkIn, session: Manager) -> BulkOut:
+    """Acknowledge or close several open problems in one go. Each one is audited as it is alone."""
+    scope_sql, params = session.scope.sql("n")
+    ids = list(dict.fromkeys(body.ids))
+    params["ids"] = ids
+    comment = body.comment.strip()
+    async with request.app.state.engine.begin() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    PROBLEMS + " WHERE p.id = ANY(CAST(:ids AS uuid[])) AND p.closed_at IS NULL"
+                    f" AND {scope_sql}"
+                ),
+                params,
+            )
+        ).all()
+        found = [r.id for r in rows]
+        if found and body.action == "close":
+            await conn.execute(
+                text(
+                    "UPDATE problem SET closed_at = now()"
+                    " WHERE id = ANY(CAST(:ids AS uuid[])) AND closed_at IS NULL"
+                ),
+                {"ids": found},
+            )
+        elif found:
+            await conn.execute(
+                text(
+                    "UPDATE problem SET acknowledged_by = :u, acknowledged_at = now(),"
+                    " ack_comment = :c WHERE id = ANY(CAST(:ids AS uuid[])) AND closed_at IS NULL"
+                ),
+                {"u": session.user_id, "c": comment, "ids": found},
+            )
+    action = (
+        "monitoring.problem_closed" if body.action == "close" else "monitoring.problem_acknowledged"
+    )
+    for p in rows:
+        await record(
+            request,
+            session,
+            action,
+            "check",
+            f"{p.node_name}/{p.check_name}",
+            {"state": p.state, "comment": comment, "bulk": True},
+        )
+    if found and body.action == "close":
+        _wake(request)
+    return BulkOut(done=len(found), skipped=len(ids) - len(found))
+
+
 @router.delete("/problems/{problem_id}/ack", status_code=204)
 async def unacknowledge(request: Request, problem_id: uuid.UUID, session: Manager) -> Response:
     p = await _problem(request, session, problem_id)

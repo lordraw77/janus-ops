@@ -7,6 +7,9 @@
   `monitoring.manage`). The problem moves to the history and the check runs again at once: if it still fails, a new
   problem opens and notifies again, so to silence a real problem use Acknowledge or a downtime. An optional comment
   is kept in the audit log (`monitoring.problem_closed`).
+- **Select several problems** (Problems → Open): a checkbox per row and "select all" on what the filters show, then
+  **Acknowledge** or **Close** them in one step (`POST /problems/bulk`, up to 200). Each problem is audited as if it were
+  done alone (with `bulk: true`); problems already closed or outside your scope are skipped and counted.
 
 ## 0.11.0 — 2026-11-24
 

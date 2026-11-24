@@ -4,7 +4,7 @@ import { BellOff, Check as CheckIcon, CircleX, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { AckDialog, CloseProblemDialog, Flags } from "@/components/Checks";
+import { AckDialog, BulkProblemsDialog, CloseProblemDialog, Flags } from "@/components/Checks";
 import { FilterBar } from "@/components/FilterBar";
 import { SortTh } from "@/components/SortTh";
 import { Alert, Button, Card, Field, Select, StateBadge, TextInput } from "@/components/ui";
@@ -35,6 +35,9 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
   const [state, setState] = useState<{ data: Problem[] | null; error: string | null }>({ data: null, error: null });
   const [acking, setAcking] = useState<Problem | null>(null);
   const [closing, setClosing] = useState<Problem | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<"ack" | "close" | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [host, setHost] = useState("");
   const [group, setGroup] = useState("");
@@ -58,6 +61,16 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
     );
   }, [all, q, host, env, level, group, groupsOf]);
   const { sorted, sort, toggle } = useSortedRows(shown, PROBLEM_SORT);
+  const selectable = status === "open" && manage;
+  // only what is on screen counts: a filter that hides a row also takes it out of the action
+  const chosen = useMemo(() => sorted.filter((p) => selected.has(p.id)), [sorted, selected]);
+  const allChosen = sorted.length > 0 && chosen.length === sorted.length;
+  function pick(id: string, on: boolean) {
+    const next = new Set(selected);
+    if (on) next.add(id);
+    else next.delete(id);
+    setSelected(next);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -129,9 +142,28 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
         </Field>
       </FilterBar>
       {shown.length === 0 && <p className="mb-2 text-sm text-fg-muted">Nothing matches.</p>}
+      {notice && <p className="mb-2 text-xs text-fg-secondary">{notice}</p>}
+      {selectable && chosen.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-line bg-surface px-3 py-2 text-xs">
+          <span className="font-semibold">{chosen.length} selected</span>
+          <Button onClick={() => setBulk("ack")}>Acknowledge</Button>
+          <Button onClick={() => setBulk("close")}>Close</Button>
+          <Button onClick={() => setSelected(new Set())}>Clear selection</Button>
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead className="text-left text-[11px] uppercase text-fg-muted">
           <tr>
+            {selectable && (
+              <th className="w-6 py-1 pr-2">
+                <input
+                  type="checkbox"
+                  aria-label="Select all problems shown"
+                  checked={allChosen}
+                  onChange={(e) => setSelected(e.target.checked ? new Set(sorted.map((p) => p.id)) : new Set())}
+                />
+              </th>
+            )}
             <SortTh label="State" col="state" sort={sort} onSort={toggle} className={th} />
             <SortTh label="Node / check" col="node" sort={sort} onSort={toggle} className={th} />
             <SortTh label="Output" col="output" sort={sort} onSort={toggle} className={th} />
@@ -148,6 +180,16 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
         <tbody className="divide-y divide-line">
           {sorted.map((p) => (
             <tr key={p.id} className="align-top">
+              {selectable && (
+                <td className="py-2 pr-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${p.node_name} / ${p.check_name}`}
+                    checked={selected.has(p.id)}
+                    onChange={(e) => pick(p.id, e.target.checked)}
+                  />
+                </td>
+              )}
               <td className="py-2 pr-2">
                 <StateBadge state={p.state} />
               </td>
@@ -193,6 +235,19 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
           ))}
         </tbody>
       </table>
+      {bulk && (
+        <BulkProblemsDialog
+          action={bulk}
+          ids={chosen.map((p) => p.id)}
+          onClose={() => setBulk(null)}
+          onDone={(r) => {
+            setBulk(null);
+            setSelected(new Set());
+            setNotice(r.skipped > 0 ? `${r.done} done, ${r.skipped} skipped (already closed or out of your scope).` : `${r.done} done.`);
+            setVersion((v) => v + 1);
+          }}
+        />
+      )}
       {closing && (
         <CloseProblemDialog
           label={`${closing.node_name} / ${closing.check_name}`}

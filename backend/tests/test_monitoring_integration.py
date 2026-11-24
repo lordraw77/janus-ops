@@ -391,6 +391,61 @@ def test_a_problem_can_be_closed_by_hand() -> None:
     assert ("stale",) in events
 
 
+def test_several_problems_are_acknowledged_or_closed_together() -> None:
+    with client("alice", **SETTINGS) as admin:
+        nodes = [make_node(admin, f"mon-bulk{i}") for i in range(3)]
+        agents = []
+        for node in nodes:
+            ws, _ = FakeAgent(node, issue_token(node)).connect(admin)
+            check(
+                admin,
+                node_id=node,
+                name="CPU",
+                kind="metric",
+                params={"metric": "cpu.usage_pct"},
+                comparison="gt",
+                warn_threshold=80,
+                crit_threshold=90,
+            )
+            send_cpu(ws, 95, 1)
+            agents.append(ws)
+        tick(admin)
+        ids = [admin.get("/api/v1/problems", params={"node_id": n}).json()[0]["id"] for n in nodes]
+        url = "/api/v1/problems/bulk"
+        # an acknowledgement needs a comment, and at least one problem
+        assert admin.post(url, json={"ids": ids, "action": "ack"}).status_code == 422
+        assert admin.post(url, json={"ids": [], "action": "close"}).status_code == 422
+        r = admin.post(url, json={"ids": ids[:2], "action": "ack", "comment": "maintenance"})
+        assert r.json() == {"done": 2, "skipped": 0}
+        for n in nodes[:2]:
+            p = admin.get("/api/v1/problems", params={"node_id": n}).json()[0]
+            assert p["acknowledged_by"] == "alice" and p["ack_comment"] == "maintenance"
+        assert (
+            admin.get("/api/v1/problems", params={"node_id": nodes[2]}).json()[0]["acknowledged_at"]
+            is None
+        )
+        # close two of them plus an unknown id: the unknown one is skipped
+        missing = "00000000-0000-0000-0000-000000000000"
+        r = admin.post(url, json={"ids": [*ids[1:], missing], "action": "close", "comment": "x"})
+        assert r.json() == {"done": 2, "skipped": 1}
+        closed = {
+            p["id"] for p in admin.get("/api/v1/problems", params={"status": "closed"}).json()
+        }
+        assert set(ids[1:]) <= closed and ids[0] not in closed
+        # already closed: nothing to do
+        assert admin.post(url, json={"ids": ids[1:], "action": "close"}).json() == {
+            "done": 0,
+            "skipped": 2,
+        }
+        for ws in agents:
+            finish(ws)
+    audited = run_sql(
+        "SELECT action, count(*) FROM audit_event"
+        " WHERE payload->>'bulk' = 'true' GROUP BY 1 ORDER BY 1"
+    )
+    assert audited == [("monitoring.problem_acknowledged", 2), ("monitoring.problem_closed", 2)]
+
+
 def test_channels_keep_secrets() -> None:
     with client("alice", **SETTINGS) as admin:
         url = "https://hooks.example.invalid/very-secret-path"
