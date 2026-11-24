@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.2 — 2026-11-24
+
+**Added**
+- **Problems history shows how each one ended**: "Recovered" when the check came back OK by itself, or
+  "Closed by <user>: <comment>" when someone closed it from the console (single or bulk). Migration 0042 adds
+  `problem.closed_by` and `close_comment`; problems closed by hand before this release show as recovered.
+
 ## 0.11.1 — 2026-11-24
 
 **Added**

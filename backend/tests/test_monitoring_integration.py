@@ -229,6 +229,7 @@ def test_hysteresis_problem_and_webhook(hook_url: str) -> None:
         assert admin.get("/api/v1/problems").json() == []
         closed = admin.get("/api/v1/problems", params={"status": "closed"}).json()
         assert closed[0]["closed_at"] is not None and closed[0]["notified"] == 1
+        assert closed[0]["closed_by"] is None  # recovered by the engine, not by a person
         assert dispatch(admin) == 1
         assert _Hook.calls[-1]["event"] == "recovery" and _Hook.calls[-1]["closed_at"]
         assert dispatch(admin) == 0
@@ -375,6 +376,7 @@ def test_a_problem_can_be_closed_by_hand() -> None:
         assert admin.get("/api/v1/problems", params={"node_id": node}).json() == []
         closed = admin.get("/api/v1/problems", params={"node_id": node, "status": "closed"}).json()
         assert [c["id"] for c in closed] == [p["id"]]
+        assert closed[0]["closed_by"] and closed[0]["close_comment"] == "stale"
         # a second close is refused, an unknown problem is not found
         assert admin.post(f"/api/v1/problems/{p['id']}/close", json={}).status_code == 409
         missing = "00000000-0000-0000-0000-000000000000"

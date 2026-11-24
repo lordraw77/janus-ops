@@ -57,6 +57,8 @@ export type Problem = {
   state: CheckState;
   opened_at: string;
   closed_at: string | null;
+  closed_by: string | null;
+  close_comment: string | null;
   acknowledged_at: string | null;
   acknowledged_by: string | null;
   ack_comment: string | null;

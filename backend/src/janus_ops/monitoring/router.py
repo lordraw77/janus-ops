@@ -480,6 +480,8 @@ class ProblemOut(BaseModel):
     state: State
     opened_at: datetime
     closed_at: datetime | None
+    closed_by: str | None  # set when closed by hand; empty when the check recovered
+    close_comment: str | None
     acknowledged_at: datetime | None
     acknowledged_by: str | None
     ack_comment: str | None
@@ -493,13 +495,15 @@ class ProblemOut(BaseModel):
 PROBLEMS = f"""
 SELECT p.id, p.check_id, c.name AS check_name, c.kind AS check_kind, n.id AS node_id,
        n.name AS node_name, n.environment, p.state, p.opened_at, p.closed_at,
-       p.acknowledged_at, u.username AS acknowledged_by, p.ack_comment, s.last_output,
+       cu.username AS closed_by, p.close_comment, p.acknowledged_at,
+       u.username AS acknowledged_by, p.ack_comment, s.last_output,
        coalesce(s.is_flapping, false) AS is_flapping, coalesce(s.unreachable, false) AS unreachable,
        {DOWNTIME_NOW} AS in_downtime,
        (SELECT count(*) FROM notification_delivery d
         WHERE d.problem_id = p.id AND d.status = 'sent') AS notified
 FROM problem p JOIN service_check c ON c.id = p.check_id JOIN node n ON n.id = c.node_id
 LEFT JOIN check_state s ON s.check_id = c.id LEFT JOIN app_user u ON u.id = p.acknowledged_by
+LEFT JOIN app_user cu ON cu.id = p.closed_by
 """  # noqa: S608 - constant fragments only
 
 
@@ -586,10 +590,10 @@ async def close_problem(
     async with request.app.state.engine.begin() as conn:
         closed = await conn.scalar(
             text(
-                "UPDATE problem SET closed_at = now() WHERE id = :id AND closed_at IS NULL"
-                " RETURNING 1"
+                "UPDATE problem SET closed_at = now(), closed_by = :u, close_comment = :c"
+                " WHERE id = :id AND closed_at IS NULL RETURNING 1"
             ),
-            {"id": problem_id},
+            {"id": problem_id, "u": session.user_id, "c": body.comment.strip() or None},
         )
     if closed is None:
         raise HTTPException(409, "problem_closed")
@@ -643,10 +647,10 @@ async def bulk_problems(request: Request, body: BulkIn, session: Manager) -> Bul
         if found and body.action == "close":
             await conn.execute(
                 text(
-                    "UPDATE problem SET closed_at = now()"
+                    "UPDATE problem SET closed_at = now(), closed_by = :u, close_comment = :c"
                     " WHERE id = ANY(CAST(:ids AS uuid[])) AND closed_at IS NULL"
                 ),
-                {"ids": found},
+                {"ids": found, "u": session.user_id, "c": comment or None},
             )
         elif found:
             await conn.execute(

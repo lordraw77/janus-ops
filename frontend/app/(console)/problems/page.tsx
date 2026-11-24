@@ -202,6 +202,13 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
                   <Flags c={p} />
                   {p.notified > 0 && <span className="ml-1 font-mono text-[9px] text-fg-muted">notified ×{p.notified}</span>}
                 </div>
+                {p.closed_at && (
+                  <div className={`text-[11px] ${p.closed_by ? "text-warning" : "text-ok"}`}>
+                    {p.closed_by
+                      ? `Closed by ${p.closed_by}${p.close_comment ? `: ${p.close_comment}` : ""}`
+                      : "Recovered"}
+                  </div>
+                )}
                 {p.acknowledged_at && (
                   <div className="text-[11px] text-telemetry">
                     {p.acknowledged_by}: {p.ack_comment}
