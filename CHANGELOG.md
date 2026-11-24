@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.2 — 2026-11-24
+
+**Added**
+- **Signed update for the Windows agent**: "Update agent" and "Update all" now work on Windows nodes. The Windows binary has
+  its own signature (`janus-agent-windows-amd64.exe.sig`, platform `windows-amd64`), so a signature made for the Linux
+  binary of the same architecture is never accepted. The running file is renamed to `.old`, the service recovery
+  restarts it, and a rollback puts the old binary back if the new one does not connect. `make agent/sign`,
+  `make release` and the image build now sign and check the `.exe` as well. A Windows agent older than this release
+  must be reinstalled once (it cannot update itself).
+
 ## 0.10.1 — 2026-11-22
 
 **Added**

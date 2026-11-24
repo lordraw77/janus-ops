@@ -264,3 +264,26 @@ def test_an_agent_that_stops_confirming_stalls_the_update_not_the_link(tmp_path:
 def test_an_agent_without_the_feature_still_gets_the_binary_in_one_go(tmp_path: Path) -> None:
     result, _ = asyncio.run(_push(b"updated:0.3.0", None, tmp_path))
     assert result == "0.3.0"  # the existing path, unchanged
+
+
+def test_the_windows_agent_has_its_own_signed_platform(tmp_path: Path) -> None:
+    key = Ed25519PrivateKey.generate()
+    exe = b"windows-bytes"
+    (tmp_path / "janus-agent-windows-amd64.exe").write_bytes(exe)
+    meta = update.sign(key, "0.3.0", update.WINDOWS, exe)
+    (tmp_path / "janus-agent-windows-amd64.exe.sig").write_text(json.dumps(meta))
+    release = update.load_release(tmp_path, update.WINDOWS, _pub(key))
+    assert release.path.name == "janus-agent-windows-amd64.exe"
+    assert release.arch == "windows-amd64"
+    # a signature made for the Linux amd64 binary does not pass for the Windows one
+    linux = update.sign(key, "0.3.0", "amd64", exe)
+    (tmp_path / "janus-agent-windows-amd64.exe.sig").write_text(json.dumps(linux))
+    with pytest.raises(update.UpdateError) as exc:
+        update.load_release(tmp_path, update.WINDOWS, _pub(key))
+    assert exc.value.code == "signature_invalid"
+
+
+def test_target_of_a_node() -> None:
+    assert update.target_of("amd64", "Windows 11 Pro 25H2") == "windows-amd64"
+    assert update.target_of("amd64", "Debian GNU/Linux 13 (trixie)") == "amd64"
+    assert update.target_of("arm64", None) == "arm64"

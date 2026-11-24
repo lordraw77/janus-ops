@@ -40,13 +40,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "agent-sign", help="sign the agent binaries in a directory with the release private key"
     )
     sg.add_argument("--private-key", required=True)
-    sg.add_argument("--dir", required=True, help="directory with janus-agent-linux-<arch>")
+    sg.add_argument(
+        "--dir",
+        required=True,
+        help="directory with janus-agent-linux-<arch> and janus-agent-windows-amd64.exe",
+    )
     sg.add_argument("--agent-version", required=True, help="version of these binaries, e.g. 0.3.0")
     vf = sub.add_parser(
         "agent-verify",
         help="check the signed agent binaries in a directory against the release public key",
     )
-    vf.add_argument("--dir", required=True, help="directory with janus-agent-linux-<arch> + .sig")
+    vf.add_argument("--dir", required=True, help="directory with the agent binaries + .sig")
     vf.add_argument("--public-key", required=True, help="base64 ed25519 release public key")
     vf.add_argument("--agent-version", help="also require exactly this version")
     ip = sub.add_parser(
@@ -98,7 +102,7 @@ def _release_command(args: argparse.Namespace) -> int:
     if args.command == "agent-verify":
         failed = checked = 0
         for arch in update.ARCHES:
-            if not (Path(args.dir) / update.BINARY.format(arch=arch)).is_file():
+            if not (Path(args.dir) / update.binary_name(arch)).is_file():
                 continue
             checked += 1
             try:
@@ -151,7 +155,7 @@ def _release_command(args: argparse.Namespace) -> int:
         return 2
     signed = 0
     for arch in update.ARCHES:
-        binary = Path(args.dir) / update.BINARY.format(arch=arch)
+        binary = Path(args.dir) / update.binary_name(arch)
         if not binary.is_file():
             continue
         meta = update.sign(loaded, args.agent_version, arch, binary.read_bytes())

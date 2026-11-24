@@ -42,8 +42,9 @@ RUN for arch in amd64 arm64 arm; do \
 # also refuses to build without one. The private key never enters the build.
 ARG REQUIRE_SIGNED=false
 RUN set -eu; \
-    for arch in amd64 arm64 arm; do \
-      bin=/out/janus-agent-linux-$arch; sig=release/janus-agent-linux-$arch.sig; \
+    for arch in amd64 arm64 arm windows-amd64; do \
+      case "$arch" in windows-amd64) name=janus-agent-windows-amd64.exe;; *) name=janus-agent-linux-$arch;; esac; \
+      bin=/out/$name; sig=release/$name.sig; \
       if [ ! -f "$sig" ]; then \
         if [ "$REQUIRE_SIGNED" = "true" ]; then \
           echo "no signature for $arch: run 'make agent/sign' and commit agent/release/" >&2; exit 1; \

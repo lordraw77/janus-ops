@@ -43,6 +43,16 @@ func UpdateMessage(version, arch, sha string) []byte {
 	return []byte(updateContext + "\n" + version + "\n" + arch + "\n" + sha)
 }
 
+// updatePlatform is the "architecture" the release key signs. On Linux it is GOARCH, as it always
+// was; on Windows it is "windows-amd64", so a signature made for a Linux binary of the same
+// architecture can never pass for a Windows one (the agent would be replaced by an ELF file).
+func updatePlatform() string {
+	if runtime.GOOS == "windows" {
+		return "windows-" + runtime.GOARCH
+	}
+	return runtime.GOARCH
+}
+
 // versionNewer reports whether candidate is newer than current. A current version that is not
 // numeric (a development build) accepts any signed candidate.
 func versionNewer(candidate, current string) bool {
@@ -150,8 +160,7 @@ func (u *updateSink) abort() {
 }
 
 func (m *mux) startUpdate(ctx context.Context, id uint32, req openRequest) error {
-	if runtime.GOOS != "linux" {
-		// the signed binaries are Linux builds: never replace another OS's agent with one
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		return m.refuse(ctx, id, "update_unsupported_os")
 	}
 	if len(m.updateKey) != ed25519.PublicKeySize {
@@ -162,7 +171,7 @@ func (m *mux) startUpdate(ctx context.Context, id uint32, req openRequest) error
 		!updateVersionRe.MatchString(req.Version) || req.Size <= 0 || req.Size > updateMaxSize {
 		return m.refuse(ctx, id, "bad_request")
 	}
-	if !ed25519.Verify(m.updateKey, UpdateMessage(req.Version, runtime.GOARCH, req.Sha256), sig) {
+	if !ed25519.Verify(m.updateKey, UpdateMessage(req.Version, updatePlatform(), req.Sha256), sig) {
 		return m.refuse(ctx, id, "bad_signature")
 	}
 	if !versionNewer(req.Version, m.version) {

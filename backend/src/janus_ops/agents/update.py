@@ -6,7 +6,8 @@ distribute an update but cannot forge one. The agent verifies the signature agai
 in its own configuration before replacing itself (agent/internal/tunnel/update.go); the server
 checks it too, to fail early with a clear reason.
 
-Signature file `janus-agent-linux-<arch>.sig`: JSON {version, arch, sha256, signature}, where
+Signature file `<binary>.sig` (the binary is `janus-agent-linux-<arch>` or
+`janus-agent-windows-amd64.exe`): JSON {version, arch, sha256, signature}, where
 `signature` is the base64 ed25519 signature over `message(version, arch, sha256)`.
 """
 
@@ -30,7 +31,10 @@ from janus_ops.agents.mux import CHUNK, Stream, StreamError
 
 CONTEXT = "janus-agent-update-v1"
 BINARY = "janus-agent-linux-{arch}"
-ARCHES = ("amd64", "arm64", "arm")
+# "windows-amd64" is the signed platform of the Windows agent: it differs from "amd64" so that a
+# signature made for a Linux binary can never be accepted for a Windows one, or the other way round.
+WINDOWS = "windows-amd64"
+ARCHES = ("amd64", "arm64", "arm", WINDOWS)
 VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+){0,3}$")
 MAX_SIZE = 64 * 1024 * 1024
 RESULT_WAIT_S = 60
@@ -39,6 +43,16 @@ RESULT_WAIT_S = 60
 # of binary. No confirmation for STALL_S seconds means the link or the node is stuck.
 WINDOW = 256 * 1024
 STALL_S: float = 60
+
+
+def binary_name(arch: str) -> str:
+    """File name of the agent binary for a signed platform."""
+    return "janus-agent-windows-amd64.exe" if arch == WINDOWS else BINARY.format(arch=arch)
+
+
+def target_of(arch: str, os_name: str | None) -> str:
+    """The signed platform of a node: its architecture, or WINDOWS for a Windows agent."""
+    return WINDOWS if str(os_name or "").startswith("Windows") and arch == "amd64" else arch
 
 
 class UpdateError(Exception):
@@ -87,8 +101,8 @@ def load_release(agent_dir: Path, arch: str, release_key_b64: str | None) -> Rel
         raise UpdateError("release_key_missing")
     if arch not in ARCHES:
         raise UpdateError("unsupported_arch")
-    binary = agent_dir / BINARY.format(arch=arch)
-    sig_file = agent_dir / (BINARY.format(arch=arch) + ".sig")
+    binary = agent_dir / binary_name(arch)
+    sig_file = agent_dir / (binary_name(arch) + ".sig")
     if not binary.is_file():
         raise UpdateError("agent_binary_missing")
     if not sig_file.is_file():

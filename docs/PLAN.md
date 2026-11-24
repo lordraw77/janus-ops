@@ -184,7 +184,7 @@
 > - **Windows agent** (FR-85, now built): Windows service `JanusAgent` with recovery actions, metrics (CPU, memory, swap,
 >   file systems, network without filter interfaces, uptime, processes), one-time enrollment and a PowerShell install
 >   one-liner that pins the server CA (`POST /agents/{id}/install-command`, `/agent/install.ps1`). Shell, signed update,
->   listening ports and service discovery on Windows are not done.
+>   listening ports and service discovery on Windows are not done. (Signed update on Windows: 0.10.2.)
 > - **Workflows**: runs interrupted by a restart resume between steps (a run with an `exec` step in flight is marked failed).
 >   **GitOps**: private https repositories with a vault `git_token` credential.
 > - **AI providers and fallback routes** (ported from AIFRED, `docs/AI_PROVIDERS.md`, migration `0037`): providers with
@@ -318,7 +318,7 @@ Points of the specifications that must be corrected, clarified or scaled down be
 | FR-82 | SNMP (v2c/v3) for NAS, switches, UPS | SHOULD | F8 |
 | FR-83 | PTY and remote commands through the agent tunnel | SHOULD | F8 |
 | FR-84 | Signed air-gapped agent auto-update | SHOULD | F8 |
-| FR-85 | Windows agent | SHOULD — service, metrics and install built in 0.10; shell, update and discovery pending | F8+ |
+| FR-85 | Windows agent | SHOULD — service, metrics, install and signed update built; shell and discovery pending | F8+ |
 | FR-86 | Secrets and keys in an external secret manager (OpenBao, HashiCorp Vault or similar): master key (KEK) and/or secret content outside Janus-Ops. **AMEND Product Owner (v0.9)**: from WON'T to SHOULD, at the user's request; design in ADR-011. **Done (v0.28, option a of ADR-011)**: `JANUS_SECRET_BACKEND=openbao-transit`, the master key in the Transit engine of OpenBao/Vault (AppRole, minimal encrypt/decrypt policy, token renewal, DEK cache `JANUS_BAO_DEK_CACHE_S`), `janus-ops secrets status` and `secrets migrate --to ...` (DEK re-wrap only, idempotent, reversible, all or nothing, audit), readiness that checks the secret manager, TOTP included. Tested against a real OpenBao 2.4.1 and a real HashiCorp Vault 1.20 (Transit, key rotation without re-wrap, KV v2). **Option (b) `openbao-kv`** done: the content of each secret lives in KV v2, Postgres keeps only a reference (`kv1:` + mount, path and pinned version), the path derives from the record id and a reference pointing elsewhere is refused; `secrets migrate --to openbao-kv` and back, deleting a credential removes its content from KV, `secrets prune` for orphans (deleted GitOps stacks, workflows and channels do not do it by themselves). TOTP stays on the Transit or local key. **OpenBao in the stack** (`deploy/compose.openbao.yaml`, `scripts/openbao-setup.sh`, `docs/OPENBAO.md`): raft storage, TLS with its own CA, **auto-unseal with a static key** on restart (tested: restart of the container and of the whole stack), AppRole and minimal policy; the live stack has run on it since 2026-11-17 with `openbao-transit` (18 secrets migrated). A defect found in the real migration (channel secrets are sealed under `channel-<id>`) is fixed and covered by tests. **Not yet:** "by reference" credentials pointing to secrets of other teams (read-only) | SHOULD | F8+ |
 | FR-87 | Multi-tenancy, server HA | WON'T (MVP) | — |
 

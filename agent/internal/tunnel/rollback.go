@@ -46,6 +46,7 @@ func readPending(stateDir string) (pendingUpdate, bool) {
 func installBinary(tmp, dst, stateDir, version string) error {
 	old := dst + ".old"
 	_ = os.Remove(old)
+	_ = os.Remove(dst + ".bad") // left by a rollback on Windows, where the running file cannot be deleted
 	if err := os.Rename(dst, old); err != nil {
 		return err
 	}
@@ -105,12 +106,23 @@ func (g *updateGuard) confirm() {
 	g.a.Log.Info("update confirmed", "version", g.a.Version)
 }
 
-// rollback restores the previous binary and exits; systemd restarts it.
+// rollback restores the previous binary and exits; systemd (or the Windows service recovery) restarts it.
 func (a *Agent) rollback() {
 	old := a.exePath + ".old"
 	if _, err := os.Stat(old); err == nil {
 		if err := os.Rename(old, a.exePath); err != nil {
-			a.Log.Error("rollback failed", "err", err)
+			// Windows will not replace the file of a running program, but it lets it be renamed:
+			// move the failing binary aside, then put the old one back
+			bad := a.exePath + ".bad"
+			_ = os.Remove(bad)
+			if os.Rename(a.exePath, bad) == nil {
+				if err := os.Rename(old, a.exePath); err != nil {
+					_ = os.Rename(bad, a.exePath)
+					a.Log.Error("rollback failed", "err", err)
+				}
+			} else {
+				a.Log.Error("rollback failed", "err", err)
+			}
 		}
 	}
 	_ = os.Remove(pendingPath(a.Cfg.StateDir))

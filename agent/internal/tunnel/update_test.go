@@ -45,7 +45,7 @@ func runUpdateWith(t *testing.T, payload []byte, version, current string, mutate
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	sum := sha256.Sum256(payload)
 	sha := hex.EncodeToString(sum[:])
-	sig := ed25519.Sign(priv, UpdateMessage(version, runtime.GOARCH, sha))
+	sig := ed25519.Sign(priv, UpdateMessage(version, updatePlatform(), sha))
 	req := openRequest{Kind: "update", Version: version, Sha256: sha, Size: int64(len(payload)),
 		Signature: base64.StdEncoding.EncodeToString(sig)}
 	if mutate != nil {
@@ -216,5 +216,15 @@ func TestAgentAnnouncesUpdateAck(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("features = %v", proto.Features)
+	}
+}
+
+func TestUpdatePlatform(t *testing.T) {
+	want := runtime.GOARCH
+	if runtime.GOOS == "windows" {
+		want = "windows-" + runtime.GOARCH
+	}
+	if got := updatePlatform(); got != want {
+		t.Fatalf("updatePlatform() = %q, want %q", got, want)
 	}
 }

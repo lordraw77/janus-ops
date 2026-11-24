@@ -74,11 +74,6 @@ class AgentDetail(AgentOut):
     facts_at: datetime | None
 
 
-def is_windows(row: Any) -> bool:
-    """Signed self-update ships Linux binaries only; a Windows agent is updated by reinstalling."""
-    return str(row.os or "").startswith("Windows")
-
-
 def status_of(row: Any, hub: AgentHub) -> Status:
     if hub.get(str(row.id)) is not None:
         return "online"
@@ -310,8 +305,7 @@ async def _update_row(request: Request, session: Session, row: Any) -> UpdateOut
         raise HTTPException(409, "agent_binary_missing")
     if row.arch is None:
         raise HTTPException(409, "agent_offline")
-    if is_windows(row):
-        raise HTTPException(409, "update_unsupported_os")
+    target = update.target_of(row.arch, row.os)
     key = str(row.id)
     if key in _busy(request):
         raise HTTPException(409, "bootstrap_running")
@@ -319,7 +313,7 @@ async def _update_row(request: Request, session: Session, row: Any) -> UpdateOut
     try:
         try:
             release = update.load_release(
-                settings.agent_dir, row.arch, settings.agent_release_public_key
+                settings.agent_dir, target, settings.agent_release_public_key
             )
             installed = await update.push(app.state.agents, key, release)
         except update.UpdateError as exc:
@@ -395,7 +389,7 @@ async def update_all_agents(
     wanted = set(body.node_ids) if body.node_ids else None
     rows = [r for r in rows if wanted is None or r.id in wanted]
     versions: dict[str, str] = {}
-    for arch in {r.arch for r in rows if r.arch}:
+    for arch in {update.target_of(r.arch, r.os) for r in rows if r.arch}:
         try:
             versions[arch] = update.load_release(
                 settings.agent_dir, arch, settings.agent_release_public_key
@@ -413,11 +407,10 @@ async def update_all_agents(
 
         if hub.get(str(row.id)) is None:
             return item("skipped", "agent_offline")
-        if is_windows(row):
-            return item("skipped", "update_unsupported_os")
-        if row.arch not in versions:
+        target = update.target_of(row.arch, row.os)
+        if target not in versions:
             return item("skipped", "agent_binary_missing")
-        if row.version == versions[row.arch]:
+        if row.version == versions[target]:
             return item("skipped", "up_to_date")
         async with sem:
             try:

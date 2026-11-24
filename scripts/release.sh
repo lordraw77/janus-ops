@@ -26,7 +26,7 @@ PUBKEY="${JANUS_AGENT_RELEASE_PUBLIC_KEY:-$(sed -n 's/^JANUS_AGENT_RELEASE_PUBLI
 VERIFY_DIR="$(mktemp -d)"
 trap 'rm -rf "$VERIFY_DIR"' EXIT
 make agent/build VERSION="$VERSION" >/dev/null
-cp agent/dist/janus-agent-linux-* "$VERIFY_DIR/"
+cp agent/dist/janus-agent-linux-* agent/dist/janus-agent-windows-amd64.exe "$VERIFY_DIR/"
 cp agent/release/*.sig "$VERIFY_DIR/" 2>/dev/null || { echo "no agent/release/*.sig: run 'make agent/sign' and commit" >&2; exit 1; }
 (cd backend && uv run janus-ops agent-verify --dir "$VERIFY_DIR" --public-key "$PUBKEY" --agent-version "$VERSION") \
   || { echo "agent signatures do not match: run 'make agent/sign' (with secrets/release/release.pem) and commit agent/release/" >&2; exit 1; }
