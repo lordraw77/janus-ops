@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.0 — 2026-11-24
+
+**Added**
+- **Docker area: Stacks, Images, Volumes, Networks and Disk** next to Containers, for each Docker host. Stacks are the
+  Compose projects found from container labels: services, containers, networks, volumes and images, with start,
+  restart, stop, pull + recreate and the new `down` (containers and networks; "down + volumes" also deletes the data).
+  Images: pull, remove, prune dangling or unused. Volumes: size, stack and use, remove, prune unused. Networks: subnet,
+  gateway, attached containers, remove, prune. Disk: space used and reclaimable, remove stopped containers, clear
+  build cache. Changes need `containers.manage` and are audited. The Compose file itself is not read or edited.
+
 ## 0.11.2 — 2026-11-24
 
 **Added**

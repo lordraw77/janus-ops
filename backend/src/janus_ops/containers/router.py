@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Annotated, Any, Literal
@@ -32,6 +33,8 @@ Manager = Annotated[Session, Depends(require_node_permission("containers.manage"
 PROJECT = "com.docker.compose.project"
 SERVICE = "com.docker.compose.service"
 Action = Literal["start", "stop", "restart", "kill", "pause", "unpause"]
+IMAGE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/@+-]{0,255}$")
+BUILTIN_NETWORKS = {"bridge", "host", "none"}
 EXEC_IDLE_S = 1800
 LIVE_PARALLEL = 8
 HEALTH = (
@@ -528,6 +531,97 @@ async def remove(
     return Response(status_code=204)
 
 
+def _label_filter(project: str) -> str:
+    return json.dumps({"label": [f"{PROJECT}={project}"]})
+
+
+@router.get("/{node_id}/stacks/{project}")
+async def stack_detail(
+    request: Request, node_id: uuid.UUID, project: str, session: Reader
+) -> dict[str, Any]:
+    """Everything a Compose project owns, from labels: containers, networks, volumes, images."""
+    _, opener = await _opener(request, node_id, session)
+    name = check_name(project)
+    flt = {"filters": _label_filter(name)}
+    try:
+        rows, nets, vols = await asyncio.gather(
+            docker.call(opener, "GET", "/containers/json", {"all": True, **flt}),
+            docker.call(opener, "GET", "/networks", flt),
+            docker.call(opener, "GET", "/volumes", flt),
+        )
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    if not rows and not nets and not (vols or {}).get("Volumes"):
+        raise HTTPException(404, "not_found")
+    labels = (rows[0].get("Labels") or {}) if rows else {}
+    containers = sorted((_summary(c) for c in rows), key=lambda c: (c["service"] or "", c["name"]))
+    return {
+        "name": name,
+        "working_dir": labels.get("com.docker.compose.project.working_dir"),
+        "config_files": labels.get("com.docker.compose.project.config_files"),
+        "version": labels.get("com.docker.compose.version"),
+        "containers": containers,
+        "services": sorted({c["service"] or "?" for c in containers}),
+        "images": sorted({c["image"] for c in containers if c["image"]}),
+        "networks": [
+            {"id": n["Id"][:12], "name": n["Name"], "driver": n.get("Driver")} for n in nets or []
+        ],
+        "volumes": [
+            {"name": v["Name"], "driver": v.get("Driver")}
+            for v in (vols or {}).get("Volumes") or []
+        ],
+    }
+
+
+@router.post("/{node_id}/stacks/{project}/down")
+async def stack_down(
+    request: Request,
+    node_id: uuid.UUID,
+    project: str,
+    session: Manager,
+    volumes: bool = False,
+) -> dict[str, Any]:
+    """Like `docker compose down`: remove the containers and the networks of the project,
+    and its volumes only when asked (they hold data)."""
+    host, opener = await _opener(request, node_id, session)
+    name = check_name(project)
+    flt = {"filters": _label_filter(name)}
+    try:
+        rows = await docker.call(opener, "GET", "/containers/json", {"all": True, **flt})
+        nets = await docker.call(opener, "GET", "/networks", flt)
+        vols = (await docker.call(opener, "GET", "/volumes", flt) or {}).get("Volumes") or []
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    if not rows and not nets and not vols:
+        raise HTTPException(404, "not_found")
+    results: dict[str, str] = {}
+
+    async def drop(label: str, method_path: str, query: dict[str, Any] | None = None) -> None:
+        try:
+            await docker.call(opener, "DELETE", method_path, query)
+            results[label] = "removed"
+        except DockerError as exc:
+            results[label] = f"error: {exc.detail or exc.code}"
+
+    for c in rows:
+        cname = (c.get("Names") or ["/?"])[0].lstrip("/")
+        await drop(f"container {cname}", path("containers", c["Id"]), {"force": True})
+    for n in nets or []:
+        await drop(f"network {n['Name']}", path("networks", n["Id"]))
+    if volumes:
+        for v in vols:
+            await drop(f"volume {v['Name']}", path("volumes", v["Name"]))
+    await record(
+        request,
+        session,
+        "containers.stack_down",
+        "stack",
+        f"{host.node_name}/{name}",
+        {"volumes": volumes, "results": results},
+    )
+    return {"results": results}
+
+
 @router.post("/{node_id}/stacks/{project}/{action}")
 async def stack_action(
     request: Request,
@@ -569,26 +663,256 @@ async def stack_action(
     return {"results": results}
 
 
+def _ref(value: str) -> str:
+    if not IMAGE_REF.match(value):
+        raise DockerError("invalid_name", 400)
+    return value
+
+
+def _image_path(ref: str) -> str:
+    return f"/images/{quote(ref, safe='/:@')}"
+
+
+async def _fail(coro: Any) -> Any:
+    try:
+        return await coro
+    except DockerError as exc:
+        raise _http_error(exc) from None
+
+
 @router.get("/{node_id}/images")
 async def images(request: Request, node_id: uuid.UUID, session: Reader) -> list[dict[str, Any]]:
     _, opener = await _opener(request, node_id, session)
-    try:
-        rows = await docker.call(opener, "GET", "/images/json")
-    except DockerError as exc:
-        raise _http_error(exc) from None
+    rows = await _fail(docker.call(opener, "GET", "/images/json"))
     return sorted(
         (
             {
                 "id": i["Id"].split(":")[-1][:12],
                 "tags": i.get("RepoTags") or [],
+                "digests": i.get("RepoDigests") or [],
                 "size": i.get("Size"),
                 "created": i.get("Created"),
                 "containers": i.get("Containers", -1),
+                "dangling": not [t for t in i.get("RepoTags") or [] if t != "<none>:<none>"],
             }
             for i in rows
         ),
         key=lambda i: -(i["created"] or 0),
     )
+
+
+@router.post("/{node_id}/images/pull")
+async def image_pull(
+    request: Request, node_id: uuid.UUID, session: Manager, ref: str = Query(...)
+) -> dict[str, str]:
+    host, opener = await _opener(request, node_id, session)
+    image = _ref(ref)
+    pulled = await _fail(docker.call(opener, "POST", "/images/create", {"fromImage": image}))
+    if isinstance(pulled, str) and '"errorDetail"' in pulled:
+        last = [ln for ln in pulled.splitlines() if '"errorDetail"' in ln][-1]
+        raise HTTPException(502, f"pull_failed:{last[:300]}")
+    await record(request, session, "images.pull", "image", f"{host.node_name}/{image}")
+    return {"result": "pulled"}
+
+
+@router.delete("/{node_id}/images", status_code=204)
+async def image_remove(
+    request: Request,
+    node_id: uuid.UUID,
+    session: Manager,
+    ref: str = Query(...),
+    force: bool = False,
+) -> Response:
+    host, opener = await _opener(request, node_id, session)
+    image = _ref(ref)
+    await _fail(docker.call(opener, "DELETE", _image_path(image), {"force": force}))
+    await record(request, session, "images.removed", "image", f"{host.node_name}/{image}")
+    return Response(status_code=204)
+
+
+@router.post("/{node_id}/images/prune")
+async def image_prune(
+    request: Request, node_id: uuid.UUID, session: Manager, unused: bool = False
+) -> dict[str, Any]:
+    """Remove dangling images; with `unused` every image no container uses."""
+    host, opener = await _opener(request, node_id, session)
+    flt = json.dumps({"dangling": ["false" if unused else "true"]})
+    data = await _fail(docker.call(opener, "POST", "/images/prune", {"filters": flt})) or {}
+    out = {
+        "removed": len(data.get("ImagesDeleted") or []),
+        "reclaimed": data.get("SpaceReclaimed", 0),
+    }
+    await record(
+        request, session, "images.prune", "host", host.node_name, {"unused": unused, **out}
+    )
+    return out
+
+
+@router.get("/{node_id}/volumes")
+async def volumes(request: Request, node_id: uuid.UUID, session: Reader) -> list[dict[str, Any]]:
+    """Volumes with size and how many containers use them (from /system/df)."""
+    _, opener = await _opener(request, node_id, session)
+    df = await _fail(docker.call(opener, "GET", "/system/df")) or {}
+    out = []
+    for v in df.get("Volumes") or []:
+        usage = v.get("UsageData") or {}
+        labels = v.get("Labels") or {}
+        size = usage.get("Size", -1)
+        refs = usage.get("RefCount", -1)
+        out.append(
+            {
+                "name": v["Name"],
+                "driver": v.get("Driver"),
+                "mountpoint": v.get("Mountpoint"),
+                "created": v.get("CreatedAt"),
+                "size": size if size is not None and size >= 0 else None,
+                "used_by": refs if refs is not None and refs >= 0 else None,
+                "project": labels.get(PROJECT),
+            }
+        )
+    return sorted(out, key=lambda v: v["name"])
+
+
+@router.delete("/{node_id}/volumes/{volume}", status_code=204)
+async def volume_remove(
+    request: Request, node_id: uuid.UUID, volume: str, session: Manager, force: bool = False
+) -> Response:
+    host, opener = await _opener(request, node_id, session)
+    name = check_name(volume)
+    await _fail(docker.call(opener, "DELETE", path("volumes", name), {"force": force}))
+    await record(request, session, "volumes.removed", "volume", f"{host.node_name}/{name}")
+    return Response(status_code=204)
+
+
+@router.post("/{node_id}/volumes/prune")
+async def volume_prune(request: Request, node_id: uuid.UUID, session: Manager) -> dict[str, Any]:
+    """Remove every volume no container uses, named ones included."""
+    host, opener = await _opener(request, node_id, session)
+    flt = json.dumps({"all": ["true"]})
+    data = await _fail(docker.call(opener, "POST", "/volumes/prune", {"filters": flt})) or {}
+    out = {
+        "removed": len(data.get("VolumesDeleted") or []),
+        "reclaimed": data.get("SpaceReclaimed", 0),
+    }
+    await record(request, session, "volumes.prune", "host", host.node_name, out)
+    return out
+
+
+@router.get("/{node_id}/networks")
+async def networks(request: Request, node_id: uuid.UUID, session: Reader) -> list[dict[str, Any]]:
+    _, opener = await _opener(request, node_id, session)
+    nets, rows = await _fail(
+        asyncio.gather(
+            docker.call(opener, "GET", "/networks"),
+            docker.call(opener, "GET", "/containers/json", {"all": True}),
+        )
+    )
+    users: dict[str, list[str]] = {}
+    for c in rows:
+        cname = (c.get("Names") or ["/?"])[0].lstrip("/")
+        for n in ((c.get("NetworkSettings") or {}).get("Networks") or {}).values():
+            users.setdefault(n.get("NetworkID", ""), []).append(cname)
+    out = []
+    for n in nets:
+        cfg = (n.get("IPAM") or {}).get("Config") or []
+        members = sorted(users.get(n["Id"], []))
+        out.append(
+            {
+                "id": n["Id"][:12],
+                "name": n["Name"],
+                "driver": n.get("Driver"),
+                "scope": n.get("Scope"),
+                "internal": bool(n.get("Internal")),
+                "subnets": [c["Subnet"] for c in cfg if c.get("Subnet")],
+                "gateways": [c["Gateway"] for c in cfg if c.get("Gateway")],
+                "containers": members,
+                "project": (n.get("Labels") or {}).get(PROJECT),
+                "builtin": n["Name"] in BUILTIN_NETWORKS,
+                "created": n.get("Created"),
+            }
+        )
+    return sorted(out, key=lambda n: (not n["builtin"], n["name"]))
+
+
+@router.delete("/{node_id}/networks/{network}", status_code=204)
+async def network_remove(
+    request: Request, node_id: uuid.UUID, network: str, session: Manager
+) -> Response:
+    host, opener = await _opener(request, node_id, session)
+    ref = check_name(network)
+    await _fail(docker.call(opener, "DELETE", path("networks", ref)))
+    await record(request, session, "networks.removed", "network", f"{host.node_name}/{ref}")
+    return Response(status_code=204)
+
+
+@router.post("/{node_id}/networks/prune")
+async def network_prune(request: Request, node_id: uuid.UUID, session: Manager) -> dict[str, Any]:
+    host, opener = await _opener(request, node_id, session)
+    data = await _fail(docker.call(opener, "POST", "/networks/prune")) or {}
+    out = {"removed": len(data.get("NetworksDeleted") or [])}
+    await record(request, session, "networks.prune", "host", host.node_name, out)
+    return out
+
+
+@router.get("/{node_id}/disk")
+async def disk(request: Request, node_id: uuid.UUID, session: Reader) -> dict[str, Any]:
+    """Disk used by images, containers, volumes and build cache, and what is reclaimable."""
+    _, opener = await _opener(request, node_id, session)
+    df = await _fail(docker.call(opener, "GET", "/system/df")) or {}
+    images_ = df.get("Images") or []
+    boxes = df.get("Containers") or []
+    vols = df.get("Volumes") or []
+    cache = df.get("BuildCache") or []
+
+    def pos(n: Any) -> int:
+        return n if isinstance(n, int) and n > 0 else 0
+
+    return {
+        "images": {
+            "count": len(images_),
+            "size": sum(pos(i.get("Size")) for i in images_),
+            "reclaimable": sum(pos(i.get("Size")) for i in images_ if not pos(i.get("Containers"))),
+        },
+        "containers": {
+            "count": len(boxes),
+            "size": sum(pos(c.get("SizeRw")) for c in boxes),
+            "reclaimable": sum(pos(c.get("SizeRw")) for c in boxes if c.get("State") != "running"),
+            "stopped": sum(1 for c in boxes if c.get("State") != "running"),
+        },
+        "volumes": {
+            "count": len(vols),
+            "size": sum(pos((v.get("UsageData") or {}).get("Size")) for v in vols),
+            "reclaimable": sum(
+                pos((v.get("UsageData") or {}).get("Size"))
+                for v in vols
+                if (v.get("UsageData") or {}).get("RefCount") == 0
+            ),
+        },
+        "build_cache": {
+            "count": len(cache),
+            "size": sum(pos(b.get("Size")) for b in cache),
+            "reclaimable": sum(pos(b.get("Size")) for b in cache if not b.get("InUse")),
+        },
+    }
+
+
+@router.post("/{node_id}/prune/{what}")
+async def prune(
+    request: Request,
+    node_id: uuid.UUID,
+    what: Literal["containers", "build-cache"],
+    session: Manager,
+) -> dict[str, Any]:
+    """Remove stopped containers, or the unused build cache."""
+    host, opener = await _opener(request, node_id, session)
+    target = "/containers/prune" if what == "containers" else "/build/prune"
+    data = await _fail(docker.call(opener, "POST", target)) or {}
+    out = {
+        "removed": len(data.get("ContainersDeleted") or data.get("CachesDeleted") or []),
+        "reclaimed": data.get("SpaceReclaimed", 0),
+    }
+    await record(request, session, f"{what}.prune", "host", host.node_name, out)
+    return out
 
 
 # ------------------------------------------------------------------ WebSockets: logs, exec

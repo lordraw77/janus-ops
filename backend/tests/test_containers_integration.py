@@ -82,6 +82,49 @@ def docker_reply(request: bytes, calls: list[str]) -> bytes:
         return b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % len(raw) + raw
     elif method == "POST" and path.endswith(("/start", "/restart", "/stop")):
         status = 204
+    elif path == "/networks":
+        body = [
+            {
+                "Id": "n" * 64,
+                "Name": "shop_default",
+                "Driver": "bridge",
+                "Scope": "local",
+                "IPAM": {"Config": [{"Subnet": "172.18.0.0/16", "Gateway": "172.18.0.1"}]},
+                "Labels": {"com.docker.compose.project": "shop"},
+            },
+            {"Id": "m" * 64, "Name": "bridge", "Driver": "bridge", "Scope": "local"},
+        ]
+    elif path == "/volumes":
+        body = {"Volumes": [{"Name": "shop_data", "Driver": "local"}]}
+    elif path == "/system/df":
+        body = {
+            "Images": [{"Size": 100, "Containers": 1}, {"Size": 50, "Containers": 0}],
+            "Containers": [{"State": "running", "SizeRw": 5}, {"State": "exited", "SizeRw": 7}],
+            "Volumes": [
+                {
+                    "Name": "shop_data",
+                    "Driver": "local",
+                    "Mountpoint": "/v/shop_data",
+                    "Labels": {"com.docker.compose.project": "shop"},
+                    "UsageData": {"Size": 900, "RefCount": 1},
+                },
+                {"Name": "old", "Driver": "local", "UsageData": {"Size": -1, "RefCount": 0}},
+            ],
+            "BuildCache": [{"Size": 30, "InUse": False}],
+        }
+    elif path == "/images/json":
+        body = [
+            {
+                "Id": "sha256:" + "c" * 64,
+                "RepoTags": ["nginx:1.27"],
+                "Size": 100,
+                "Created": 5,
+                "Containers": 1,
+            },
+            {"Id": "sha256:" + "d" * 64, "RepoTags": ["<none>:<none>"], "Size": 50, "Created": 4},
+        ]
+    elif method == "DELETE":
+        status = 204
     elif path == "/containers/missing/json":
         status, body = 404, {"message": "No such container: missing"}
     data = b"" if body is None else json.dumps(body).encode()
@@ -216,6 +259,35 @@ def test_containers_through_the_agent() -> None:
         r = op.post(f"/api/v1/containers/{node}/stacks/shop/stop")
         assert r.json() == {"results": {"web": "ok"}}
         assert f"POST /containers/{'a' * 64}/stop" in fake.calls
+
+        detail = op.get(f"/api/v1/containers/{node}/stacks/shop").json()
+        assert detail["services"] == ["web"] and detail["images"] == ["nginx:1.27"]
+        assert [n["name"] for n in detail["networks"]] == ["shop_default", "bridge"]
+        assert detail["volumes"] == [{"name": "shop_data", "driver": "local"}]
+        vols = op.get(f"/api/v1/containers/{node}/volumes").json()
+        assert [(v["name"], v["size"], v["used_by"], v["project"]) for v in vols] == [
+            ("old", None, 0, None),
+            ("shop_data", 900, 1, "shop"),
+        ]
+        nets = op.get(f"/api/v1/containers/{node}/networks").json()
+        assert [(n["name"], n["builtin"], n["containers"]) for n in nets] == [
+            ("bridge", True, []),
+            ("shop_default", False, []),
+        ]
+        imgs = op.get(f"/api/v1/containers/{node}/images").json()
+        assert [(i["tags"], i["dangling"]) for i in imgs] == [
+            (["nginx:1.27"], False),
+            (["<none>:<none>"], True),
+        ]
+        disk = op.get(f"/api/v1/containers/{node}/disk").json()
+        assert disk["images"] == {"count": 2, "size": 150, "reclaimable": 50}
+        assert disk["volumes"]["reclaimable"] == 0 and disk["containers"]["stopped"] == 1
+        assert op.delete(f"/api/v1/containers/{node}/images?ref=nginx:1.27").status_code == 204
+        assert op.delete(f"/api/v1/containers/{node}/images?ref=../x%20y").status_code in (400, 422)
+        assert op.delete(f"/api/v1/containers/{node}/volumes/old").status_code == 204
+        r = op.post(f"/api/v1/containers/{node}/stacks/shop/down?volumes=true")
+        assert r.status_code == 200 and "volume shop_data" in r.json()["results"]
+        assert "DELETE /volumes/shop_data" in fake.calls
         finish(ws)
     with client("carol") as auditor:  # reads, cannot act or open shells
         assert auditor.post(f"/api/v1/containers/{node}/c/web/restart").status_code == 403

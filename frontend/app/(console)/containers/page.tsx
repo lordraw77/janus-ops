@@ -29,6 +29,13 @@ import { formatBytes } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { InventoryNode } from "@/lib/inventory";
+import {
+  DiskSection,
+  ImagesSection,
+  NetworksSection,
+  StacksSection,
+  VolumesSection,
+} from "./Resources";
 import { type Getters, useSortedRows } from "@/lib/sort";
 
 // xterm.js touches `window`: load it in the browser only
@@ -1432,6 +1439,43 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
   );
 }
 
+const SECTIONS = [
+  ["containers", "Containers"],
+  ["stacks", "Stacks"],
+  ["images", "Images"],
+  ["volumes", "Volumes"],
+  ["networks", "Networks"],
+  ["disk", "Disk"],
+] as const;
+type Section = (typeof SECTIONS)[number][0];
+
+function HostSections({ host }: { host: Host }) {
+  const [section, setSection] = useState<Section>("containers");
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1" role="tablist" aria-label="Docker resources">
+        {SECTIONS.map(([key, label]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={section === key}
+            onClick={() => setSection(key)}
+            className={`rounded px-3 py-1 text-xs font-semibold ${section === key ? "bg-elevated text-fg" : "text-fg-muted hover:text-fg"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {section === "containers" && <HostView host={host} />}
+      {section === "stacks" && <StacksSection nodeId={host.node_id} />}
+      {section === "images" && <ImagesSection nodeId={host.node_id} />}
+      {section === "volumes" && <VolumesSection nodeId={host.node_id} />}
+      {section === "networks" && <NetworksSection nodeId={host.node_id} />}
+      {section === "disk" && <DiskSection nodeId={host.node_id} />}
+    </div>
+  );
+}
+
 export default function ContainersPage() {
   const hosts = useResource<Host[]>("/containers/hosts");
   const [selected, setSelected] = useState<string | null>(null);
@@ -1487,7 +1531,7 @@ export default function ContainersPage() {
         </div>
       )}
       {showAll && <AllHostsView hosts={list} />}
-      {current && <HostView key={current.node_id} host={current} />}
+      {current && <HostSections key={current.node_id} host={current} />}
     </div>
   );
 }
