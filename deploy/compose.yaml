@@ -38,7 +38,7 @@ services:
     networks: [edge]
 
   janus-ops:
-    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.10.1}
+    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.10.2}
     restart: unless-stopped
     environment:
       <<: *janus-env
@@ -96,7 +96,7 @@ services:
 
   # One-shot: database migrations, then the initial administrator (created only if missing)
   setup:
-    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.10.1}
+    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.10.2}
     command: ["setup"]
     restart: "no"
     environment:
