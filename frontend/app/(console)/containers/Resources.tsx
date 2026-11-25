@@ -7,6 +7,7 @@ import {
   Play,
   Plus,
   Save,
+  Sparkles,
   RefreshCw,
   RotateCw,
   Square,
@@ -19,6 +20,7 @@ import { Alert, Button, Modal } from "@/components/ui";
 import { formatBytes } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type { LlmChoices } from "@/lib/aiProviders";
 import { type Getters, useSortedRows } from "@/lib/sort";
 
 type Notice = { kind: "ok" | "error"; text: string } | null;
@@ -152,6 +154,213 @@ const STACK_GET: Getters<StackRow> = {
   state: (s) => s.running / (s.containers || 1),
 };
 
+// ------------------------------------------------------------------ AI assist
+
+type Generated = {
+  content: string;
+  notes: string[];
+  warnings: string[];
+  model: string | null;
+  masked: number;
+};
+
+/** Lines added and removed between two texts (longest common subsequence), for review. */
+function lineDiff(
+  before: string,
+  after: string,
+): { sign: "+" | "-" | " "; line: string }[] {
+  const a = before.split("\n");
+  const b = after.split("\n");
+  const n = a.length;
+  const m = b.length;
+  const t: number[][] = Array.from({ length: n + 1 }, () =>
+    new Array<number>(m + 1).fill(0),
+  );
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      t[i][j] =
+        a[i] === b[j]
+          ? t[i + 1][j + 1] + 1
+          : Math.max(t[i + 1][j], t[i][j + 1]);
+  const out: { sign: "+" | "-" | " "; line: string }[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({ sign: " ", line: a[i++] });
+      j++;
+    } else if (t[i + 1][j] >= t[i][j + 1])
+      out.push({ sign: "-", line: a[i++] });
+    else out.push({ sign: "+", line: b[j++] });
+  }
+  while (i < n) out.push({ sign: "-", line: a[i++] });
+  while (j < m) out.push({ sign: "+", line: b[j++] });
+  return out;
+}
+
+/** "Describe it" box: asks a configured model for a Compose file (or a change to `current`).
+ * The answer goes to the editor through `onResult`; the person reviews and saves. */
+function AiAssist({
+  nodeId,
+  current,
+  onResult,
+}: {
+  nodeId: string;
+  /** the file as it is now: the model changes it; null: write a new one */
+  current: string | null;
+  onResult: (content: string) => void;
+}) {
+  const { can } = useAuth();
+  const choices = useResource<LlmChoices>("/ai/llm/choices");
+  const [prompt, setPrompt] = useState("");
+  const [spec, setSpec] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ g: Generated; before: string } | null>(
+    null,
+  );
+  const [showDiff, setShowDiff] = useState(true);
+  if (!can("ai.use")) return null;
+  const edit = current !== null;
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    const r = await api<Generated>(`/containers/${nodeId}/stacks/generate`, {
+      method: "POST",
+      body: { prompt, current, spec: spec || null },
+    });
+    setBusy(false);
+    if (!r.ok) return setError(message(r.code));
+    setResult({ g: r.data, before: current ?? "" });
+    onResult(r.data.content);
+  }
+  const routes = choices.data?.routes ?? [];
+  const models = choices.data?.models ?? [];
+  return (
+    <div className="space-y-2 rounded border border-line bg-surface p-3 text-xs">
+      <div className="flex items-center gap-2 font-semibold">
+        <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />
+        {edit ? "Describe the change" : "Describe the stack you want"}
+      </div>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        rows={3}
+        maxLength={4000}
+        placeholder={
+          edit
+            ? "e.g. add a redis cache and put both on a private network"
+            : "e.g. a Gitea with a Postgres database, data on named volumes, web on port 3000"
+        }
+        aria-label="What you want"
+        className="w-full rounded border border-line bg-canvas p-2 outline-none focus:border-primary"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        {choices.data?.configured && (
+          <select
+            value={spec}
+            onChange={(e) => setSpec(e.target.value)}
+            aria-label="Model"
+            className="max-w-80 rounded border border-line bg-canvas px-2 py-1.5"
+          >
+            <option value="">default route</option>
+            {routes.length > 0 && (
+              <optgroup label="Routes (with fallback)">
+                {routes.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {models.length > 0 && (
+              <optgroup label="One model">
+                {models.map((m) => (
+                  <option key={m.spec} value={m.spec}>
+                    {m.spec}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        )}
+        <Button
+          onClick={() => void generate()}
+          disabled={busy || !prompt.trim()}
+        >
+          <Sparkles className="h-3 w-3" aria-hidden />{" "}
+          {busy ? "Thinking…" : edit ? "Apply to the editor" : "Generate"}
+        </Button>
+        <span className="text-fg-muted">
+          {edit ? "The model gets the file in the editor. " : ""}
+          Literal passwords and tokens are hidden from the model and put back in
+          its answer.
+        </span>
+      </div>
+      {error && <Alert>{error}</Alert>}
+      {result && (
+        <div className="space-y-2">
+          <p className="text-fg-muted">
+            Written by{" "}
+            <span className="font-mono">{result.g.model ?? "the model"}</span>.
+            Read it before you save: nothing has been saved or run.
+            {result.g.masked > 0 &&
+              ` ${result.g.masked} secret value(s) were hidden from the model.`}
+          </p>
+          {result.g.warnings.map((w) => (
+            <Alert key={w} kind="info">
+              {w}
+            </Alert>
+          ))}
+          {result.g.notes.length > 0 && (
+            <ul className="list-disc space-y-0.5 pl-5">
+              {result.g.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          )}
+          {edit && (
+            <>
+              <div className="flex gap-2">
+                <Button onClick={() => setShowDiff((v) => !v)}>
+                  {showDiff ? "Hide changes" : "Show changes"}
+                </Button>
+                <Button
+                  onClick={() => {
+                    onResult(result.before);
+                    setResult(null);
+                  }}
+                >
+                  Undo
+                </Button>
+              </div>
+              {showDiff && (
+                <pre className="max-h-64 overflow-auto rounded border border-line bg-canvas p-2 font-mono">
+                  {lineDiff(result.before, result.g.content).map((d, i) => (
+                    <div
+                      key={i}
+                      className={
+                        d.sign === "+"
+                          ? "bg-ok/15 text-ok"
+                          : d.sign === "-"
+                            ? "bg-crit/15 text-crit"
+                            : "text-fg-muted"
+                      }
+                    >
+                      {d.sign} {d.line}
+                    </div>
+                  ))}
+                </pre>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Compose = {
   path: string;
   files: string[];
@@ -209,6 +418,9 @@ function ComposeEditor({ nodeId, name }: { nodeId: string; name: string }) {
             {res.data.files.length > 1 &&
               ` (+${res.data.files.length - 1} more file(s), not editable here)`}
           </p>
+          {manage && (
+            <AiAssist nodeId={nodeId} current={value} onResult={setText} />
+          )}
           <textarea
             value={value}
             onChange={(e) => setText(e.target.value)}
@@ -378,6 +590,7 @@ function NewStackDialog({
             className="mt-1 block w-64 rounded border border-line bg-canvas px-2 py-1.5 font-mono outline-none focus:border-primary"
           />
         </label>
+        <AiAssist nodeId={nodeId} current={null} onResult={setContent} />
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}

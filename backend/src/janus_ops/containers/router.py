@@ -17,10 +17,14 @@ from starlette.websockets import WebSocketDisconnect
 from janus_ops import audit
 from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
+from janus_ops.ai import config_store
+from janus_ops.ai.gateway import Gateway
+from janus_ops.ai.iac import sha256
+from janus_ops.ai.llm import AIError
 from janus_ops.auth import sessions
 from janus_ops.auth.deps import require_node_permission
 from janus_ops.auth.sessions import Session
-from janus_ops.containers import docker
+from janus_ops.containers import compose_ai, docker
 from janus_ops.containers.access import DockerAccess, DockerHost
 from janus_ops.containers.docker import DockerError, LogDemuxer, check_name, path
 from janus_ops.terminal.router import _same_origin
@@ -783,6 +787,65 @@ async def stack_compose_save(
         {"applied": apply},
     )
     return {"saved": True, "applied": apply, "output": output}
+
+
+@router.post("/{node_id}/stacks/generate")
+async def stack_generate(
+    request: Request, node_id: uuid.UUID, session: Manager, body: dict[str, Any]
+) -> dict[str, Any]:
+    """Ask a model for a Compose file: a new one from a description, or the given one changed as
+    described. Returns text for a person to read; it is not saved or run."""
+    if "ai.use" not in session.permissions:
+        raise HTTPException(403, "forbidden")
+    prompt = str(body.get("prompt", "")).strip()
+    current = body.get("current")
+    spec = body.get("spec") or None
+    if not prompt or len(prompt) > compose_ai.PROMPT_MAX:
+        raise HTTPException(422, "invalid_prompt")
+    if current is not None:
+        current = _body_text(str(current))
+        if len(current) > compose_ai.CURRENT_MAX:
+            raise HTTPException(413, "compose_too_large")
+    host, opener = await _opener(request, node_id, session)
+    rows = await _fail(docker.call(opener, "GET", "/containers/json", {"all": True}))
+    ports = sorted(
+        {
+            f"{p['PublicPort']}/{p.get('Type', 'tcp')}"
+            for c in rows
+            for p in c.get("Ports") or []
+            if p.get("PublicPort")
+        }
+    )
+    stacks = sorted({str(n) for c in rows if (n := (c.get("Labels") or {}).get(PROJECT))})
+    messages, back = compose_ai.build_messages(host.node_name, prompt, current, ports, stacks)
+    app = request.app.state
+    settings = await config_store.effective(app.engine, app.settings, app.vault)
+    gateway = Gateway(app.engine, app.vault, settings)
+    try:
+        answer = await gateway.text(spec, messages, source="stack")
+        content, notes, warnings = compose_ai.read_answer(answer, back)
+    except AIError as exc:
+        raise HTTPException(502, exc.code) from None
+    await record(
+        request,
+        session,
+        "containers.stack_generate",
+        "host",
+        host.node_name,
+        {
+            "mode": "edit" if current is not None else "new",
+            "model": gateway.used[-1] if gateway.used else None,
+            "prompt_sha256": sha256(prompt),
+            "secrets_masked": len(back),
+        },
+    )
+    return {
+        "content": content,
+        "notes": notes,
+        "warnings": warnings,
+        "model": gateway.used[-1] if gateway.used else None,
+        "masked": len(back),
+    }
 
 
 @router.post("/{node_id}/stacks", status_code=201)

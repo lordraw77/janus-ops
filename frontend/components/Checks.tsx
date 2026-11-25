@@ -1,12 +1,13 @@
 "use client";
 
-import { CalendarClock, Lightbulb, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, Lightbulb, Pencil, Play, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
 import { Alert, Button, Card, Field, Modal, Select, StateBadge, TextInput } from "@/components/ui";
 import { type OidEntry, SnmpOidCatalog, useOidCatalog } from "@/components/SnmpOids";
 import { ago } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
+import type { LlmChoices } from "@/lib/aiProviders";
 import { useAuth } from "@/lib/auth";
 import {
   type Check,
@@ -28,6 +29,135 @@ const str = (v: FormDataEntryValue | null): string | undefined => {
   return s === "" ? undefined : s;
 };
 
+type CheckDraft = CheckDef & { name: string };
+type CheckDrafts = { checks: CheckDraft[]; notes: string[]; warnings: string[]; model: string | null };
+
+/** "Describe what to watch": a configured model drafts checks for the node. The person reads them,
+ * loads one into the form to edit it, or creates them as they are. */
+function AiCheckAssist({ nodeId, onUse, onCreated }: { nodeId: string; onUse: (def: CheckDef) => void; onCreated: () => void }) {
+  const { can } = useAuth();
+  const choices = useResource<LlmChoices>("/ai/llm/choices");
+  const [prompt, setPrompt] = useState("");
+  const [spec, setSpec] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<CheckDrafts | null>(null);
+  if (!can("ai.use")) return null;
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    const r = await api<CheckDrafts>("/checks/generate", { method: "POST", body: { node_id: nodeId, prompt, spec: spec || null } });
+    setBusy(false);
+    if (!r.ok) return setError(message(r.code));
+    setResult(r.data);
+  }
+  async function createAll() {
+    if (!result?.checks.length) return;
+    setBusy(true);
+    setError(null);
+    for (const c of result.checks) {
+      const r = await api("/checks", { method: "POST", body: { ...c, node_id: nodeId, enabled: true } });
+      if (!r.ok) {
+        setBusy(false);
+        return setError(`${c.name}: ${message(r.code)}`);
+      }
+    }
+    setBusy(false);
+    onCreated();
+  }
+  const routes = choices.data?.routes ?? [];
+  const models = choices.data?.models ?? [];
+  return (
+    <div className="mb-3 space-y-2 rounded border border-line bg-surface p-3 text-xs">
+      <div className="flex items-center gap-2 font-semibold">
+        <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden /> Describe what to watch
+      </div>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        rows={3}
+        maxLength={2000}
+        placeholder="e.g. check that celery is running and that the myapp log has no errors"
+        aria-label="What to watch"
+        className="w-full rounded border border-line bg-canvas p-2 outline-none focus:border-primary"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        {choices.data?.configured && (
+          <select value={spec} onChange={(e) => setSpec(e.target.value)} aria-label="Model" className="max-w-72 rounded border border-line bg-canvas px-2 py-1.5">
+            <option value="">default route</option>
+            {routes.length > 0 && (
+              <optgroup label="Routes (with fallback)">
+                {routes.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {models.length > 0 && (
+              <optgroup label="One model">
+                {models.map((m) => (
+                  <option key={m.spec} value={m.spec}>
+                    {m.spec}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        )}
+        <Button onClick={() => void generate()} disabled={busy || !prompt.trim()}>
+          <Sparkles className="h-3 w-3" aria-hidden /> {busy ? "Thinking…" : "Draft checks"}
+        </Button>
+        <span className="text-fg-muted">The model sees this node&apos;s inventory, running units, ports and metric names, never secrets.</span>
+      </div>
+      {error && <Alert>{error}</Alert>}
+      {result && (
+        <div className="space-y-2">
+          <p className="text-fg-muted">
+            Drafted by <span className="font-mono">{result.model ?? "the model"}</span>. Nothing is saved until you create them.
+          </p>
+          {result.warnings.map((w) => (
+            <Alert key={w} kind="info">
+              {w}
+            </Alert>
+          ))}
+          {result.checks.length === 0 && <p className="text-fg-muted">No usable check came back: rephrase the request or see the notes.</p>}
+          {result.checks.map((c, i) => (
+            <div key={`${c.name}-${i}`} className="flex items-start gap-2 rounded border border-line bg-canvas px-2 py-1.5">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">{c.name}</div>
+                <div className="text-fg-muted">
+                  {KIND_LABEL[c.kind]} · {describeCheck(c)}
+                </div>
+              </div>
+              <Button onClick={() => onUse(c)} title="Load into the form below to edit it">
+                Use in form
+              </Button>
+              <Button onClick={() => setResult({ ...result, checks: result.checks.filter((_, j) => j !== i) })} aria-label={`Drop ${c.name}`} title="Drop this draft">
+                <X className="h-3 w-3" aria-hidden />
+              </Button>
+            </div>
+          ))}
+          {result.notes.length > 0 && (
+            <ul className="list-disc space-y-0.5 pl-5">
+              {result.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          )}
+          {result.checks.length > 0 && (
+            <Button variant="primary" onClick={() => void createAll()} disabled={busy}>
+              <Plus className="h-3 w-3" aria-hidden /> Create {result.checks.length === 1 ? "this check" : `all ${result.checks.length}`}
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Create or edit a check; fields follow the kind. */
 export function CheckEditor({
   nodeId,
@@ -40,10 +170,14 @@ export function CheckEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  // a draft written by the model fills the form like a check being edited; the form is remounted
+  const [draft, setDraft] = useState<{ def: CheckDef; n: number } | null>(null);
+  const src: CheckDef | null = check ?? draft?.def ?? null;
   const [kind, setKind] = useState<CheckKind>(check?.kind ?? "metric");
   const [error, setError] = useState<string | null>(null);
-  const p = (check?.params ?? {}) as Record<string, unknown>;
-  const thresholds = kind === "metric" || kind === "tcp" || kind === "http" || kind === "snmp" || kind === "probe";
+  const [logsSource, setLogsSource] = useState(String(check?.params?.source ?? "unit"));
+  const p = (src?.params ?? {}) as Record<string, unknown>;
+  const thresholds = kind === "metric" || kind === "tcp" || kind === "http" || kind === "snmp" || kind === "probe" || kind === "logs";
   // SNMP: the OID comes from the catalog (with an instance for table columns) or is typed
   const catalog = useOidCatalog();
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -69,6 +203,15 @@ export function CheckEditor({
     } else if (kind === "systemd") params = { unit: str(f.get("unit")) };
     else if (kind === "service") params = { unit: str(f.get("unit")) };
     else if (kind === "fritzbox") params = { item: str(f.get("item")) };
+    else if (kind === "process")
+      params = { match: f.get("match") ?? "name", pattern: str(f.get("pattern")), min_count: num(f.get("min_count")) ?? 1 };
+    else if (kind === "logs") {
+      const words = String(f.get("words") ?? "").split(/[,;]+/).map((w) => w.trim()).filter(Boolean);
+      params =
+        f.get("source") === "file"
+          ? { source: "file", path: str(f.get("path")), words, last_lines: num(f.get("last_lines")) ?? 200 }
+          : { source: "unit", unit: str(f.get("unit")), words, since_min: num(f.get("since_min")) ?? 15 };
+    }
     else if (kind === "probe") {
       const wanted = probes.data?.find((x) => x.name === probe);
       const args: Record<string, string | boolean> = {};
@@ -81,7 +224,11 @@ export function CheckEditor({
     }
     else if (kind === "port") params = { port: num(f.get("port")), proto: f.get("proto") };
     else if (kind === "tcp") params = { port: num(f.get("port")), host: str(f.get("host")) };
-    else if (kind === "backup") params = { max_age_h: num(f.get("max_age_h")) ?? undefined };
+    else if (kind === "backup") {
+      const ids = String(f.get("ignore_vmids") ?? "").split(/[\s,;]+/).filter(Boolean).map(Number);
+      if (ids.some((n) => !Number.isInteger(n) || n < 1)) return setError("Guest ids are numbers, separated by commas.");
+      params = { max_age_h: num(f.get("max_age_h")) ?? undefined, ignore_vmids: ids };
+    }
     else if (kind === "snmp")
       params = {
         oid: picked?.indexed ? `${picked.oid}.${instance.trim() || "1"}` : oidText.trim(),
@@ -117,7 +264,19 @@ export function CheckEditor({
 
   return (
     <Modal title={check ? `Edit ${check.name}` : "New check"} onClose={onClose}>
-      <form onSubmit={(e) => void submit(e)} className="max-h-[75vh] space-y-3 overflow-y-auto pr-1">
+      {!check && (
+        <AiCheckAssist
+          nodeId={nodeId}
+          onUse={(def) => {
+            setKind(def.kind);
+            if (def.kind === "probe") setProbe(String(def.params.probe ?? probe));
+            if (def.kind === "logs") setLogsSource(String(def.params.source ?? "unit"));
+            setDraft((d) => ({ def, n: (d?.n ?? 0) + 1 }));
+          }}
+          onCreated={onSaved}
+        />
+      )}
+      <form key={draft?.n ?? 0} onSubmit={(e) => void submit(e)} className="max-h-[75vh] space-y-3 overflow-y-auto pr-1">
         {error && <Alert>{error}</Alert>}
         <Field label="Kind">
           <Select value={kind} onChange={(e) => setKind(e.target.value as CheckKind)} disabled={!!check}>
@@ -129,7 +288,7 @@ export function CheckEditor({
           </Select>
         </Field>
         <Field label="Name">
-          <TextInput name="name" required maxLength={256} defaultValue={check?.name} />
+          <TextInput name="name" required maxLength={256} defaultValue={src?.name} />
         </Field>
         {kind === "metric" && (
           <>
@@ -277,9 +436,68 @@ export function CheckEditor({
           </>
         )}
         {kind === "backup" && (
-          <Field label="Max backup age (hours, empty = per job schedule)">
-            <TextInput name="max_age_h" type="number" min={1} max={2160} defaultValue={String(p.max_age_h ?? "")} />
-          </Field>
+          <>
+            <Field label="Max backup age (hours, empty = per job schedule)">
+              <TextInput name="max_age_h" type="number" min={1} max={2160} defaultValue={String(p.max_age_h ?? "")} />
+            </Field>
+            <Field label="Guests not backed up on purpose" hint="VM/CT ids separated by commas: left out of this check.">
+              <TextInput name="ignore_vmids" placeholder="101, 205" defaultValue={Array.isArray(p.ignore_vmids) ? p.ignore_vmids.join(", ") : ""} />
+            </Field>
+          </>
+        )}
+        {kind === "process" && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Match">
+                <Select name="match" defaultValue={String(p.match ?? "name")}>
+                  <option value="name">exact process name</option>
+                  <option value="cmdline">text in the command line</option>
+                </Select>
+              </Field>
+              <Field label="At least (processes)">
+                <TextInput name="min_count" type="number" min={1} max={1000} defaultValue={String(p.min_count ?? 1)} />
+              </Field>
+            </div>
+            <Field label="Name or text" hint="Name: as `ps -e` shows it (15 characters at most). Needs the agent with exec allowed.">
+              <TextInput name="pattern" required maxLength={100} defaultValue={String(p.pattern ?? "")} />
+            </Field>
+          </>
+        )}
+        {kind === "logs" && (
+          <>
+            <Field label="Where" hint="Needs the agent with exec allowed (Linux). Critical when a line has one of the words.">
+              <Select name="source" value={logsSource} onChange={(e) => setLogsSource(e.target.value)}>
+                <option value="unit">journal of a systemd unit</option>
+                <option value="file">file under /var/log</option>
+              </Select>
+            </Field>
+            {logsSource === "file" ? (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <Field label="File">
+                    <TextInput name="path" required placeholder="/var/log/app/app.log" defaultValue={String(p.path ?? "/var/log/")} />
+                  </Field>
+                </div>
+                <Field label="Last lines">
+                  <TextInput name="last_lines" type="number" min={10} max={2000} defaultValue={String(p.last_lines ?? 200)} />
+                </Field>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <Field label="Unit">
+                    <TextInput name="unit" required placeholder="nginx.service" defaultValue={String(p.unit ?? "")} />
+                  </Field>
+                </div>
+                <Field label="Last minutes">
+                  <TextInput name="since_min" type="number" min={1} max={1440} defaultValue={String(p.since_min ?? 15)} />
+                </Field>
+              </div>
+            )}
+            <Field label="Words" hint="Comma separated, any case. A line with one of them counts.">
+              <TextInput name="words" defaultValue={(Array.isArray(p.words) ? (p.words as string[]) : ["error", "fatal", "exception", "panic"]).join(", ")} />
+            </Field>
+          </>
         )}
         {kind === "http" && (
           <>
@@ -302,25 +520,25 @@ export function CheckEditor({
         {thresholds && (
           <div className="grid grid-cols-3 gap-3">
             <Field label="Alert when">
-              <Select name="comparison" defaultValue={check?.comparison ?? "gt"}>
+              <Select name="comparison" defaultValue={src?.comparison ?? "gt"}>
                 <option value="gt">above</option>
                 <option value="lt">below</option>
               </Select>
             </Field>
-            <Field label={kind === "metric" ? "Warn" : "Warn (ms)"}>
-              <TextInput name="warn" type="number" step="any" defaultValue={check?.warn_threshold?.toString() ?? ""} />
+            <Field label={kind === "metric" || kind === "probe" || kind === "snmp" ? "Warn" : kind === "logs" ? "Warn (lines)" : "Warn (ms)"}>
+              <TextInput name="warn" type="number" step="any" defaultValue={src?.warn_threshold?.toString() ?? ""} />
             </Field>
-            <Field label={kind === "metric" ? "Crit" : "Crit (ms)"}>
-              <TextInput name="crit" type="number" step="any" defaultValue={check?.crit_threshold?.toString() ?? ""} />
+            <Field label={kind === "metric" || kind === "probe" || kind === "snmp" ? "Crit" : kind === "logs" ? "Crit (lines)" : "Crit (ms)"}>
+              <TextInput name="crit" type="number" step="any" defaultValue={src?.crit_threshold?.toString() ?? ""} />
             </Field>
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Interval (s)">
-            <TextInput name="interval" type="number" min={10} max={86400} defaultValue={String(check?.interval_s ?? 60)} />
+            <TextInput name="interval" type="number" min={10} max={86400} defaultValue={String(src?.interval_s ?? 60)} />
           </Field>
           <Field label="Cycles before alerting" hint="Consecutive bad results">
-            <TextInput name="cycles" type="number" min={1} max={100} defaultValue={String(check?.check_cycles ?? 3)} />
+            <TextInput name="cycles" type="number" min={1} max={100} defaultValue={String(src?.check_cycles ?? 3)} />
           </Field>
         </div>
         <label className="flex items-center gap-2 text-xs text-fg-secondary">
@@ -476,6 +694,78 @@ export function CloseProblemDialog({ label, problemId, onClose, onSaved }: { lab
           </Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+type AttentionGuest = {
+  vmid: number;
+  name: string | null;
+  type: string | null;
+  node: string | null;
+  status: string;
+  last_backup: number | null;
+  ignored: boolean;
+};
+
+/** Pick the guests that are not backed up on purpose: the backup check leaves them out and runs
+ * again, so the problem closes by itself when nothing else is wrong. */
+export function IgnoreBackupGuestsDialog({ label, checkId, onClose, onSaved }: { label: string; checkId: string; onClose: () => void; onSaved: () => void }) {
+  const res = useResource<{ guests: AttentionGuest[]; ignored: number[] }>(`/checks/${checkId}/backup-attention`);
+  const [picked, setPicked] = useState<Set<number> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const guests = res.data?.guests ?? [];
+  // by default the guests already ignored stay ignored; nothing new is picked for the person
+  const chosen = picked ?? new Set(guests.filter((g) => g.ignored).map((g) => g.vmid));
+  // ignored ids of guests that no longer exist, or are fine now, are kept as they are
+  const hidden = (res.data?.ignored ?? []).filter((v) => !guests.some((g) => g.vmid === v));
+  function toggle(v: number) {
+    const next = new Set(chosen);
+    if (next.has(v)) next.delete(v);
+    else next.add(v);
+    setPicked(next);
+  }
+  async function save() {
+    setBusy(true);
+    const r = await api(`/checks/${checkId}/backup-ignore`, { method: "PUT", body: { vmids: [...chosen, ...hidden] } });
+    setBusy(false);
+    if (!r.ok) return setError(message(r.code));
+    onSaved();
+  }
+  return (
+    <Modal title={`Guests not backed up: ${label}`} onClose={onClose}>
+      <div className="space-y-3 text-xs">
+        <p className="text-fg-secondary">
+          Tick the guests you do not back up on purpose. The check leaves them out from now on and runs again; you can
+          undo this here or in the check&apos;s settings.
+        </p>
+        {res.error && <Alert>{res.error}</Alert>}
+        {error && <Alert>{error}</Alert>}
+        {!res.data && !res.error && <p className="py-4 text-center text-fg-muted">Asking Proxmox…</p>}
+        {res.data && guests.length === 0 && <p className="text-fg-muted">Every guest has a recent backup.</p>}
+        {guests.map((g) => (
+          <label key={g.vmid} className="flex items-center gap-2 rounded border border-line px-2 py-1.5">
+            <input type="checkbox" checked={chosen.has(g.vmid)} onChange={() => toggle(g.vmid)} />
+            <span className="font-mono">{g.vmid}</span>
+            <span className="font-semibold">{g.name ?? "?"}</span>
+            <span className="text-fg-muted">
+              {g.type} on {g.node}
+            </span>
+            <span className="ml-auto text-fg-muted">
+              {g.ignored ? "ignored · " : ""}
+              {g.status}
+              {g.last_backup ? ` · last ${new Date(g.last_backup * 1000).toLocaleDateString()}` : " · never"}
+            </span>
+          </label>
+        ))}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={() => void save()} disabled={busy || !res.data}>
+            Save
+          </Button>
+        </div>
+      </div>
     </Modal>
   );
 }

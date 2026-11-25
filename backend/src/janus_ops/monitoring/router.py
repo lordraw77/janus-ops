@@ -12,12 +12,19 @@ from sqlalchemy.exc import IntegrityError
 
 from janus_ops import scope as node_scope
 from janus_ops.admin.common import record
+from janus_ops.agents import exec as node_exec
+from janus_ops.ai import config_store, tools
+from janus_ops.ai.gateway import Gateway
+from janus_ops.ai.iac import sha256
+from janus_ops.ai.llm import AIError
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
 from janus_ops.inventory.services import has_requirement, missing_code
-from janus_ops.monitoring import probes
+from janus_ops.monitoring import check_ai, probes
 from janus_ops.monitoring.checks import PARAMS, THRESHOLDS, Kind
 from janus_ops.monitoring.notify import Message, SendError, channel_secret_id, deliver
+from janus_ops.proxmox.backup_audit import collect as collect_backups
+from janus_ops.proxmox.client import PveError
 from janus_ops.vault import VaultUnavailable
 
 router = APIRouter(tags=["monitoring"])
@@ -162,6 +169,114 @@ async def list_probes(_: Reader) -> list[dict[str, Any]]:
     ]
 
 
+class GenerateIn(BaseModel):
+    node_id: uuid.UUID
+    prompt: str = Field(min_length=1, max_length=check_ai.PROMPT_MAX)
+    spec: str | None = Field(default=None, max_length=200)
+
+
+async def _node_context(conn: Any, node_id: uuid.UUID) -> dict[str, str]:
+    """What the model may know about the node: inventory without secrets, what runs on it (from
+    the agent's facts), the metric names, the probe catalog and the checks it already has."""
+    sections = {"inventory": await tools.inventory(conn, str(node_id))}
+    facts = (
+        await conn.execute(text("SELECT facts FROM agent WHERE node_id = :id"), {"id": node_id})
+    ).scalar()
+    if facts:
+        sections["systemd_units_running"] = ", ".join(facts.get("units", [])[:120]) or "none"
+        sections["listening_ports"] = ", ".join(
+            f"{s.get('proto')}/{s.get('port')} ({s.get('process') or '?'})"
+            for s in facts.get("listening", [])[:60]
+        )
+        top = {p.get("name") for p in [*facts.get("top_cpu", []), *facts.get("top_mem", [])]}
+        sections["busiest_processes"] = ", ".join(sorted(n for n in top if n)) or "none"
+    names = await conn.execute(
+        text("SELECT DISTINCT name FROM metric_series WHERE node_id = :id ORDER BY name LIMIT 80"),
+        {"id": node_id},
+    )
+    sections["metric_names"] = ", ".join(r.name for r in names) or "none"
+    sections["probe_catalog"] = "; ".join(
+        f"{p.name} [{p.unit}] needs {p.requires or 'nothing'} args {list(p.args)}"
+        for p in probes.CATALOG.values()
+    )
+    rows = await conn.execute(
+        text("SELECT name, kind, params FROM service_check WHERE node_id = :id ORDER BY name"),
+        {"id": node_id},
+    )
+    sections["existing_checks"] = (
+        "\n".join(f"{r.name} ({r.kind}) {json.dumps(r.params)[:150]}" for r in rows) or "none"
+    )
+    return sections
+
+
+@router.post("/checks/generate")
+async def generate_checks(request: Request, body: GenerateIn, session: Manager) -> dict[str, Any]:
+    """Draft checks for one node from a description. Nothing is saved or run."""
+    if "ai.use" not in session.permissions:
+        raise HTTPException(403, "forbidden")
+    await node_scope.require_node(request, session, body.node_id)
+    app = request.app.state
+    async with app.engine.connect() as conn:
+        node = await _node_name(conn, body.node_id)
+        sections = await _node_context(conn, body.node_id)
+        exec_ok = await node_exec.policy_allows_exec(conn, str(body.node_id))
+        has_agent = await has_requirement(conn, body.node_id, "agent")
+        existing = {
+            r.name for r in await conn.execute(
+                text("SELECT name FROM service_check WHERE node_id = :id"), {"id": body.node_id}
+            )
+        }  # fmt: skip
+    messages = check_ai.build_messages(node, body.prompt.strip(), sections)
+    settings = await config_store.effective(app.engine, app.settings, app.vault)
+    gateway = Gateway(app.engine, app.vault, settings)
+    try:
+        answer = await gateway.text(body.spec or None, messages, source="check")
+        raw, notes = check_ai.read_answer(answer)
+    except AIError as exc:
+        raise HTTPException(502, exc.code) from None
+    drafts: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for item in raw:
+        label = str(item.get("name") or item.get("kind") or "?")[:60]
+        if item.get("kind") not in check_ai.KINDS:
+            warnings.append(f"Left out {label}: kind {item.get('kind')!r} is not offered here.")
+            continue
+        try:
+            check = CheckIn.model_validate(
+                {**item, "node_id": str(body.node_id), "source": "manual"}
+            )
+        except ValidationError as exc:
+            warnings.append(f"Left out {label}: {check_ai.describe_error(exc)}.")
+            continue
+        draft = check.model_dump(mode="json", exclude={"node_id", "source", "enabled"})
+        if check.name in existing:
+            warnings.append(f"{check.name}: a check with this name already exists on the node.")
+        if check.kind in ("service", "process", "logs") and not (has_agent and exec_ok):
+            warnings.append(
+                f"{check.name}: needs the agent with exec allowed on this node (Allow exec in "
+                "the agent install options), otherwise it reports UNKNOWN."
+            )
+        drafts.append(draft)
+    await record(
+        request,
+        session,
+        "monitoring.check_generate",
+        "node",
+        node,
+        {
+            "model": gateway.used[-1] if gateway.used else None,
+            "prompt_sha256": sha256(body.prompt),
+            "drafts": len(drafts),
+        },
+    )
+    return {
+        "checks": drafts,
+        "notes": notes,
+        "warnings": warnings,
+        "model": gateway.used[-1] if gateway.used else None,
+    }
+
+
 @router.post("/checks", status_code=201, response_model=CheckOut)
 async def create_check(request: Request, body: CheckIn, session: Manager) -> CheckOut:
     if body.node_id is None:
@@ -302,6 +417,76 @@ async def run_check_now(request: Request, check_id: uuid.UUID, session: Manager)
         )
     _wake(request)
     return {"status": "scheduled"}
+
+
+class BackupIgnoreIn(BaseModel):
+    vmids: list[Annotated[int, Field(ge=1, le=999_999_999)]] = Field(max_length=200)
+
+
+async def _backup_check(request: Request, session: Session, check_id: uuid.UUID) -> CheckOut:
+    check = await _get_check(request, session, check_id)
+    if check.kind != "backup":
+        raise HTTPException(422, "not_a_backup_check")
+    return check
+
+
+@router.get("/checks/{check_id}/backup-attention")
+async def backup_attention(
+    request: Request, check_id: uuid.UUID, session: Reader
+) -> dict[str, Any]:
+    """The guests the backup check is unhappy about right now (read from Proxmox), and the ones
+    it was told to ignore, so a person can say which are not backed up on purpose."""
+    check = await _backup_check(request, session, check_id)
+    ignored = {int(v) for v in check.params.get("ignore_vmids") or []}
+    max_age = check.params.get("max_age_h")
+    try:
+        audit = await collect_backups(
+            request.app.state.proxmox, str(check.node_id), max_age * 3600 if max_age else None
+        )
+    except PveError as exc:
+        raise HTTPException(502, f"proxmox_unavailable:{exc.code}") from None
+    guests = [
+        {
+            **{k: g[k] for k in ("vmid", "name", "type", "node", "status", "last_backup", "jobs")},
+            "ignored": int(g["vmid"]) in ignored,
+        }
+        for g in audit["guests"]
+        if g["status"] != "ok" or int(g["vmid"]) in ignored
+    ]
+    return {"guests": guests, "ignored": sorted(ignored)}
+
+
+@router.put("/checks/{check_id}/backup-ignore")
+async def backup_ignore(
+    request: Request, check_id: uuid.UUID, body: BackupIgnoreIn, session: Manager
+) -> dict[str, Any]:
+    """Set the guests this backup check leaves out ("I do not back these up"), and run it
+    again at once: the problem closes by itself when nothing else is wrong."""
+    check = await _backup_check(request, session, check_id)
+    vmids = sorted(set(body.vmids))
+    async with request.app.state.engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE service_check SET params = params ||"
+                " jsonb_build_object('ignore_vmids', CAST(:v AS jsonb)), updated_at = now()"
+                " WHERE id = :id"
+            ),
+            {"id": check_id, "v": json.dumps(vmids)},
+        )
+        await conn.execute(
+            text("UPDATE check_state SET last_checked_at = NULL WHERE check_id = :id"),
+            {"id": check_id},
+        )
+    await record(
+        request,
+        session,
+        "monitoring.backup_ignore",
+        "check",
+        f"{check.node_name}/{check.name}",
+        {"ignore_vmids": vmids, "before": check.params.get("ignore_vmids") or []},
+    )
+    _wake(request)
+    return {"ignore_vmids": vmids}
 
 
 class ResultOut(BaseModel):

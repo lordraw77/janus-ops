@@ -159,3 +159,21 @@ def test_proxmox_error_is_unknown() -> None:
     result = run(Down())
     assert result.state == "unknown"
     assert "host_unreachable" in result.output
+
+
+def test_ignored_guests_are_left_out_of_the_check() -> None:
+    access = FakePve([guest(101), guest(102), guest(103)], [pbs_snapshot(101, HOUR)])
+    assert run(access).state == "crit"  # 102 and 103 have no backup
+    result = run(access, ignore_vmids=[102, 103])
+    assert result.state == "ok"
+    assert "2 ignored" in result.output
+    partial = run(access, ignore_vmids=[102])  # 103 is still a problem
+    assert partial.state == "crit"
+    assert "103 missing" in partial.output and "102 missing" not in partial.output
+
+
+def test_ignore_list_is_validated() -> None:
+    assert BackupParams.model_validate({"ignore_vmids": [100, 101]}).ignore_vmids == [100, 101]
+    for bad in ([0], ["x"], list(range(1, 202))):
+        with pytest.raises(ValidationError):
+            BackupParams.model_validate({"ignore_vmids": bad})

@@ -1,7 +1,7 @@
 /** Alerting API types (backend: janus_ops.monitoring). */
 
 export type CheckState = "ok" | "warn" | "crit" | "unknown";
-export type CheckKind = "host" | "metric" | "systemd" | "service" | "port" | "tcp" | "http" | "backup" | "snmp" | "fritzbox" | "probe";
+export type CheckKind = "host" | "metric" | "systemd" | "service" | "port" | "tcp" | "http" | "backup" | "snmp" | "fritzbox" | "probe" | "process" | "logs";
 
 /** One entry of the probe catalog (GET /probes). */
 export type ProbeInfo = {
@@ -129,6 +129,8 @@ export const KIND_LABEL: Record<CheckKind, string> = {
   backup: "Backups (Proxmox cluster)",
   snmp: "SNMP OID (from server)",
   service: "Systemd service (via agent)",
+  process: "Process running (via agent)",
+  logs: "Log has no errors (via agent)",
   fritzbox: "FRITZ!Box (TR-064, from server)",
   probe: "Service probe (PostgreSQL, Apache, Proxmox)",
 };
@@ -167,9 +169,16 @@ export function describeCheck(c: CheckDef): string {
     case "http":
       return `GET ${p.url} → ${p.expect_status ?? "200-399"}${limits}`;
     case "backup":
-      return p.max_age_h ? `guests backed up within ${p.max_age_h} h` : "guests backed up on schedule";
+      return (
+        (p.max_age_h ? `guests backed up within ${p.max_age_h} h` : "guests backed up on schedule") +
+        (Array.isArray(p.ignore_vmids) && p.ignore_vmids.length ? ` (${p.ignore_vmids.length} ignored)` : "")
+      );
     case "service":
       return `${p.unit} is active`;
+    case "process":
+      return p.match === "cmdline" ? `process with "${p.pattern}" in its command line` : `process ${p.pattern} running`;
+    case "logs":
+      return p.source === "file" ? `no errors in the last lines of ${p.path}` : `no errors in the journal of ${p.unit}`;
     case "fritzbox":
       return `FRITZ!Box ${p.item ?? "item"}`;
     case "probe":

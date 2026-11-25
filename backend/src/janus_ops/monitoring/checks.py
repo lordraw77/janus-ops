@@ -9,6 +9,10 @@ Kinds:
 - http:    the server gets an expected HTTP status (no agent needed); latency thresholds
 - backup:  the Proxmox cluster behind the node has no guest without a recent backup (FR-53):
            failed or missing = CRIT, stale or not in any job = WARN. Needs the PVE access.
+- process: at least N processes with a given name (or command line) run on the node, from
+           `pgrep` through the agent (exec allowed on the node, Linux).
+- logs:    the journal of a systemd unit (last minutes) or the tail of a file under /var/log has
+           no lines with error words, through the agent (exec allowed on the node, Linux).
 - probe:   one named measurement of a service (PostgreSQL, Apache status, Proxmox), read by a
            connector in the server (monitoring/probes); the number is compared with the thresholds.
 - snmp:    one numeric OID read by SNMP GET from the server (FR-82, no agent needed); the
@@ -25,7 +29,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import text
@@ -51,6 +55,8 @@ Kind = Literal[
     "snmp",
     "fritzbox",
     "probe",
+    "process",
+    "logs",
 ]
 FACTS_STALE = timedelta(minutes=3)
 METRIC_STALE = timedelta(minutes=5)
@@ -98,6 +104,70 @@ class TcpParams(_Params):
     port: int = Field(ge=1, le=65535)
     host: str | None = Field(default=None, max_length=253)
     timeout_s: float = Field(default=5, gt=0, le=30)
+
+
+PROCESS_NAME = re.compile(
+    r"^[A-Za-z0-9._@+][A-Za-z0-9._@+-]{0,14}$"
+)  # the kernel keeps 15 characters
+PROCESS_CMDLINE = re.compile(r"^[A-Za-z0-9._/:@=+][A-Za-z0-9 ._/:@=+-]{0,99}$")
+LOG_UNIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@:._-]{0,255}$")
+LOG_PATH = re.compile(r"^/var/log/[A-Za-z0-9._@+/-]{1,200}$")
+LOG_WORDS = ["error", "fatal", "exception", "panic"]
+
+
+class ProcessParams(_Params):
+    match: Literal["name", "cmdline"] = "name"
+    # `name`: the exact process name (what `ps -e` shows, 15 characters at most);
+    # `cmdline`: text that appears in the command line
+    pattern: str = Field(max_length=100)
+    min_count: int = Field(default=1, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def _fits(self) -> "ProcessParams":
+        rule = PROCESS_NAME if self.match == "name" else PROCESS_CMDLINE
+        if not rule.match(self.pattern) or self.pattern != self.pattern.strip():
+            raise ValueError("invalid process pattern")
+        return self
+
+
+class LogsParams(_Params):
+    source: Literal["unit", "file"]
+    unit: str | None = Field(default=None, max_length=256)  # source unit: the journal of a unit
+    path: str | None = Field(default=None, max_length=256)  # source file: under /var/log
+    # a line counts when it contains one of these words, whatever the case
+    words: list[Annotated[str, Field(min_length=1, max_length=40)]] = Field(
+        default_factory=lambda: list(LOG_WORDS), min_length=1, max_length=8
+    )
+    since_min: int = Field(default=15, ge=1, le=1440)  # unit: how far back to read
+    last_lines: int = Field(default=200, ge=10, le=2000)  # file: how many lines from the end
+
+    @model_validator(mode="after")
+    def _fits(self) -> "LogsParams":
+        if self.source == "unit":
+            if not self.unit or not LOG_UNIT.match(self.unit) or self.path:
+                raise ValueError("a unit name is needed")
+        elif not self.path or ".." in self.path or not LOG_PATH.match(self.path) or self.unit:
+            raise ValueError("a path under /var/log is needed")
+        if any(not w.strip() or any(ord(c) < 32 for c in w) for w in self.words):
+            raise ValueError("invalid words")
+        return self
+
+
+def process_argv(p: ProcessParams) -> list[str]:
+    """`pgrep -c`: prints how many processes match. No shell: the pattern is one argument."""
+    if p.match == "name":
+        return ["pgrep", "-c", "-x", "--", p.pattern]
+    escaped = re.sub(r"([.\[\](){}*+?|^$\\])", r"\\\1", p.pattern)
+    return ["pgrep", "-c", "-f", "--", escaped]
+
+
+def logs_argv(p: LogsParams) -> list[str]:
+    if p.source == "unit":
+        return [
+            "journalctl", "-u", str(p.unit), "--since", f"{p.since_min} min ago",
+            "--no-pager", "-q", "-o", "cat",
+        ]  # fmt: skip
+    return ["tail", "-n", str(p.last_lines), "--", str(p.path)]
 
 
 class HttpParams(_Params):
@@ -148,6 +218,10 @@ class ProbeParams(_Params):
 class BackupParams(_Params):
     # longer than the schedule of the jobs when set; default: each guest's own job period
     max_age_h: int | None = Field(default=None, ge=1, le=24 * 90)
+    # guests that are not backed up on purpose: left out of the audit of this check
+    ignore_vmids: list[Annotated[int, Field(ge=1, le=999_999_999)]] = Field(
+        default_factory=list, max_length=200
+    )
 
 
 PARAMS: dict[str, type[_Params]] = {
@@ -162,9 +236,11 @@ PARAMS: dict[str, type[_Params]] = {
     "snmp": SnmpParams,
     "fritzbox": FritzParams,
     "probe": ProbeParams,
+    "process": ProcessParams,
+    "logs": LogsParams,
 }
 # kinds whose value can be compared with thresholds
-THRESHOLDS = {"metric", "tcp", "http", "snmp", "probe"}
+THRESHOLDS = {"metric", "tcp", "http", "snmp", "probe", "logs"}
 # kinds that need the agent
 NEEDS_AGENT = {"host", "metric", "systemd", "port"}
 
@@ -362,17 +438,28 @@ async def _backup(c: Check, proxmox: ProxmoxAccess | None) -> Result:
         )
     except PveError as exc:
         return Result("unknown", f"Proxmox: {exc.code}")
-    s = audit["summary"]
+    skipped = set(p.ignore_vmids)
+    kept = [g for g in audit["guests"] if int(g["vmid"]) not in skipped]
+    s: dict[str, int] = {}
+    for g in kept:
+        s[g["status"]] = s.get(g["status"], 0) + 1
+    note = (
+        f" ({len(audit['guests']) - len(kept)} ignored)"
+        if len(kept) != len(audit["guests"])
+        else ""
+    )
     bad = s.get("failed", 0) + s.get("missing", 0)
     attention = s.get("stale", 0) + s.get("unscheduled", 0)
     if not bad and not attention:
-        return Result("ok", f"{s.get('ok', 0)} guests with a recent backup", {"attention": 0})
-    rows = [g for g in audit["guests"] if g["status"] != "ok"]
+        return Result("ok", f"{s.get('ok', 0)} guests with a recent backup{note}", {"attention": 0})
+    rows = [g for g in kept if g["status"] != "ok"]
     shown = ", ".join(f"{g['vmid']} {g['status']}" for g in rows[:8])
     if len(rows) > 8:
         shown += f" (+{len(rows) - 8})"
     head = f"{bad} failed or missing, {attention} stale or unscheduled"
-    return Result("crit" if bad else "warn", f"{head}: {shown}", {"attention": bad + attention})
+    return Result(
+        "crit" if bad else "warn", f"{head}: {shown}{note}", {"attention": bad + attention}
+    )
 
 
 PROBE_ERRORS = probes.base.ERRORS
@@ -440,6 +527,42 @@ def grade_service(unit: str, output: str) -> Result:
     if state in ("activating", "reloading"):
         return Result("warn", f"{unit} is {state}")
     return Result("crit", f"{unit} is {state or 'not reported'}")
+
+
+def grade_process(c: Check, exit_code: int | None, output: str) -> Result:
+    """`pgrep -c` prints the number of matches (and exits 1 when it is 0)."""
+    p = ProcessParams.model_validate(c.params)
+    word = output.strip().splitlines()[0].strip() if output.strip() else ""
+    if not word.isdigit():
+        return Result("unknown", f"pgrep failed (exit {exit_code}): {word[:120] or 'no output'}")
+    n = int(word)
+    what = f"named {p.pattern}" if p.match == "name" else f"with {p.pattern!r} in the command line"
+    if n >= p.min_count:
+        return Result("ok", f"{n} process(es) {what}", {"processes": n})
+    return Result("crit", f"{n} process(es) {what}, expected {p.min_count}", {"processes": n})
+
+
+def grade_logs(c: Check, exit_code: int | None, output: str, truncated: bool = False) -> Result:
+    """Counts the lines with one of the words; no thresholds: any line is critical."""
+    p = LogsParams.model_validate(c.params)
+    if exit_code not in (0, None):
+        first = output.strip().splitlines()[0] if output.strip() else ""
+        return Result("unknown", f"cannot read the log (exit {exit_code}): {first[:160]}")
+    words = [w.casefold() for w in p.words]
+    hits = [line for line in output.splitlines() if any(w in line.casefold() for w in words)]
+    n = len(hits)
+    where = p.unit if p.source == "unit" else p.path
+    window = f"last {p.since_min} min" if p.source == "unit" else f"last {p.last_lines} lines"
+    note = " (output truncated)" if truncated else ""
+    state = grade(n, c.comparison, c.warn, c.crit) if c.comparison else ("crit" if n else "ok")
+    if not n:
+        return Result("ok", f"{where}: no error lines in the {window}{note}", {"matches": 0})
+    sample = hits[-1].strip()[:160]
+    return Result(
+        state,
+        f"{where}: {n} line(s) with errors in the {window}{note}. Last: {sample}",
+        {"matches": n},
+    )
 
 
 async def evaluate(

@@ -32,6 +32,8 @@ from janus_ops.monitoring import fritz, probes, snmp_poll
 from janus_ops.monitoring.checks import (
     Check,
     FritzParams,
+    LogsParams,
+    ProcessParams,
     Result,
     ServiceParams,
     SnmpParams,
@@ -39,7 +41,11 @@ from janus_ops.monitoring.checks import (
     evaluate,
     evaluate_probe,
     evaluate_snmp,
+    grade_logs,
+    grade_process,
     grade_service,
+    logs_argv,
+    process_argv,
 )
 from janus_ops.proxmox.access import ProxmoxAccess
 from janus_ops.vault import Vault
@@ -192,6 +198,8 @@ class Engine:
         online = self.hub.get(check.node_id) is not None
         if check.kind == "service":
             result = await self._service(check, online)
+        elif check.kind in ("process", "logs"):
+            result = await self._exec_check(check, online)
         elif check.kind in ("metric", "systemd", "port") and not online:
             # no fresh data while the agent is away: the host check reports it
             result = Result("unknown", "Agent not connected")
@@ -228,6 +236,27 @@ class Engine:
         except node_exec.ExecError as exc:
             return Result("crit", f"{unit}: the command did not run ({exc.code})")
         return grade_service(unit, result.output)
+
+    async def _exec_check(self, check: Check, online: bool) -> Result:
+        """`process` and `logs`: a fixed read-only command (pgrep, journalctl, tail) through the
+        agent; the server reads the answer. Needs the agent connected and exec allowed."""
+        if not online:
+            return Result("unknown", "Agent not connected")
+        async with self.db.connect() as conn:
+            allowed = await node_exec.policy_allows_exec(conn, check.node_id)
+        if not allowed:
+            return Result("unknown", "exec is not allowed on this node (agent policy allow_exec)")
+        if check.kind == "process":
+            argv = process_argv(ProcessParams.model_validate(check.params))
+        else:
+            argv = logs_argv(LogsParams.model_validate(check.params))
+        try:
+            res = await node_exec.run(self.hub, check.node_id, argv, 30)
+        except node_exec.ExecError as exc:
+            return Result("unknown", f"the command did not run ({exc.code})")
+        if check.kind == "process":
+            return grade_process(check, res.exit_code, res.output)
+        return grade_logs(check, res.exit_code, res.output, res.truncated)
 
     async def _fritzbox(self, check: Check) -> Result:
         """One item of the FRITZ!Box reading, polled over TR-064 from the server (no agent)."""

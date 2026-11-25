@@ -77,6 +77,8 @@ KIND_REQUIRES: dict[str, str] = {
     "snmp": "snmp",
     "backup": "proxmox",
     "fritzbox": "fritzbox",
+    "process": "agent",
+    "logs": "agent",
 }
 
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.12.2 — 2026-11-25
+
+**Added**
+- **Describe it, the model drafts it** (needs `ai.use`). *Stacks*: "New stack" and the Compose tab have a box where you
+  say what you want; the model writes the Compose file, or changes the one in the editor, and you review it (with a diff
+  and Undo) before saving. Literal passwords and tokens are replaced by placeholders before the file leaves the server
+  and put back in the answer; the model also sees the host ports already in use. *Checks*: "New check" has a
+  "Describe what to watch" box; the model drafts checks from the node's inventory, running units, ports and metric names,
+  each draft is validated like a hand-made check, and you load one into the form or create them all. The model is chosen
+  among the configured routes and models. Both are audited (model, hash of the request); nothing is saved or run for you.
+- **Check kinds `process` and `logs`**. `process`: at least N processes with a name (or text in the command line) run on the
+  node, from `pgrep`. `logs`: the journal of a systemd unit (last minutes) or the tail of a file under `/var/log` has no
+  line with the error words (default error, fatal, exception, panic); the last matching line is shown. Both run a fixed
+  read-only command through the agent (needs "Allow exec", Linux).
+- **Backup check: guests not backed up on purpose.** The check has a list of VM/CT ids it leaves out
+  (`ignore_vmids`). On an open backup problem the new "ignore guests" button lists what Proxmox complains about so you
+  tick the ones you do not back up; the check runs again at once and the problem closes by itself. Audited.
+
 ## 0.12.1 — 2026-11-25
 
 **Added**

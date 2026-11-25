@@ -1,10 +1,10 @@
 "use client";
 
-import { BellOff, Check as CheckIcon, CircleX, X } from "lucide-react";
+import { BellOff, Check as CheckIcon, CircleX, EyeOff, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { AckDialog, BulkProblemsDialog, CloseProblemDialog, Flags } from "@/components/Checks";
+import { AckDialog, BulkProblemsDialog, CloseProblemDialog, Flags, IgnoreBackupGuestsDialog } from "@/components/Checks";
 import { FilterBar } from "@/components/FilterBar";
 import { SortTh } from "@/components/SortTh";
 import { Alert, Button, Card, Field, Select, StateBadge, TextInput } from "@/components/ui";
@@ -34,6 +34,7 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
   const [version, setVersion] = useState(0);
   const [state, setState] = useState<{ data: Problem[] | null; error: string | null }>({ data: null, error: null });
   const [acking, setAcking] = useState<Problem | null>(null);
+  const [ignoring, setIgnoring] = useState<Problem | null>(null);
   const [closing, setClosing] = useState<Problem | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<"ack" | "close" | null>(null);
@@ -233,6 +234,13 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
                       <CheckIcon className="h-3 w-3" aria-hidden />
                     </Button>
                   )}{" "}
+                  {p.check_kind === "backup" && (
+                    <>
+                      <Button onClick={() => setIgnoring(p)} aria-label={`Ignore guests of ${p.check_name}`} title="Some guests are not backed up on purpose">
+                        <EyeOff className="h-3 w-3" aria-hidden />
+                      </Button>{" "}
+                    </>
+                  )}
                   <Button onClick={() => setClosing(p)} aria-label={`Close ${p.check_name}`} title="Close the problem">
                     <CircleX className="h-3 w-3" aria-hidden />
                   </Button>
@@ -263,6 +271,18 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
           onSaved={() => {
             setClosing(null);
             setVersion((v) => v + 1);
+          }}
+        />
+      )}
+      {ignoring && (
+        <IgnoreBackupGuestsDialog
+          label={`${ignoring.node_name} / ${ignoring.check_name}`}
+          checkId={ignoring.check_id}
+          onClose={() => setIgnoring(null)}
+          onSaved={() => {
+            setIgnoring(null);
+            setVersion((v) => v + 1);
+            setTimeout(() => setVersion((v) => v + 1), 3000); // the check runs again at once
           }}
         />
       )}
