@@ -622,6 +622,215 @@ async def stack_down(
     return {"results": results}
 
 
+HELPER_IMAGE = "docker:28-cli"
+STACKS_ROOT = "/var/lib/janus-ops/stacks"
+COMPOSE_MAX = 256 * 1024
+PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
+ABS_PATH = re.compile(r"^/[A-Za-z0-9._/@+ -]{1,500}$")
+COMPOSE_FILE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
+async def _helper(
+    opener: Any,
+    script: str,
+    mount: str,
+    *,
+    writable: bool,
+    env: dict[str, str] | None = None,
+    socket: bool = False,
+) -> tuple[int, str]:
+    """Run `sh -c script` in a throwaway docker-cli container that sees `mount` (the same path
+    as on the host, so relative paths in a Compose file resolve to real host paths).
+    Returns (exit code, output). The container is always removed."""
+    try:
+        await docker.call(opener, "GET", _image_path(HELPER_IMAGE) + "/json")
+    except DockerError as exc:
+        if exc.code != "not_found":
+            raise
+        await docker.call(opener, "POST", "/images/create", {"fromImage": HELPER_IMAGE})
+    binds = [f"{mount}:{mount}:{'rw' if writable else 'ro'}"]
+    if socket:
+        binds.append("/var/run/docker.sock:/var/run/docker.sock")
+    body = {
+        "Image": HELPER_IMAGE,
+        "Entrypoint": ["sh", "-c"],
+        "Cmd": [script],
+        "WorkingDir": mount,
+        "Env": [f"{k}={v}" for k, v in (env or {}).items()],
+        "Labels": {"janus.helper": "1"},
+        "HostConfig": {"Binds": binds, "NetworkMode": "none" if not socket else "bridge"},
+    }
+    created = await docker.call(opener, "POST", "/containers/create", None, body)
+    cid = created["Id"]
+    try:
+        await docker.call(opener, "POST", path("containers", cid, "start"))
+        waited = await docker.call(opener, "POST", path("containers", cid, "wait"))
+        demux = LogDemuxer(False)
+        parts: list[bytes] = []
+        async for chunk in docker.stream(
+            opener,
+            path("containers", cid, "logs"),
+            {"stdout": True, "stderr": True, "tail": 200},
+        ):
+            parts.extend(data for _, data in demux.feed(chunk))
+        return int((waited or {}).get("StatusCode", 1)), b"".join(parts).decode(errors="replace")
+    finally:
+        with contextlib.suppress(DockerError):
+            await docker.call(opener, "DELETE", path("containers", cid), {"force": True})
+
+
+async def _stack_files(opener: Any, project: str) -> tuple[str, list[str]]:
+    """Working directory and compose file paths of a project, from its container labels."""
+    rows = await docker.call(
+        opener,
+        "GET",
+        "/containers/json",
+        {"all": True, "filters": _label_filter(project)},
+    )
+    labels = (rows[0].get("Labels") or {}) if rows else {}
+    wd = labels.get("com.docker.compose.project.working_dir") or ""
+    files = [
+        f for f in (labels.get("com.docker.compose.project.config_files") or "").split(",") if f
+    ]
+    if not wd or not files:
+        raise DockerError("no_compose_file")
+    if not ABS_PATH.match(wd) or not all(ABS_PATH.match(f) for f in files):
+        raise DockerError("invalid_path")
+    return wd, files
+
+
+def _compose_script(files: list[str], action: str, project: str) -> str:
+    flags = " ".join(f"-f '{f}'" for f in files)
+    return f"docker compose -p '{project}' {flags} {action}"
+
+
+def _body_text(content: str) -> str:
+    if len(content.encode()) > COMPOSE_MAX:
+        raise HTTPException(413, "compose_too_large")
+    if "\x00" in content:
+        raise HTTPException(422, "invalid_compose")
+    return content
+
+
+@router.get("/{node_id}/stacks/{project}/compose")
+async def stack_compose(
+    request: Request, node_id: uuid.UUID, project: str, session: Reader
+) -> dict[str, Any]:
+    """The Compose file of a project, read from the host through a throwaway container."""
+    _, opener = await _opener(request, node_id, session)
+    name = _name(project)
+    try:
+        wd, files = await _stack_files(opener, name)
+        code, out = await _helper(
+            opener, 'cat "$COMPOSE_FILE"', wd, writable=False, env={"COMPOSE_FILE": files[0]}
+        )
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    if code != 0:
+        raise HTTPException(404, f"compose_unreadable:{out[:300]}")
+    return {"path": files[0], "files": files, "working_dir": wd, "content": out}
+
+
+@router.put("/{node_id}/stacks/{project}/compose")
+async def stack_compose_save(
+    request: Request,
+    node_id: uuid.UUID,
+    project: str,
+    session: Manager,
+    body: dict[str, Any],
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Validate and save the Compose file (the old one is kept as `<file>.bak`); with `apply`
+    also run `docker compose up -d` so the changes take effect."""
+    host, opener = await _opener(request, node_id, session)
+    name = _name(project)
+    content = _body_text(str(body.get("content", "")))
+    try:
+        wd, files = await _stack_files(opener, name)
+        target = files[0]
+        check = (
+            'printf %s "$CONTENT" > /tmp/new.yaml && '
+            + f"docker compose -p '{name}' --project-directory '{wd}' -f /tmp/new.yaml config -q"
+        )
+        code, out = await _helper(opener, check, wd, writable=False, env={"CONTENT": content})
+        if code != 0:
+            raise HTTPException(422, f"invalid_compose:{out.strip()[:500]}")
+        save = 'cp "$TARGET" "$TARGET.bak" 2>/dev/null; printf %s "$CONTENT" > "$TARGET"'
+        code, out = await _helper(
+            opener, save, wd, writable=True, env={"CONTENT": content, "TARGET": target}
+        )
+        if code != 0:
+            raise HTTPException(502, f"compose_write_failed:{out.strip()[:300]}")
+        output = ""
+        if apply:
+            code, output = await _helper(
+                opener,
+                _compose_script(files, "up -d --remove-orphans", name),
+                wd,
+                writable=True,
+                socket=True,
+            )
+            if code != 0:
+                raise HTTPException(502, f"compose_up_failed:{output.strip()[-500:]}")
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    await record(
+        request,
+        session,
+        "containers.stack_compose_saved",
+        "stack",
+        f"{host.node_name}/{name}",
+        {"applied": apply},
+    )
+    return {"saved": True, "applied": apply, "output": output}
+
+
+@router.post("/{node_id}/stacks", status_code=201)
+async def stack_create(
+    request: Request, node_id: uuid.UUID, session: Manager, body: dict[str, Any]
+) -> dict[str, Any]:
+    """Create a stack from a pasted Compose file: saved under `STACKS_ROOT/<name>` on the
+    host, then `docker compose up -d`."""
+    host, opener = await _opener(request, node_id, session)
+    name = str(body.get("name", ""))
+    if not PROJECT_NAME.match(name):
+        raise HTTPException(422, "invalid_name")
+    content = _body_text(str(body.get("content", "")))
+    if not content.strip():
+        raise HTTPException(422, "invalid_compose")
+    directory = f"{STACKS_ROOT}/{name}"
+    file = f"{directory}/compose.yaml"
+    try:
+        existing = await docker.call(
+            opener,
+            "GET",
+            "/containers/json",
+            {"all": True, "filters": _label_filter(name)},
+        )
+        if existing:
+            raise HTTPException(409, "stack_exists")
+        script = (
+            'mkdir -p "$DIR" && printf %s "$CONTENT" > "$FILE" && '
+            + _compose_script([file], "config -q", name)
+            + " && "
+            + _compose_script([file], "up -d", name)
+        )
+        code, out = await _helper(
+            opener,
+            script,
+            STACKS_ROOT,
+            writable=True,
+            env={"DIR": directory, "FILE": file, "CONTENT": content},
+            socket=True,
+        )
+    except DockerError as exc:
+        raise _http_error(exc) from None
+    if code != 0:
+        raise HTTPException(422, f"compose_failed:{out.strip()[-500:]}")
+    await record(request, session, "containers.stack_created", "stack", f"{host.node_name}/{name}")
+    return {"name": name, "path": file, "output": out}
+
+
 @router.post("/{node_id}/stacks/{project}/{action}")
 async def stack_action(
     request: Request,
@@ -756,25 +965,43 @@ async def image_prune(
 
 
 @router.get("/{node_id}/volumes")
-async def volumes(request: Request, node_id: uuid.UUID, session: Reader) -> list[dict[str, Any]]:
-    """Volumes with size and how many containers use them (from /system/df)."""
+async def volumes(
+    request: Request, node_id: uuid.UUID, session: Reader, sizes: bool = False
+) -> list[dict[str, Any]]:
+    """Volumes and how many containers use them. Sizes come from /system/df, which makes the
+    daemon walk every volume (seconds on a big host), so only when `sizes` is set."""
     _, opener = await _opener(request, node_id, session)
-    df = await _fail(docker.call(opener, "GET", "/system/df")) or {}
+    listing, rows = await _fail(
+        asyncio.gather(
+            docker.call(opener, "GET", "/volumes"),
+            docker.call(opener, "GET", "/containers/json", {"all": True}),
+        )
+    )
+    users: dict[str, int] = {}
+    for c in rows:
+        for m in c.get("Mounts") or []:
+            if m.get("Type") == "volume" and m.get("Name"):
+                users[m["Name"]] = users.get(m["Name"], 0) + 1
+    size_of: dict[str, int] = {}
+    if sizes:
+        df = await _fail(docker.call(opener, "GET", "/system/df")) or {}
+        for v in df.get("Volumes") or []:
+            size = (v.get("UsageData") or {}).get("Size", -1)
+            if size is not None and size >= 0:
+                size_of[v["Name"]] = size
     out = []
-    for v in df.get("Volumes") or []:
-        usage = v.get("UsageData") or {}
+    for v in (listing or {}).get("Volumes") or []:
         labels = v.get("Labels") or {}
-        size = usage.get("Size", -1)
-        refs = usage.get("RefCount", -1)
         out.append(
             {
                 "name": v["Name"],
                 "driver": v.get("Driver"),
                 "mountpoint": v.get("Mountpoint"),
                 "created": v.get("CreatedAt"),
-                "size": size if size is not None and size >= 0 else None,
-                "used_by": refs if refs is not None and refs >= 0 else None,
+                "size": size_of.get(v["Name"]),
+                "used_by": users.get(v["Name"], 0),
                 "project": labels.get(PROJECT),
+                "anonymous": "com.docker.volume.anonymous" in labels,
             }
         )
     return sorted(out, key=lambda v: v["name"])

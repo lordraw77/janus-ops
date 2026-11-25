@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.1 — 2026-11-25
+
+**Added**
+- **Stacks: view and edit the Compose file, and create new stacks.** The stack dialog has a Compose tab that reads the
+  file from the host, validates your change (`docker compose config`), saves it (the old one is kept as `.bak`) and,
+  on request, applies it (`docker compose up -d`). "New stack" pastes a Compose file, saves it under
+  `/var/lib/janus-ops/stacks/<name>` on the host and starts it. Works on agent and SSH hosts alike: a throwaway
+  `docker:28-cli` container (pulled on first use) mounts the stack directory; nothing is installed on the host.
+
+**Fixed**
+- Volumes and Disk looked empty while loading: `/system/df` takes seconds on a host with many volumes. Volumes now
+  load at once (sizes on request with "Show sizes"), and every section shows a loading message.
+
 ## 0.12.0 — 2026-11-24
 
 **Added**

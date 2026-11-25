@@ -31,6 +31,7 @@ CONTAINERS = [
         "Status": "Up 2 hours (healthy)",
         "Ports": [{"IP": "0.0.0.0", "PrivatePort": 80, "PublicPort": 8080, "Type": "tcp"}],
         "Labels": {"com.docker.compose.project": "shop", "com.docker.compose.service": "web"},
+        "Mounts": [{"Type": "volume", "Name": "shop_data"}],
         "NetworkSettings": {"Networks": {"shop_default": {"IPAddress": "172.18.0.2"}}},
     },
     {
@@ -95,7 +96,17 @@ def docker_reply(request: bytes, calls: list[str]) -> bytes:
             {"Id": "m" * 64, "Name": "bridge", "Driver": "bridge", "Scope": "local"},
         ]
     elif path == "/volumes":
-        body = {"Volumes": [{"Name": "shop_data", "Driver": "local"}]}
+        body = {
+            "Volumes": [
+                {
+                    "Name": "shop_data",
+                    "Driver": "local",
+                    "Mountpoint": "/v/shop_data",
+                    "Labels": {"com.docker.compose.project": "shop"},
+                },
+                {"Name": "old", "Driver": "local"},
+            ]
+        }
     elif path == "/system/df":
         body = {
             "Images": [{"Size": 100, "Containers": 1}, {"Size": 50, "Containers": 0}],
@@ -263,12 +274,14 @@ def test_containers_through_the_agent() -> None:
         detail = op.get(f"/api/v1/containers/{node}/stacks/shop").json()
         assert detail["services"] == ["web"] and detail["images"] == ["nginx:1.27"]
         assert [n["name"] for n in detail["networks"]] == ["shop_default", "bridge"]
-        assert detail["volumes"] == [{"name": "shop_data", "driver": "local"}]
+        assert [v["name"] for v in detail["volumes"]] == ["shop_data", "old"]
         vols = op.get(f"/api/v1/containers/{node}/volumes").json()
         assert [(v["name"], v["size"], v["used_by"], v["project"]) for v in vols] == [
             ("old", None, 0, None),
-            ("shop_data", 900, 1, "shop"),
+            ("shop_data", None, 1, "shop"),
         ]
+        sized = op.get(f"/api/v1/containers/{node}/volumes?sizes=true").json()
+        assert [v["size"] for v in sized] == [None, 900]
         nets = op.get(f"/api/v1/containers/{node}/networks").json()
         assert [(n["name"], n["builtin"], n["containers"]) for n in nets] == [
             ("bridge", True, []),
