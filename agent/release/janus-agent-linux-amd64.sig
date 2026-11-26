@@ -1,6 +1,6 @@
 {
-  "version": "0.12.2",
+  "version": "0.13.0",
   "arch": "amd64",
-  "sha256": "4ebbebc9a6c4f9cc1c17e6bd122627e8ed29bb723118749864315eeb0455978e",
-  "signature": "+JaB/pV2CMFkxZC6JsuVGFPCWMcVsusdgS+RhGtvR6NR/LG/XD3u7RX9dJE8P1UdMoO5qNPt7YKCSn6OpVUxDQ=="
+  "sha256": "6ff9f2cdd3b2aaa205ec372c6f53f60bcd995de052ff6c1dd4d3b23c71483e37",
+  "signature": "kP3u1tdrQ/o7PqmujmxiuGARsNMs8skdEWWkpdwIfp+sZSctBYp3Aw1C/lnrsqZpHxZRcJty0Q5doXDVFuDcBg=="
 }
