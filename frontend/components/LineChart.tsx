@@ -22,6 +22,8 @@ function niceMax(v: number): number {
 function timeLabel(t: number, spanMs: number): string {
   const d = new Date(t);
   if (spanMs > 2 * 86400_000) return d.toLocaleDateString([], { day: "2-digit", month: "2-digit" });
+  // minutes alone repeat on a 5 minute chart: show the seconds
+  if (spanMs <= 30 * 60_000) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 

@@ -2,13 +2,14 @@
 
 from typing import Any
 
-from janus_ops.monitoring.probes import httpd, postgres, proxmox, service
+from janus_ops.monitoring.probes import httpd, postgres, proxmox, service, snmp_trap
 from janus_ops.monitoring.probes.base import Ctx, Probe, ProbeError, Target
 
 CONNECTORS = {
     "postgres": postgres.snapshot,
     "httpd": httpd.snapshot,
     "proxmox": proxmox.snapshot,
+    "snmp_traps": snmp_trap.snapshot,
     "service_tcp": service.tcp_snapshot,
     "service_http": service.http_snapshot,
 }
@@ -18,6 +19,7 @@ CATALOG: dict[str, Probe] = {
         *postgres.PROBES,
         *httpd.PROBES,
         *proxmox.PROBES,
+        *snmp_trap.PROBES,
         *service.TCP_PROBES,
         *service.HTTP_PROBES,
     ]

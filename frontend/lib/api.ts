@@ -292,6 +292,8 @@ export function message(code: string, retryAfter?: number): string {
 export type Resource<T> = {
   data: T | null;
   error: string | null;
+  /** A request is in flight (first load, a changed path, or a reload()). The old data stays. */
+  loading: boolean;
   /** Fetch again (e.g. after a change). */
   reload: () => void;
 };
@@ -300,9 +302,10 @@ export type Resource<T> = {
  * A null path reads nothing (there is nothing to ask for yet): data and error stay null. */
 export function useResource<T>(path: string | null): Resource<T> {
   const [version, setVersion] = useState(0);
-  const [state, setState] = useState<{ data: T | null; error: string | null }>({
+  const [state, setState] = useState<{ data: T | null; error: string | null; key: string }>({
     data: null,
     error: null,
+    key: "",
   });
 
   useEffect(() => {
@@ -310,7 +313,8 @@ export function useResource<T>(path: string | null): Resource<T> {
     let cancelled = false;
     void api<T>(path).then((r) => {
       if (cancelled) return;
-      setState(r.ok ? { data: r.data, error: null } : { data: null, error: message(r.code) });
+      const key = `${path}#${version}`;
+      setState(r.ok ? { data: r.data, error: null, key } : { data: null, error: message(r.code), key });
     });
     return () => {
       cancelled = true;
@@ -318,5 +322,6 @@ export function useResource<T>(path: string | null): Resource<T> {
   }, [path, version]);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
-  return { ...(path === null ? { data: null, error: null } : state), reload };
+  const loading = path !== null && state.key !== `${path}#${version}`;
+  return { ...(path === null ? { data: null, error: null } : { data: state.data, error: state.error }), loading, reload };
 }

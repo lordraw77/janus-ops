@@ -40,7 +40,7 @@ export function HexagonHealth({ hosts, services }: { hosts: Dashboard["hosts"]; 
     { label: "No agent", value: hosts.unmonitored, color: "var(--color-offline)" },
   ];
   return (
-    <section className="rounded-lg border border-line bg-surface p-4">
+    <section className="rounded-lg border border-line bg-surface p-4 shadow-sm shadow-black/20">
       <div className="flex items-center gap-5">
       <div className="relative h-28 w-28 shrink-0">
         <svg viewBox="0 0 120 120" className="h-full w-full" aria-hidden>
@@ -127,7 +127,15 @@ export function NodeCard({ node }: { node: NodeCardData }) {
   const l = node.latest;
   const volumes = node.snmp.filter((r) => r.oid in VOLUME_LABEL);
   return (
-    <article className="space-y-2.5 rounded-lg border border-line bg-surface p-3">
+    <article
+      className={`space-y-2.5 rounded-lg border bg-surface p-3 shadow-sm shadow-black/20 transition-colors ${
+        node.state === "down"
+          ? "border-crit/50 hover:border-crit"
+          : node.state === "unreachable"
+            ? "border-warn/50 hover:border-warn"
+            : "border-line hover:border-line-strong"
+      }`}
+    >
       <header className="flex items-start justify-between gap-2">
         <Link href={`/nodes/?id=${node.node_id}`} className="flex min-w-0 items-center gap-2 hover:text-primary">
           <Server className="h-4 w-4 shrink-0 text-telemetry" aria-hidden />
@@ -210,7 +218,7 @@ const ATTENTION_SORT: Getters<Attention> = {
 export function AttentionTable({ items, handled }: { items: Attention[]; handled: number }) {
   const { sorted, sort, toggle } = useSortedRows(items, ATTENTION_SORT);
   return (
-    <section className="rounded-lg border border-line bg-surface p-4">
+    <section className="rounded-lg border border-line bg-surface p-4 shadow-sm shadow-black/20">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">Unhandled problems</h2>
         <Link href="/problems/" className="text-[11px] text-primary hover:text-primary-hover">
@@ -218,7 +226,7 @@ export function AttentionTable({ items, handled }: { items: Attention[]; handled
         </Link>
       </div>
       {items.length === 0 ? (
-        <p className="text-sm text-fg-muted">Nothing to report.</p>
+        <p className="flex items-center gap-2 text-sm text-ok"><span className="inline-block h-2 w-2 rounded-full bg-ok" aria-hidden />All clear — nothing needs attention.</p>
       ) : (
         <table className="w-full text-sm">
           <thead className="text-left text-[11px] uppercase text-fg-muted">
@@ -231,7 +239,7 @@ export function AttentionTable({ items, handled }: { items: Attention[]; handled
           </thead>
           <tbody className="divide-y divide-line">
             {sorted.map((a) => (
-              <tr key={a.problem_id} className="align-top">
+              <tr key={a.problem_id} className="align-top transition-colors hover:bg-elevated/50">
                 <td className="py-1.5 pr-2">
                   <StateBadge state={a.severity} />
                 </td>

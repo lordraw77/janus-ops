@@ -3,6 +3,7 @@
 import { type FormEvent, useState } from "react";
 
 import { Alert, Button, Field, Modal, Select, TextInput } from "@/components/ui";
+import { SnmpTemplateFromOids } from "@/components/SnmpTemplateFromOids";
 import { TemplateApplyDialog } from "@/components/TemplateApply";
 import { api, message, useResource } from "@/lib/api";
 
@@ -211,6 +212,8 @@ export function SnmpOidCatalog({ onClose, onChanged }: { onClose: () => void; on
   const [deviceType, setDeviceType] = useState<DeviceType>("nas");
   const [busy, setBusy] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [buildOpen, setBuildOpen] = useState(false);
 
   async function add(e: FormEvent) {
     e.preventDefault();
@@ -272,6 +275,9 @@ export function SnmpOidCatalog({ onClose, onChanged }: { onClose: () => void; on
           </Field>
           <div className="flex items-center gap-3">
             <span className="text-[11px] text-fg-muted">{(catalog.data ?? []).length} entries</span>
+            <Button type="button" disabled={ticked.size === 0} onClick={() => setBuildOpen(true)}>
+              New template from {ticked.size} selected
+            </Button>
             <Button type="button" onClick={() => setTemplatesOpen(true)}>
               Check templates
             </Button>
@@ -281,6 +287,15 @@ export function SnmpOidCatalog({ onClose, onChanged }: { onClose: () => void; on
           <table className="w-full text-left text-xs">
             <thead className="sticky top-0 bg-surface text-fg-muted">
               <tr>
+                <th className="px-2 py-1.5">
+                  <input
+                    type="checkbox"
+                    className={CHECKBOX}
+                    aria-label="Select all"
+                    checked={(catalog.data ?? []).length > 0 && ticked.size === (catalog.data ?? []).length}
+                    onChange={(e) => setTicked(e.target.checked ? new Set((catalog.data ?? []).map((x) => x.id)) : new Set())}
+                  />
+                </th>
                 <th className="px-2 py-1.5">Name</th>
                 <th className="px-2 py-1.5">OID</th>
                 <th className="px-2 py-1.5">Type</th>
@@ -292,6 +307,21 @@ export function SnmpOidCatalog({ onClose, onChanged }: { onClose: () => void; on
             <tbody>
               {(catalog.data ?? []).map((entry) => (
                 <tr key={entry.id} className="border-t border-line align-top">
+                  <td className="px-2 py-1.5">
+                    <input
+                      type="checkbox"
+                      className={CHECKBOX}
+                      aria-label={`Select ${entry.name}`}
+                      checked={ticked.has(entry.id)}
+                      onChange={() =>
+                        setTicked((prev) => {
+                          const next = new Set(prev);
+                          if (!next.delete(entry.id)) next.add(entry.id);
+                          return next;
+                        })
+                      }
+                    />
+                  </td>
                   <td className="px-2 py-1.5">
                     <div>{entry.name}</div>
                     {entry.description && <div className="text-[11px] text-fg-muted">{entry.description}</div>}
@@ -360,6 +390,12 @@ export function SnmpOidCatalog({ onClose, onChanged }: { onClose: () => void; on
           </div>
         </form>
       </div>
+      {buildOpen && (
+        <SnmpTemplateFromOids
+          entries={(catalog.data ?? []).filter((x) => ticked.has(x.id))}
+          onClose={() => setBuildOpen(false)}
+        />
+      )}
       {templatesOpen && (
         <TemplateApplyDialog
           requires="snmp"

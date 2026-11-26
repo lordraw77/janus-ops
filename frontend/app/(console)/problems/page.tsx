@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AckDialog, BulkProblemsDialog, CloseProblemDialog, Flags, IgnoreBackupGuestsDialog } from "@/components/Checks";
 import { FilterBar } from "@/components/FilterBar";
 import { SortTh } from "@/components/SortTh";
-import { Alert, Button, Card, Field, Select, StateBadge, TextInput } from "@/components/ui";
+import { Alert, Button, Card, Field, Loading, Select, StateBadge, TextInput } from "@/components/ui";
 import { ago, formatDuration } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -93,7 +93,7 @@ function ProblemsTable({ status }: { status: "open" | "closed" }) {
   }
 
   if (state.error) return <Alert>{state.error}</Alert>;
-  if (!state.data) return <p className="text-sm text-fg-muted">Loading…</p>;
+  if (!state.data) return <Loading />;
   if (state.data.length === 0)
     return <p className="text-sm text-fg-muted">{status === "open" ? "No open problems." : "No problems yet."}</p>;
   const th = "py-1 pr-3 font-medium";

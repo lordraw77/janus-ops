@@ -18,6 +18,11 @@ Ported from the AIFRED gateway (`/opt/AIFRED/aifred/providers.py`, `router.py`).
   the entry rests (30 s doubling to 10 min, 2 min for a timeout); a request the provider rejects → next entry
   without punishment (raised as is if every entry rejects it). Health survives restarts (`ai_health`) and is
   shared by every route using the same model. Every attempt is recorded (`ai_usage`).
+- **Adding and choosing** (web UI): *Add provider* is a gallery of the presets with their address already filled in; a
+  second provider of the same type gets the next free name (`groq`, `groq-2`), for two accounts. *Use this*, next to a
+  provider's tested models, puts that model first on the `default` route and keeps the previous entries behind it as
+  fallback. In *Settings → AI models & tools* two lists, *Main model* and *Second-opinion model*, do the same for the
+  `default` and `review` routes. The old URL/model/key form there is now "Single endpoint (without providers)".
 - **Compatibility**: until a route has a model, the single endpoint of Settings → AI models (and the
   `JANUS_AI_*` environment) answers exactly as before.
 - **Import**: `janus-ops ai-import-providers --env-file FILE` (or `-` for stdin, or the process

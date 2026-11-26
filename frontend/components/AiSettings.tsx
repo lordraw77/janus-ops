@@ -4,6 +4,7 @@ import { type FormEvent, useState } from "react";
 
 import { Alert, Button, Card, Field, Select, TextInput } from "@/components/ui";
 import type { AiConfig, AiSlot, McpConfig } from "@/lib/ai";
+import type { LlmChoices } from "@/lib/aiProviders";
 import { useLoad } from "@/lib/ansible";
 import { api, message } from "@/lib/api";
 
@@ -280,15 +281,122 @@ export function McpSettingsCard() {
   );
 }
 
+type ModelRef = { provider: string; model: string };
+
+/** One role (main or second opinion): a combo of the tested models, saved as the first choice of a route. */
+function RolePicker({
+  title,
+  help,
+  route,
+  choices,
+  reload,
+}: {
+  title: string;
+  help: string;
+  route: "default" | "review";
+  choices: LlmChoices;
+  reload: () => void;
+}) {
+  const entries = choices.routes.find((r) => r.name === route)?.entries ?? [];
+  const current = entries[0] ? `${entries[0].provider}/${entries[0].model}` : "";
+  const [picked, setPicked] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const value = picked ?? current;
+  // a model already in use that is no longer offered (provider disabled, model untested) is still shown
+  const options = choices.models.some((m) => m.spec === current) || !current ? choices.models : [{ provider: "", model: current, tools: null, spec: current }, ...choices.models];
+
+  async function save() {
+    const chosen = choices.models.find((m) => m.spec === value);
+    if (!chosen) return;
+    setBusy(true);
+    setNotice(null);
+    const rest = entries.filter((e) => !(e.provider === chosen.provider && e.model === chosen.model));
+    const next: ModelRef[] = [{ provider: chosen.provider, model: chosen.model }, ...rest];
+    const r = await api(`/ai/routes/${route}`, { method: "PUT", body: { entries: next.map((e) => ({ ...e, key_id: null })) } });
+    setBusy(false);
+    if (!r.ok) return setNotice({ kind: "error", text: message(r.code) });
+    setPicked(null);
+    setNotice({ kind: "ok", text: `${chosen.spec} is now the ${title.toLowerCase()}.${rest.length ? " The previous choices stay behind it as fallback." : ""}` });
+    reload();
+  }
+
+  return (
+    <div className="space-y-2 rounded border border-line p-3">
+      <div>
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="text-xs text-fg-muted">{help}</p>
+      </div>
+      <Select value={value} onChange={(e) => setPicked(e.target.value)} aria-label={title}>
+        <option value="">{choices.models.length ? "Choose a model…" : "No tested model yet"}</option>
+        {options.map((m) => (
+          <option key={m.spec} value={m.spec}>
+            {m.spec}
+            {m.tools === false ? " (no tools)" : ""}
+          </option>
+        ))}
+      </Select>
+      <div className="flex items-center gap-2">
+        <Button variant="primary" disabled={busy || !picked || picked === current} onClick={() => void save()}>
+          {busy ? "Saving…" : "Use as " + title.toLowerCase()}
+        </Button>
+        {entries.length > 1 && <span className="text-xs text-fg-muted">+{entries.length - 1} fallback</span>}
+      </div>
+      <NoticeBar notice={notice} />
+    </div>
+  );
+}
+
+function NoticeBar({ notice }: { notice: Notice }) {
+  return notice ? <Alert kind={notice.kind === "ok" ? "ok" : "error"}>{notice.text}</Alert> : null;
+}
+
+/** Main and second-opinion models, picked from what the providers offer. */
+function ModelPickers() {
+  const choices = useLoad<LlmChoices>("/ai/llm/choices");
+  return (
+    <Card title="Which models answer">
+      <div className="space-y-3 text-sm">
+        <p className="text-xs text-fg-secondary">
+          Pick from the models of your providers that passed Test (add providers and test models in <span className="font-semibold">AI providers</span>).
+          The main model serves the Copilot, Operate and the code generator; the second-opinion model is asked only when a person presses “Ask for a
+          second opinion”, and a different family compares better. What was chosen before stays behind the new choice as fallback.
+        </p>
+        {choices.error && <Alert>{choices.error}</Alert>}
+        {choices.data && (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <RolePicker
+              title="Main model"
+              help="Diagnoses, the Copilot, Operate and the code generator."
+              route="default"
+              choices={choices.data}
+              reload={choices.reload}
+            />
+            <RolePicker
+              title="Second-opinion model"
+              help="Compares with the main model's diagnosis."
+              route="review"
+              choices={choices.data}
+              reload={choices.reload}
+            />
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function AiSettingsCard() {
   const config = useLoad<AiConfig>("/ai/config");
   const [notices, setNotices] = useState<Record<string, Notice>>({});
   return (
-    <Card title="AI models and keys">
+    <>
+      <ModelPickers />
+      <Card title="Single endpoint (without providers)">
       <div className="space-y-3 text-sm">
         <p className="text-xs text-fg-secondary">
-          What is saved here wins over the JANUS_AI_* values in the server environment; empty fields fall back to them. The
-          “Test” button sends one tiny request with the saved settings.
+          Used only while the routes above have no model. What is saved here wins over the JANUS_AI_* values in the server
+          environment; empty fields fall back to them. The “Test” button sends one tiny request with the saved settings.
         </p>
         {config.error && <Alert>{config.error}</Alert>}
         <div className="grid gap-4 lg:grid-cols-2">
@@ -305,6 +413,7 @@ export function AiSettingsCard() {
           ))}
         </div>
       </div>
-    </Card>
+      </Card>
+    </>
   );
 }

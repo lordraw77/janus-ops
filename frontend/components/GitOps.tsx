@@ -2,7 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 
-import { Alert, Button, Field, Modal, Select, TextInput } from "@/components/ui";
+import { Alert, Button, Field, Loading, Modal, Select, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -152,7 +152,7 @@ function RunPanel({ runId }: { runId: string }) {
   }
 
   if (error) return <Alert>{error}</Alert>;
-  if (!detail) return <p className="text-xs text-fg-muted">Loading the run…</p>;
+  if (!detail) return <Loading label="Loading the run…" />;
   return (
     <div className="space-y-2 rounded border border-line p-3 text-xs">
       <div className="flex flex-wrap gap-3">

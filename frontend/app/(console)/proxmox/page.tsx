@@ -27,7 +27,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { FilterBar } from "@/components/FilterBar";
 import { SortTh } from "@/components/SortTh";
 import type { TerminalStatus } from "@/components/TerminalView";
-import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
+import { Alert, Button, Card, Field, Loading, Modal, Select, TextInput } from "@/components/ui";
 import { formatBytes, formatDuration } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -1105,7 +1105,7 @@ function ClusterView({ cluster }: { cluster: Cluster }) {
           </button>
         ))}
       </div>
-      {!data && !overview.error && <p className="text-sm text-fg-muted">Loading…</p>}
+      {!data && !overview.error && <Loading label="Loading cluster…" />}
       {data && tab === "guests" && (
         <GuestsTab data={data} onOpen={setGuest} onPower={(g, a) => void power(g, a)} onConsole={(g) => setConsole({ pvenode: g.node, kind: g.type, vmid: g.vmid, title: `${g.vmid} ${g.name ?? ""}` })} />
       )}

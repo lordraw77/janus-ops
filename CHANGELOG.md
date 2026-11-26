@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.13.0 — 2026-11-26
+
+**Added**
+- **Short-range telemetry charts.** The node page has 5 and 15 minute ranges (10 s buckets, one point per agent sample,
+  seconds on the time axis) that refresh every 10 s instead of 30.
+- **The Copilot knows where a VM runs.** When the node of a problem is a Proxmox VM or container (matched by node name
+  or agent hostname against the guest name, first label only), the diagnosis also gets a `hypervisor` block: cluster,
+  guest status, lock and HA state, guest load, and the host's status, CPU, memory and number of running guests. Read-only,
+  cached 30 s, and silent when nothing matches or the API is unreachable. Several guests with the same name are listed
+  as candidates.
+- **SNMP templates from the UI.** In the OID catalog, tick entries and "New template from N selected" creates a check
+  template (one SNMP check per OID, table columns as per-instance checks). In the template editor an SNMP check has a
+  catalog picker that fills the OID, the table flag and the name, so the parameters JSON is only needed for scale and
+  timeout.
+- **SNMP traps (v2c) and MIB files.** An optional receiver (`JANUS_SNMP_TRAP_PORT`,
+  `JANUS_SNMP_TRAP_COMMUNITIES`; ready-made `deploy/compose.snmp-traps.yaml` publishes it as 162/udp) stores the traps
+  of inventory nodes, matched by source address (no SNMP capability or credential needed). Anything else is dropped and counted,
+  each source is limited to 120 traps a minute, traps are kept 30 days. New **SNMP traps** page: the traps with
+  names, their values, the receiver status, and **MIB files** (upload `.mib`/`.txt`: only names and OIDs are kept, no
+  compiler and nothing executed; standard names such as linkDown and ifOperStatus are built in). New probe
+  `snmp_traps.recent` (checks of kind probe, any inventory node): the number of traps in the last N
+  minutes, optionally only under an OID, graded with the usual thresholds, so a trap becomes a problem that closes by
+  itself. Each trap in the list has an **Alert** button that creates that check already filled in (this trap type or
+  any trap, how long the problem lasts, warning or critical). The Copilot gets the node's traps of the last 24 hours
+  with a diagnosis. SNMPv3 traps are not accepted yet (migration `0043`).
+- **Export and import of the configuration** (Settings → Backup & restore; permissions `config.export` and
+  `config.import`, admin by default). One JSON file with the sections you tick: environments, credentials, hosts (tags,
+  capabilities, services, parent), groups, your check templates, checks, the SNMP OID catalog, notification channels and
+  rules, shared snippets, workflows, AI providers with models and routes. Ids are written as names (`@node:web01`), so
+  the file moves between installations. **Secrets** (credential values, notification secrets, AI keys) are included
+  only on request (needs `credentials.reveal`) and travel in one block encrypted with a passphrase of at least 12
+  characters (scrypt + AES-256-GCM); the passphrase is never stored. Import: choose the file, **Preview** (the whole
+  import runs and is rolled back, nothing reaches the vault), then apply; existing items are left alone or overwritten,
+  each item is imported on its own so one failure does not stop the rest. Credentials in the file also need
+  `credentials.manage`. Not included: users and roles, the audit log, metrics, agents, GitOps stacks, Ansible sources,
+  downtimes, discovery. Checked on the real data: export, wipe in a transaction, import, export again gave identical
+  sections for all eleven, and the rollback left the database as it was.
+- **Show a credential's secret, with its own permission.** New permission `credentials.reveal` (the admin role has it by
+  default; give it to other roles in Users & roles). On Credentials a **Show** button opens the secret in clear
+  (password, token, key with its passphrase) for 30 seconds, with a Copy button. Every view is written to the audit
+  log (`credentials.revealed`, who and which credential, never the value) before the secret is returned, and the answer
+  is never cached. Without the permission there is no button and the endpoint answers 403.
+
+**Changed**
+- **AI providers: add and choose in one click.** "Add provider" is now a gallery of the supported providers, each with its
+  address already filled in (a second provider of the same kind gets the next free name, for two accounts). Every
+  provider has a **Use this** button next to a list of its tested models: that model becomes the first choice of the
+  default route and what answered before stays behind it as fallback; the provider in use is marked "in use" and the
+  others "fallback".
+- **Settings → AI models & tools: pick the main and the second-opinion model from a list.** Two combos offer the tested
+  models of your enabled providers; "Use as main model" / "Use as second-opinion model" make the choice the first entry of
+  the `default` / `review` route and keep the previous entries as fallback. The old URL/model/key form is now "Single
+  endpoint (without providers)", used only while the routes have no model.
+- **Spinners where something loads.** Changing the range of a telemetry chart dims the old charts and shows a spinner
+  with the range being loaded (a 30 or 90 day chart can take seconds); every "Loading…" placeholder has a spinner;
+  the Refresh button of the Docker lists spins while it reloads; Containers → All hosts shows a spinner until the hosts
+  have answered.
+- **UI polish.** Muted text raised to AA contrast, one visible keyboard focus ring everywhere, fixed full-height
+  sidebar with an accent on the active page, modals that take focus (Escape works), lock the page scroll and restore
+  focus, red/amber borders on down/unreachable node cards, loading skeleton and "all clear" state on the dashboard.
+
 ## 0.12.2 — 2026-11-25
 
 **Added**

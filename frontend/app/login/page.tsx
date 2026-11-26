@@ -9,9 +9,9 @@ import { api, message } from "@/lib/api";
 import { fetchSession } from "@/lib/auth";
 
 const INPUT =
-  "w-full rounded border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-primary";
+  "w-full rounded-md border border-line bg-canvas px-3 py-2 text-sm transition-colors hover:border-line-strong focus:border-primary";
 const SUBMIT =
-  "flex w-full items-center justify-center gap-2 rounded bg-primary px-3 py-2 text-sm font-semibold text-canvas hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50";
+  "flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-canvas transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -69,7 +69,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-6">
+    <div className="bg-glow flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-6 shadow-2xl">
         <div className="mb-6 flex flex-col items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element -- static export, no optimizer */}

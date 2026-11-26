@@ -1,11 +1,11 @@
 "use client";
 
-import { KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
+import { Copy, Eye, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { FilterBar } from "@/components/FilterBar";
 import { SortTh } from "@/components/SortTh";
-import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
+import { Alert, Button, Card, Field, Loading, Modal, Select, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { RequirePermission, useAuth } from "@/lib/auth";
 import { type Credential, KIND_LABELS } from "@/lib/inventory";
@@ -32,7 +32,94 @@ const SECRET_LABEL: Record<string, string> = {
   snmp_v3: "Authentication passphrase (8+ characters)",
 };
 
-type Dialog = { kind: "create" } | { kind: "secret"; cred: Credential } | { kind: "edit"; cred: Credential } | null;
+type Dialog =
+  | { kind: "create" }
+  | { kind: "secret"; cred: Credential }
+  | { kind: "edit"; cred: Credential }
+  | { kind: "reveal"; cred: Credential }
+  | null;
+
+const REVEAL_SECONDS = 30;
+
+/** The secret in clear for a few seconds. Opening it is audited; it is cleared when the dialog closes. */
+function RevealDialog({ cred, onClose }: { cred: Credential; onClose: () => void }) {
+  const [value, setValue] = useState<{ username: string | null; secret: string; passphrase: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [left, setLeft] = useState(REVEAL_SECONDS);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api<{ username: string | null; secret: string; passphrase: string | null }>(`/credentials/${cred.id}/reveal`, { method: "POST" }).then((r) => {
+      if (cancelled) return;
+      if (r.ok) setValue(r.data);
+      else setError(message(r.code));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cred.id]);
+
+  // it hides itself: a secret left on a screen is the risk
+  useEffect(() => {
+    if (!value) return;
+    const timer = setInterval(() => setLeft((n) => n - 1), 1000);
+    return () => clearInterval(timer);
+  }, [value]);
+  useEffect(() => {
+    if (left <= 0) onClose();
+  }, [left, onClose]);
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked: the value is on screen */
+    }
+  }
+
+  const multiline = (value?.secret ?? "").includes("\n");
+  return (
+    <Modal title={`Secret of ${cred.name}`} onClose={onClose}>
+      <div className="space-y-3">
+        {error && <Alert>{error}</Alert>}
+        {!value && !error && <Loading label="Reading the secret…" />}
+        {value && (
+          <>
+            {value.username && (
+              <Field label="User">
+                <TextInput readOnly value={value.username} className="font-mono" />
+              </Field>
+            )}
+            <Field label={KIND_LABELS[cred.kind] ?? "Secret"}>
+              {multiline ? (
+                <pre className="max-h-56 overflow-auto rounded-md border border-line bg-canvas p-2 font-mono text-xs">{value.secret}</pre>
+              ) : (
+                <TextInput readOnly value={value.secret} className="font-mono" onFocus={(e) => e.currentTarget.select()} />
+              )}
+            </Field>
+            {value.passphrase && (
+              <Field label="Passphrase">
+                <TextInput readOnly value={value.passphrase} className="font-mono" onFocus={(e) => e.currentTarget.select()} />
+              </Field>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-fg-muted">Hides in {left}s. This view was recorded in the audit log.</span>
+              <div className="flex gap-2">
+                <Button onClick={() => void copy(value.secret)}>
+                  <Copy className="h-3 w-3" aria-hidden /> {copied ? "Copied" : "Copy"}
+                </Button>
+                <Button onClick={onClose}>Close</Button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
 
 function SecretFields({
   kind,
@@ -228,6 +315,7 @@ const CRED_SORT: Getters<Credential> = {
 function CredentialsList() {
   const { can } = useAuth();
   const manage = can("credentials.manage");
+  const reveal = can("credentials.reveal");
   const { data, error, reload } = useResource<Credential[]>("/credentials");
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("");
@@ -345,8 +433,15 @@ function CredentialsList() {
                     </td>
                     <td className="py-2 pr-3 text-fg-secondary">{new Date(c.updated_at).toLocaleString()}</td>
                     <td className="py-2 text-right">
-                      {manage && (
+                      {(manage || reveal) && (
                         <div className="flex justify-end gap-1">
+                          {reveal && (
+                            <Button onClick={() => setDialog({ kind: "reveal", cred: c })} title="Show the secret (audited)" aria-label={`Show the secret of ${c.name}`}>
+                              <Eye className="h-3 w-3" aria-hidden /> Show
+                            </Button>
+                          )}
+                          {manage && (
+                            <>
                           <Button onClick={() => setDialog({ kind: "secret", cred: c })} title="Replace secret">
                             <RefreshCw className="h-3 w-3" aria-hidden /> Secret
                           </Button>
@@ -356,6 +451,8 @@ function CredentialsList() {
                           <Button variant="danger" onClick={() => void remove(c)} aria-label={`Delete ${c.name}`}>
                             <Trash2 className="h-3 w-3" aria-hidden />
                           </Button>
+                            </>
+                          )}
                         </div>
                       )}
                     </td>
@@ -368,6 +465,7 @@ function CredentialsList() {
       </Card>
       {dialog?.kind === "create" && <CreateDialog onClose={() => setDialog(null)} onDone={done} />}
       {dialog?.kind === "secret" && <ReplaceSecretDialog cred={dialog.cred} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === "reveal" && <RevealDialog cred={dialog.cred} onClose={() => setDialog(null)} />}
       {dialog?.kind === "edit" && <EditDialog cred={dialog.cred} onClose={() => setDialog(null)} onDone={done} />}
     </div>
   );

@@ -62,13 +62,48 @@ function ModelRow({ provider, m, onChanged, setNotice }: { provider: AiProvider;
   );
 }
 
-function ProviderItem({ p, onChanged }: { p: AiProvider; onChanged: () => void }) {
+/** Where a provider stands on the default route: its first choice, a fallback, or not on it. */
+function standing(p: AiProvider, entries: AiRoute["entries"]): { role: "first" | "fallback" | null; model: string | null } {
+  const i = entries.findIndex((e) => e.provider === p.slug);
+  if (i < 0) return { role: null, model: null };
+  return { role: i === 0 ? "first" : "fallback", model: entries[i].model };
+}
+
+function ProviderItem({
+  p,
+  onChanged,
+  route,
+  onRouteChanged,
+}: {
+  p: AiProvider;
+  onChanged: () => void;
+  route: AiRoute | null;
+  onRouteChanged: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [busy, setBusy] = useState(false);
   const [newKey, setNewKey] = useState("");
   const [newModel, setNewModel] = useState("");
   const [filter, setFilter] = useState("");
+  const [pick, setPick] = useState("");
+  const entries = route?.entries ?? [];
+  const here = standing(p, entries);
+  const usable = p.models.filter((m) => m.test_ok && m.kind === "chat" && m.available);
+
+  /** Make this model the first choice of the default route; what was there stays behind it as fallback. */
+  async function makeDefault() {
+    if (!pick) return;
+    setBusy(true);
+    setNotice(null);
+    const rest = entries.filter((e) => !(e.provider === p.slug && e.model === pick));
+    const next = [{ provider: p.slug, model: pick, key_id: null }, ...rest];
+    const r = await api("/ai/routes/default", { method: "PUT", body: { entries: next } });
+    setBusy(false);
+    if (!r.ok) return setNotice({ kind: "error", text: message(r.code) });
+    setNotice({ kind: "ok", text: `${p.slug} / ${pick} now answers first. The previous choices are its fallback.` });
+    onRouteChanged();
+  }
 
   async function act(path: string, method: string, ok: string, body?: unknown) {
     setBusy(true);
@@ -96,6 +131,12 @@ function ProviderItem({ p, onChanged }: { p: AiProvider; onChanged: () => void }
           {open ? "▾" : "▸"} {p.slug}
         </button>
         <span className="text-xs text-fg-muted">{p.type}</span>
+        {here.role === "first" && (
+          <span className="rounded bg-primary/20 px-1.5 text-xs font-semibold text-primary" title={here.model ?? ""}>
+            in use · {here.model}
+          </span>
+        )}
+        {here.role === "fallback" && <span className="rounded bg-elevated px-1.5 text-xs text-fg-secondary">fallback · {here.model}</span>}
         {!p.enabled && <span className="rounded bg-warn/20 px-1 text-xs text-warn">disabled</span>}
         {p.tls_unverified && <span className="rounded bg-crit/20 px-1 text-xs text-crit">TLS not verified</span>}
         <span className="text-xs text-fg-muted">
@@ -123,6 +164,28 @@ function ProviderItem({ p, onChanged }: { p: AiProvider; onChanged: () => void }
         </span>
       </div>
       <p className="mt-1 break-all text-xs text-fg-muted">{p.base_url}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {usable.length > 0 ? (
+          <>
+            <Select className="max-w-72" value={pick} onChange={(e) => setPick(e.target.value)} aria-label={`Model of ${p.slug} to use`}>
+              <option value="">Choose a model to use…</option>
+              {usable.map((m) => (
+                <option key={m.model_id} value={m.model_id}>
+                  {m.model_id}
+                </option>
+              ))}
+            </Select>
+            <Button variant="primary" disabled={busy || !pick || !p.enabled || (here.role === "first" && here.model === pick)} onClick={() => void makeDefault()}>
+              Use this
+            </Button>
+            {!p.enabled && <span className="text-xs text-warn">enable the provider first</span>}
+          </>
+        ) : (
+          <span className="text-xs text-fg-muted">
+            To use it: open it, press “Refresh models”, then Test a model. Only a tested model can be used.
+          </span>
+        )}
+      </div>
       <div className="mt-2">
         <NoticeBar notice={notice} />
       </div>
@@ -199,6 +262,13 @@ function ProviderItem({ p, onChanged }: { p: AiProvider; onChanged: () => void }
   );
 }
 
+/** The first free name for a provider of this type: `groq`, then `groq-2`, `groq-3`… */
+function freeSlug(type: string, existing: string[]): string {
+  if (!existing.includes(type)) return type;
+  for (let n = 2; n < 100; n += 1) if (!existing.includes(`${type}-${n}`)) return `${type}-${n}`;
+  return "";
+}
+
 function AddProvider({ presets, existing, onAdded }: { presets: Preset[]; existing: string[]; onAdded: () => void }) {
   const [type, setType] = useState("");
   const [slug, setSlug] = useState("");
@@ -212,7 +282,7 @@ function AddProvider({ presets, existing, onAdded }: { presets: Preset[]; existi
   function pick(t: string) {
     setType(t);
     const p = presets.find((x) => x.type === t);
-    setSlug(p && !existing.includes(p.type) ? p.type : "");
+    setSlug(p ? freeSlug(p.type, existing) : "");
     setBaseUrl(p?.base_url.includes("{account_id}") ? "" : (p?.base_url ?? ""));
     setNotice(null);
   }
@@ -238,19 +308,36 @@ function AddProvider({ presets, existing, onAdded }: { presets: Preset[]; existi
   return (
     <div className="space-y-2 rounded border border-line p-3">
       <p className="text-xs font-medium">Add a provider</p>
+      <p className="text-xs text-fg-muted">
+        Pick one: its address is already filled in. You can add as many as you like, even two of the same kind (two accounts), and then choose
+        which one answers.
+      </p>
       <NoticeBar notice={notice} />
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" role="listbox" aria-label="Provider">
+        {presets.map((p) => (
+          <button
+            key={p.type}
+            type="button"
+            role="option"
+            aria-selected={type === p.type}
+            onClick={() => pick(p.type)}
+            className={`rounded-md border p-2.5 text-left transition-colors ${
+              type === p.type ? "border-primary bg-primary/10" : "border-line bg-canvas/40 hover:border-line-strong hover:bg-elevated"
+            }`}
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold">
+              {p.label}
+              {p.paid && <span className="rounded bg-warn/20 px-1 text-[10px] font-normal text-warn">billed</span>}
+              {!p.key && <span className="rounded bg-elevated px-1 text-[10px] font-normal text-fg-muted">no key</span>}
+              {existing.some((s) => s === p.type || s.startsWith(`${p.type}-`)) && (
+                <span className="ml-auto text-[10px] font-normal text-fg-muted">added</span>
+              )}
+            </span>
+            <span className="mt-0.5 block truncate font-mono text-[11px] text-fg-muted">{p.base_url || "your own address"}</span>
+          </button>
+        ))}
+      </div>
       <div className="grid gap-2 md:grid-cols-2">
-        <Field label="Provider">
-          <Select value={type} onChange={(e) => pick(e.target.value)}>
-            <option value="">Choose…</option>
-            {presets.map((p) => (
-              <option key={p.type} value={p.type}>
-                {p.label}
-                {p.paid ? " (billed)" : ""}
-              </option>
-            ))}
-          </Select>
-        </Field>
         {preset && (
           <>
             <Field label="Name" hint="Lowercase letters, digits, - and _. Used as provider/model in routes.">
@@ -284,6 +371,8 @@ function AddProvider({ presets, existing, onAdded }: { presets: Preset[]; existi
 export function AiProvidersCard() {
   const providers = useLoad<AiProvider[]>("/ai/providers");
   const presets = useLoad<Preset[]>("/ai/providers/presets");
+  const routes = useLoad<AiRoute[]>("/ai/routes");
+  const defaultRoute = (routes.data ?? []).find((r) => r.name === "default") ?? null;
   const [showAdd, setShowAdd] = useState(false);
   return (
     <Card
@@ -308,7 +397,7 @@ export function AiProvidersCard() {
         )}
         <ul className="space-y-2">
           {(providers.data ?? []).map((p) => (
-            <ProviderItem key={p.id} p={p} onChanged={providers.reload} />
+            <ProviderItem key={p.id} p={p} onChanged={providers.reload} route={defaultRoute} onRouteChanged={routes.reload} />
           ))}
           {providers.data && providers.data.length === 0 && <li className="text-fg-muted">No provider yet.</li>}
         </ul>

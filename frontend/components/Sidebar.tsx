@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Bell,
   Bot,
+  RadioTower,
   Boxes,
   GitBranch,
   GitFork,
@@ -52,6 +53,7 @@ export const NAV: NavItem[] = [
   { label: "Credentials", icon: KeyRound, target: { href: "/credentials/", permission: "inventory.read" } },
   { label: "Templates", icon: LayoutTemplate, keywords: "checks monitoring postgres proxmox apache zabbix", target: { href: "/templates/", permission: "inventory.read" } },
   { label: "Problems", icon: TriangleAlert, target: { href: "/problems/", permission: "inventory.read" } },
+  { label: "SNMP traps", icon: RadioTower, keywords: "mib notifications snmp", target: { href: "/traps/", permission: "inventory.read" } },
   { label: "Containers", icon: Container, target: { href: "/containers/", permission: "inventory.read" } },
   { label: "Proxmox VE", icon: Boxes, target: { href: "/proxmox/", permission: "inventory.read" } },
   { label: "Ansible", icon: Workflow, keywords: "playbook", target: { href: "/ansible/", permission: "ansible.read" } },
@@ -75,7 +77,7 @@ export const NAV: NavItem[] = [
 /** The menu by area. Items are found by label in NAV, which also feeds the Ctrl+K palette. */
 const GROUPS: { id: string; label: string; items: string[] }[] = [
   { id: "infra", label: "Infrastructure", items: ["Inventory", "Credentials", "Templates", "Containers", "Proxmox VE"] },
-  { id: "monitoring", label: "Monitoring", items: ["Problems", "Notifications"] },
+  { id: "monitoring", label: "Monitoring", items: ["Problems", "SNMP traps", "Notifications"] },
   { id: "automation", label: "Automation", items: ["Ansible", "Workflows", "GitOps", "SSH Bastion"] },
   { id: "ai", label: "AI", items: ["Janus AI Copilot", "Operate"] },
   { id: "admin", label: "Administration", items: ["Users & roles", "Audit log", "Archive", "Settings"] },
@@ -142,8 +144,10 @@ export function Sidebar() {
         key={item.label}
         href={item.target.href}
         aria-current={active ? "page" : undefined}
-        className={`flex items-center gap-2 rounded border px-2.5 py-1.5 ${
-          active ? "border-line bg-elevated text-primary" : "border-transparent text-fg-nav hover:bg-elevated hover:text-fg"
+        className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-colors ${
+          active
+            ? "border-line bg-elevated text-primary shadow-[inset_2px_0_0_var(--color-primary)]"
+            : `border-transparent hover:bg-elevated hover:text-fg ${item.ai ? "text-ai/80 hover:text-ai" : "text-fg-nav"}`
         }`}
       >
         <item.icon className="h-3.5 w-3.5" aria-hidden />
@@ -157,7 +161,7 @@ export function Sidebar() {
   const top = NAV.filter((n) => !grouped.has(n.label) && allowed(n));
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col justify-between overflow-y-auto border-r border-line bg-surface p-3">
+    <aside className="sticky top-0 flex h-screen w-56 shrink-0 flex-col justify-between self-start overflow-y-auto border-r border-line bg-surface p-3">
       <div>
         <div className="mb-4 flex items-center gap-2.5 border-b border-line px-2 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element -- static export, no optimizer */}
@@ -173,12 +177,12 @@ export function Sidebar() {
         <button
           type="button"
           onClick={() => window.dispatchEvent(new Event(OPEN_PALETTE))}
-          className="mb-3 flex w-full items-center justify-between rounded border border-line px-2.5 py-1.5 text-xs text-fg-muted hover:text-fg"
+          className="mb-3 flex w-full items-center justify-between rounded-md border border-line bg-canvas/40 px-2.5 py-1.5 text-xs text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
         >
           <span className="flex items-center gap-2">
             <Search className="h-3.5 w-3.5" aria-hidden /> Search…
           </span>
-          <kbd className="font-mono text-[10px]">Ctrl K</kbd>
+          <kbd className="rounded border border-line bg-elevated px-1 font-mono text-[10px]">Ctrl K</kbd>
         </button>
 
         <nav aria-label="Main" className="space-y-1 text-xs">

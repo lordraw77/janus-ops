@@ -1,4 +1,5 @@
-"""/api/v1/credentials: vault entries. Secrets are write-only: no endpoint returns them."""
+"""/api/v1/credentials: vault entries. Secrets are write-only, with one exception: `reveal` shows a
+secret to a user with `credentials.reveal`, writes the audit event first and is never cached."""
 
 import asyncio
 import json
@@ -16,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from janus_ops.admin.common import record
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
+from janus_ops.crypto import DecryptionError
 from janus_ops.vault import InvalidSecret, Sealed, Vault, VaultUnavailable, inspect_ssh_key
 
 log = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ router = APIRouter(prefix="/credentials", tags=["credentials"])
 
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 Manager = Annotated[Session, Depends(require_permission("credentials.manage"))]
+Revealer = Annotated[Session, Depends(require_permission("credentials.reveal"))]
 
 Kind = Literal[
     "ssh_key",
@@ -237,6 +240,48 @@ async def _kind(request: Request, credential_id: uuid.UUID) -> str:
     if kind is None:
         raise HTTPException(404, "not_found")
     return str(kind)
+
+
+@router.post("/{credential_id}/reveal", responses={404: {}, 409: {}, 503: {}})
+async def reveal_secret(
+    credential_id: uuid.UUID, request: Request, response: Response, session: Revealer
+) -> dict[str, Any]:
+    """The secret in clear. The audit event is written BEFORE the answer leaves: if it cannot be
+    written, nothing is shown."""
+    async with request.app.state.engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT name, kind, username, ciphertext, nonce, dek_wrapped"
+                    " FROM credential WHERE id = :id"
+                ),
+                {"id": credential_id},
+            )
+        ).first()
+    if row is None:
+        raise HTTPException(404, "not_found")
+    try:
+        secret = _vault(request).reveal(
+            str(credential_id), row.ciphertext, row.nonce, row.dek_wrapped
+        )
+    except VaultUnavailable:
+        raise HTTPException(503, "vault_unavailable") from None
+    except DecryptionError:
+        raise HTTPException(409, "credential_unreadable") from None
+    await record(
+        request,
+        session,
+        "credentials.revealed",
+        "credential",
+        str(credential_id),
+        {"name": row.name, "kind": row.kind},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "username": row.username,
+        "secret": str(secret.get("secret", "")),
+        "passphrase": str(secret["passphrase"]) if secret.get("passphrase") else None,
+    }
 
 
 @router.put("/{credential_id}/secret", status_code=204, responses={404: {}, 422: {}, 503: {}})

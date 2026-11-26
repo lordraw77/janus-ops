@@ -84,7 +84,20 @@ function ControlPlane() {
 function Noc() {
   const result = usePoll(loadDashboard);
   const { names } = useEnvironments();
-  if (result === null) return <p className="text-sm text-fg-muted">Loading…</p>;
+  if (result === null)
+    return (
+      <div className="space-y-4" aria-busy="true" aria-label="Loading dashboard">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_1fr]">
+          <div className="h-52 animate-pulse rounded-lg border border-line bg-surface" />
+          <div className="h-52 animate-pulse rounded-lg border border-line bg-surface" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
+          {Array.from({ length: 5 }, (_, i) => (
+            <div key={i} className="h-56 animate-pulse rounded-lg border border-line bg-surface" />
+          ))}
+        </div>
+      </div>
+    );
   if (result.error || !result.data) return <Alert>{result.error}</Alert>;
   const dash = result.data;
   const order = (env: string) => names.indexOf(env);

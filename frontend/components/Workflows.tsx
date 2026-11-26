@@ -3,7 +3,7 @@
 import { Redo2, Undo2 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
-import { Alert, Button, Field, Modal, TextInput } from "@/components/ui";
+import { Alert, Button, Field, Loading, Modal, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import dynamic from "next/dynamic";
 
@@ -24,7 +24,7 @@ import { canRedo, canUndo, fresh, push, redo, undo } from "@/lib/history";
 
 const WorkflowGraph = dynamic(() => import("@/components/WorkflowGraph").then((m) => m.WorkflowGraph), {
   ssr: false,
-  loading: () => <p className="p-4 text-xs text-fg-muted">Loading the graph…</p>,
+  loading: () => <Loading label="Loading the graph…" className="p-4" />,
 });
 
 type WorkflowRow = {
@@ -306,7 +306,7 @@ function RunPanel({ runId, definition, onChanged }: { runId: string; definition:
     onChanged();
   }
 
-  if (!run) return <p className="text-xs text-fg-muted">{detail.error ?? "Loading the run…"}</p>;
+  if (!run) return detail.error ? <p className="text-xs text-fg-muted">{detail.error}</p> : <Loading label="Loading the run…" />;
   const pending = run.approvals.filter((a) => a.status === "pending");
 
   return (

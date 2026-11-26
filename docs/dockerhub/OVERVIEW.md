@@ -36,15 +36,16 @@ self-hosted TLS, and a Go agent that only opens outbound connections.
 | Inventory and vault | Nodes, tags, groups, environments, per-role node scope; encrypted credential vault |
 | SSH bastion | Web terminal, jump host, host-key pinning, session recording and replay, SFTP browser, broadcast, snippets |
 | `janus-agent` | Outbound-only telemetry agent (Linux, and a Windows service), SSH bootstrap or a PowerShell one-liner, optional commands, shell and Docker access under a local policy, signed self-update with rollback (Linux) |
-| Monitoring | Checks (agent, metrics, ports, HTTP, systemd, SNMP, FRITZ!Box), hysteresis, acknowledge, downtimes, dependencies, notifications (mail, Telegram, webhook, Discord, Slack, ntfy) |
+| Monitoring | Checks (agent, metrics, ports, HTTP, systemd, SNMP, FRITZ!Box), charts from 5 minutes to 90 days, hysteresis, acknowledge, downtimes, dependencies, notifications (mail, Telegram, webhook, Discord, Slack, ntfy); SNMP check templates built from the OID catalog, v2c traps (optional receiver) with MIB names |
 | Containers | Docker hosts and Compose stacks through the agent or SSH: logs, stats, actions, shell |
 | Proxmox VE | Clusters, VM/LXC lifecycle, snapshots, backup audit, consoles |
 | Ansible | Playbook catalogue (Git, upload, editor, network mount, SFTP), surveys, live runs, history |
 | Workflows | Graph editor (drag steps, connect branches), manual / interval / alert / signed-webhook triggers, conditional branches, approvals, run status drawn on the flow |
 | GitOps | Compose stacks deployed from Git with a signed webhook |
-| AI Copilot | Diagnosis of problems on any OpenAI-compatible provider, with fallback routes and optional MCP tools that look at the node; action plans you approve |
+| AI Copilot | Diagnosis of problems on any OpenAI-compatible provider, with fallback routes and optional MCP tools that look at the node; knows which hypervisor a VM runs on; action plans you approve |
 | Operate | A chat to carry out an instruction on servers you pick (looks, changes the minimum, verifies, reports); every call audited |
 | Archive | Recorded SSH sessions and Operate chats move to a searchable archive after X days and are deleted after Y (1 and 30 by default) |
+| Backup & restore | Export the configuration to one file (secrets encrypted with a passphrase) and import it with a preview first |
 | Secret manager | Optional OpenBao / HashiCorp Vault for the master key (Transit) or the secrets themselves (KV) |
 
 ## What is in this image
@@ -107,7 +108,7 @@ Check readiness:
 
 ```bash
 curl -k https://localhost/api/v1/ready
-# {"status":"ok","version":"0.12.2","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
+# {"status":"ok","version":"0.13.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
 ```
 
 Optional overrides, used with `-f compose.yaml -f <file>` (all in the same `deploy/` folder):
@@ -197,9 +198,40 @@ installation (`allow_exec`, `allow_pty`, `allow_docker`); the server cannot chan
 agent checks the signature, refuses a version that is not newer, and rolls back automatically if the
 new binary cannot connect. Roll an update out from **Inventory → Update agents**.
 
+### SNMP traps and MIB names (optional)
+
+An optional receiver stores SNMP v2c traps from the hosts in the inventory (matched by source address; no SNMP
+credentials needed) and shows them on the **SNMP traps** page with names from the MIB files you upload (standard names are
+built in). Each trap has an **Alert** button that creates a check which opens a problem when the trap arrives and closes
+it after a window without new ones. Add the overlay and a community, then point the devices at port 162/udp:
+
+```bash
+echo 'JANUS_SNMP_TRAP_COMMUNITIES=<long random community>' >> .env
+docker compose -f compose.yaml -f compose.snmp-traps.yaml up -d
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `JANUS_SNMP_TRAP_PORT` | `0` (off; `1162` in the overlay, published as 162/udp) | UDP port the receiver listens on |
+| `JANUS_SNMP_TRAP_COMMUNITIES` | — | Comma-separated v2c communities accepted (required with the port) |
+| `JANUS_SNMP_TRAP_BIND` | `0.0.0.0` | Address to listen on |
+
+Traps from an address that is not an inventory node, or with another community, are dropped and counted; a source is
+limited to 120 traps a minute and traps are kept 30 days. SNMPv3 traps are not accepted yet.
+
+### Configuration export and import
+
+**Settings → Backup & restore** (`config.export`, `config.import`): one JSON file with environments, credentials, hosts, groups,
+check templates, checks, the SNMP OID catalog, notification channels and rules, snippets, workflows and AI providers. Ids are
+written as names so the file imports into another installation. Secrets are included only on request (`credentials.reveal`) and
+are encrypted in the file with a passphrase (scrypt + AES-256-GCM). **Import** previews the result (nothing is changed) before it
+applies it; existing items are kept or overwritten. Users, roles, audit, metrics, agents, GitOps and Ansible sources are not exported.
+
 ### AI providers, routes and Operate
 
-**Settings → AI providers**: add every provider you have a key for (Groq, OpenRouter, NVIDIA, Cloudflare, Mistral, Cerebras,
+**Settings → AI providers**: **Add provider** is a gallery with the address already filled in; **Use this** puts a tested model first on
+the default route (the previous ones stay as fallback), and **AI models & tools** has a list for the main and the second-opinion model.
+Add every provider you have a key for (Groq, OpenRouter, NVIDIA, Cloudflare, Mistral, Cerebras,
 Hugging Face, Gemini, Ollama, a local engine, anything OpenAI-compatible). Several keys per provider, sealed in the vault.
 **Routes and fallback** are ordered lists of models: a request goes to the first that works and falls over to the next on a
 limit, outage, timeout, bad key or missing model; health and usage are on the same page. The `JANUS_AI_*` variables keep
@@ -263,12 +295,12 @@ Sign in as `breakglass`. Every use is audited and logged as a warning.
 # 1. Apply the schema (needs PostgreSQL 16 with the TimescaleDB extension)
 docker run --rm \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.12.2 migrate
+  lordraw/janus-ops:0.13.0 migrate
 
 # 2. Start the server
 docker run -d --name janus-ops -p 127.0.0.1:8000:8000 \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.12.2
+  lordraw/janus-ops:0.13.0
 ```
 
 ## Configuration
@@ -324,7 +356,7 @@ Variables used by the Compose stack (`.env`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.12.2` | Image and tag to run |
+| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.13.0` | Image and tag to run |
 | `JANUS_DOMAIN` | `localhost` | Host name served by Caddy |
 | `JANUS_TLS` | `internal` | `internal` (local CA, works offline) or an e-mail for ACME |
 | `JANUS_HTTP_PORT` / `JANUS_HTTPS_PORT` | `80` / `443` | Host ports of the proxy |
@@ -361,6 +393,9 @@ Variables used by the Compose stack (`.env`):
 | `/api/v1/ansible/*` | Playbook sources, files, runs |
 | `/api/v1/workflows/*` | Workflows, runs, approvals; `/{id}/webhook` is the signed trigger (HMAC-SHA256) |
 | `/api/v1/gitops/*` | GitOps stacks; `/stacks/{id}/webhook` is the signed push trigger |
+| `/api/v1/snmp-traps` · `/snmp-mibs` | Received traps, receiver status, MIB files |
+| `/api/v1/config/export` · `/config/import` | Configuration export and import (preview with `dry_run`) |
+| `/api/v1/credentials/{id}/reveal` | Show a secret (`credentials.reveal`, audited) |
 | `/api/v1/snmp-oids` · `/templates` · `/fritzbox/*` | SNMP catalogue, check templates (macros, built-in files), FRITZ!Box · `/probes` service probe catalog |
 | `/api/v1/ai/*` | AI Copilot diagnoses and action plans |
 | `/api/v1/health` | Liveness: the process is up |
@@ -371,7 +406,7 @@ Variables used by the Compose stack (`.env`):
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.12.2`) | Immutable release, built from git tag `vX.Y.Z` |
+| `X.Y.Z` (e.g. `0.13.0`) | Immutable release, built from git tag `vX.Y.Z` |
 | `X.Y` (e.g. `0.5`) | Latest patch release of that minor version |
 | `latest` | Most recent release |
 

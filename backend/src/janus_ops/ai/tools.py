@@ -76,6 +76,24 @@ async def metrics(conn: AsyncConnection, node_id: str, minutes: int = 60) -> str
     return "\n".join(lines) or f"no metrics in the last {minutes} minutes"
 
 
+async def traps(conn: AsyncConnection, node_id: str, limit: int = 15) -> str:
+    """The latest SNMP traps the node sent, with their values (names are for people: the model
+    gets the numeric OIDs it can be told about)."""
+    rows = await conn.execute(
+        text(
+            "SELECT received_at, trap_oid, varbinds FROM snmp_trap"
+            " WHERE node_id = CAST(:id AS uuid) AND received_at > now() - interval '24 hours'"
+            " ORDER BY received_at DESC LIMIT :n"
+        ),
+        {"id": node_id, "n": limit},
+    )
+    lines = [
+        f"{r.received_at.isoformat()} {r.trap_oid or 'unknown'} {_cut(r.varbinds or [], 250)}"
+        for r in rows
+    ]
+    return "\n".join(lines) or "no traps in the last 24 hours"
+
+
 async def check_history(conn: AsyncConnection, check_id: str, limit: int = 20) -> str:
     rows = await conn.execute(
         text(

@@ -13,6 +13,7 @@ import {
   thresholds,
 } from "@/components/TemplateApply";
 import { FilterBar } from "@/components/FilterBar";
+import { type OidEntry } from "@/components/SnmpOids";
 import { SortTh } from "@/components/SortTh";
 import { Alert, Button, Card, Field, Modal, Select, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
@@ -130,6 +131,19 @@ function ItemsTab({
 }) {
   const setItem = (i: number, patch: Partial<TemplateItem>) =>
     set({ ...draft, items: draft.items.map((it, n) => (n === i ? { ...it, ...patch } : it)) });
+  const hasSnmp = draft.items.some((it) => it.kind === "snmp");
+  const catalog = useResource<OidEntry[]>(hasSnmp && !readOnly ? "/snmp-oids" : null);
+  /** Fill an SNMP item from a catalog entry: the OID, the table flag, and the name when empty. */
+  const pickOid = (i: number, id: string) => {
+    const e = (catalog.data ?? []).find((x) => x.id === id);
+    if (!e) return;
+    const item = draft.items[i];
+    setItem(i, {
+      params: { ...item.params, oid: e.oid.replace(/^\./, "") },
+      indexed: e.indexed,
+      name: item.name.trim() ? item.name : e.name,
+    });
+  };
   return (
     <div className="space-y-3">
       {draft.items.map((item, i) => (
@@ -174,6 +188,18 @@ function ItemsTab({
               </Button>
             )}
           </div>
+          {item.kind === "snmp" && !readOnly && (
+            <Field label="OID from the catalog" hint="Fills the OID and the table flag; scale and timeout stay in the JSON">
+              <Select value="" onChange={(e) => pickOid(i, e.target.value)}>
+                <option value="">{catalog.data ? "Choose an entry…" : "Loading…"}</option>
+                {(catalog.data ?? []).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name} ({o.oid})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <Field label="Parameters (JSON)" hint='e.g. {"port": "{$PG_PORT}"} or {"metric": "cpu.usage_pct"}'>
             <ParamsInput value={item.params} disabled={readOnly} onChange={(params) => setItem(i, { params })} />
           </Field>

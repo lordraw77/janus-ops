@@ -65,7 +65,7 @@ def test_the_catalog_is_consistent() -> None:
     for name, probe in probes.CATALOG.items():
         assert name == f"{probe.connector}.{name.split('.', 1)[1]}"
         assert probe.connector in probes.CONNECTORS
-        assert probe.description and probe.requires in (None, "postgres", "proxmox")
+        assert probe.description and probe.requires in (None, "postgres", "proxmox", "snmp")
         assert all(isinstance(required, bool) for required in probe.args.values())
 
 

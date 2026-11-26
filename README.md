@@ -9,7 +9,7 @@ Monitoring · Containers · Virtualization · SSH · Automation · AI troublesho
 
 **[Website](https://lordraw77.github.io/janus-ops/)** · **[Docker Hub](https://hub.docker.com/r/lordraw/janus-ops)** · **[Roadmap](docs/PLAN.md)**
 
-![Status](https://img.shields.io/badge/status-pre--1.0%20(0.10)-F59E0B?style=flat-square)
+![Status](https://img.shields.io/badge/status-pre--1.0%20(0.13)-F59E0B?style=flat-square)
 ![Backend](https://img.shields.io/badge/backend-FastAPI%20%C2%B7%20Python%203.12-10B981?style=flat-square)
 ![Frontend](https://img.shields.io/badge/frontend-Next.js%20%C2%B7%20TypeScript-22D3EE?style=flat-square)
 ![Agent](https://img.shields.io/badge/agent-Go%20static%20binary-818CF8?style=flat-square)
@@ -37,13 +37,14 @@ It is designed from day one for **segmented, air-gapped and proxy-restricted net
 
 | Module | What it does | Inspired by |
 |---|---|---|
-| 👁️ **Observability & Alerting** | High-frequency metrics, auto service discovery, `OK/WARN/CRIT/UNKNOWN` with hysteresis, ack, downtimes, flapping detection, parent/child dependencies, notification routing | Checkmk |
+| 👁️ **Observability & Alerting** | High-frequency metrics with charts from 5 minutes to 90 days, auto service discovery, `OK/WARN/CRIT/UNKNOWN` with hysteresis, ack, downtimes, flapping detection, parent/child dependencies, SNMP checks, templates and v2c traps with MIB names, notification routing | Checkmk |
 | 🐳 **Container & Stack Manager** | Multi-host Docker management through the agent tunnel, live logs/stats, exec shell, Compose stacks with GitOps, prune & image update checks | Dockhand / Portainer |
 | 🛡️ **Virtualization** | Proxmox VE clusters: quorum, nodes, storage, VM/LXC lifecycle, snapshots, migration, console, backup & replication audit | Proxmox VE UI |
 | 🔑 **SSH Bastion** | Web terminal (xterm.js), credential vault, SFTP browser, multi-tab & broadcast, snippet library, transparent ProxyJump / agent tunnel | MobaXterm / Termius |
 | ⚡ **Automation Hub** | Ansible playbooks with dynamic inventory from the DB, surveys, live output; visual event-driven workflow builder | AWX / n8n |
-| 🤖 **Janus AI Copilot** | One-click RCA on failing services (logs + metrics + audit trail), contextual IaC generation, a second opinion, **human-approved** action plans. Looks at the node itself through MCP tools; any OpenAI-compatible provider, with **fallback routes** | — |
+| 🤖 **Janus AI Copilot** | One-click RCA on failing services (logs + metrics + audit trail), contextual IaC generation, a second opinion, **human-approved** action plans. Looks at the node itself through MCP tools, knows which hypervisor a VM runs on and the traps it sent; any OpenAI-compatible provider, with **fallback routes** | — |
 | 💬 **Operate** | A chat in which you pick servers and say what to do (“change the NTP server”): the AI looks, changes the minimum, verifies and reports, with every call listed and audited | — |
+| 📥 **Backup & restore** | Export the whole configuration (hosts, checks, notifications, workflows, AI providers…) to one file, secrets encrypted with a passphrase, and import it back with a preview first | — |
 | 🗄️ **Archive & retention** | Recorded SSH sessions and Operate chats move to a searchable archive after X days and are deleted after Y (defaults 1 and 30), unless marked *keep* | — |
 
 Cross-cutting: unified inventory, encrypted secret vault, LDAP-backed login with TOTP and RBAC
@@ -102,6 +103,9 @@ get the union. The built-in roles:
 | `inventory.read` | view nodes, tags, groups and credential names (never secrets) |
 | `inventory.manage` | create, edit and delete nodes, tags, groups and capabilities |
 | `credentials.manage` | create, replace and delete vault credentials |
+| `config.export` | export the configuration as a file (with secrets it also needs `credentials.reveal`; admin has it by default) |
+| `config.import` | import a configuration file, preview first (its credentials part also needs `credentials.manage`) |
+| `credentials.reveal` | show a stored secret in clear (every view is audited; admin has it by default) |
 | `ssh.connect` | open web SSH terminals on nodes with the SSH capability |
 | `sftp.transfer` | browse, download, upload, rename and delete files on nodes over SFTP |
 | `snippets.manage` | create, edit and delete shared command snippets |
@@ -139,8 +143,11 @@ itself encrypted with `JANUS_SECRET_KEY` (envelope encryption, AES-256-GCM). Sec
 **write-only**: no page or API returns them, and they never reach the browser or the audit log.
 SSH keys show their type and SHA-256 fingerprint (same as `ssh-keygen -l`). A credential used by
 a node cannot be deleted.
-Planned: keep the master key, or the secrets themselves, in an external secret manager such as
-OpenBao or HashiCorp Vault (see ADR-011 in [docs/PLAN.md](docs/PLAN.md)).
+A user with the `credentials.reveal` permission gets a **Show** button on each credential: the secret opens for 30
+seconds (with Copy), every view is written to the audit log before the secret is returned and the answer is never
+cached. It is the only exception to "write-only", and off for everybody but admins until you grant it.
+The master key, or the secrets themselves, can live in an external secret manager such as OpenBao or HashiCorp Vault
+(see [docs/OPENBAO.md](docs/OPENBAO.md)).
 
 ### SSH bastion
 
@@ -196,6 +203,12 @@ Protocol: [proto/agent-protocol.md](proto/agent-protocol.md).
 
 ### AI providers, routes and Operate
 
+**Settings → AI providers**: **Add provider** is a gallery of the supported providers with their address already
+filled in; you can add as many as you like, even two of the same kind (two accounts). Every provider has **Use this**
+next to its tested models: that model becomes the first choice of the `default` route and what answered before stays
+behind it as fallback. In **Settings → AI models & tools**, two lists (**Main model**, **Second-opinion model**) offer
+the tested models of your providers; the choice is saved as the first entry of the `default` / `review` route.
+
 **Settings → AI providers** holds every provider you have a key for (Groq, OpenRouter, NVIDIA, Cloudflare,
 Mistral, Cerebras, Hugging Face, Gemini, Ollama, a local engine, any OpenAI-compatible endpoint). A provider can
 have several keys (sealed in the vault), its models are read from it (or added by name) and **Test** checks that a
@@ -238,6 +251,16 @@ thresholds (CPU, memory, any file system or series, optionally averaged), failed
 listening ports, and TCP or HTTP(S) probes run by the server (no agent needed). **Suggested checks**
 proposes them from what the agent reports. A check alerts after *N* consecutive bad results
 (soft → hard state); flapping checks are recognised and kept quiet.
+
+**SNMP** checks read one numeric OID from NAS, switches and UPS (v2c or v3). In the OID catalog, tick entries and
+**New template from N selected** creates a check template (one check per OID, table columns per instance); in the
+template editor an SNMP check has a catalog picker. **SNMP traps (v2c)**: an optional receiver stores the traps of
+inventory nodes (matched by source address, no SNMP credentials needed), shows them with names on the **SNMP traps**
+page, and each trap has an **Alert** button that creates a check (`snmp_traps.recent`) which opens a problem when it
+arrives and closes it by itself after a window without new traps. **MIB files** (`.mib`, `.txt`) give names to OIDs
+(only names are kept; standard names are built in). Start the receiver with `deploy/compose.snmp-traps.yaml` and
+`JANUS_SNMP_TRAP_COMMUNITIES`; devices send to port 162/udp. SNMPv3 traps are not accepted yet.
+The node page has telemetry charts from 5 minutes to 90 days (long ranges come from continuous aggregates).
 
 **Problems** lists open problems and history; acknowledge them with a comment, or schedule a
 **downtime** for a node, a check or a group. Children of a node that is down are *unreachable*
@@ -289,6 +312,18 @@ shared secret and the clock, the QR code is drawn by the server, nothing contact
 Keep the server clock in sync (NTP); one 30-second step of drift is tolerated. Seeds are encrypted
 with `JANUS_SECRET_KEY`: back it up with the database. A user who loses the phone signs in with a
 recovery code, or an admin resets their 2FA from Users & roles.
+
+### Configuration export and import
+
+**Settings → Backup & restore** (`config.export`, `config.import`; admin by default). **Export** writes one JSON file
+with the sections you tick: environments, credentials, hosts (tags, capabilities, services, parent), groups, your check
+templates, checks, the SNMP OID catalog, notification channels and rules, shared snippets, workflows, and AI providers
+with models and routes. Ids are written as names, so the file moves between installations. Secrets (credential values,
+notification secrets, AI keys) are included only if you ask (needs `credentials.reveal`) and are encrypted in the file with
+a passphrase of at least 12 characters (scrypt + AES-256-GCM); the passphrase is not stored, so keep it. **Import**: choose
+the file, **Preview** (the whole import runs and is rolled back: nothing is changed, nothing reaches the vault), then apply;
+existing items are left alone or overwritten, and one failing item does not stop the others. Not included: users and roles
+(they come from the directory), the audit log, metrics, agents, GitOps stacks, Ansible sources, downtimes and discovery.
 
 ### Break-glass account
 
@@ -409,7 +444,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 
 ## Project status & roadmap
 
-> 🚧 **Pre-1.0 (0.10.x).** Available today: the single `lordraw/janus-ops` image, LDAP
+> 🚧 **Pre-1.0 (0.13.x).** Available today: the single `lordraw/janus-ops` image, LDAP
 > sign-in, user/role/permission management, optional TOTP, break-glass account, hash-chained
 > audit log, inventory and credential vault (phase F0), **web SSH bastion** with host key
 > pinning, session recording, SFTP browser, command broadcast and snippets (phase F1),
@@ -420,7 +455,9 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 > for Compose stacks from Git (API and web UI) and **SNMP v2c/v3 checks** for NAS, switches and
 > UPS. Visual workflow editor and resume of interrupted runs after a restart are done. Release 0.10 adds the
 > **Windows agent**, **AI providers with fallback routes**, **MCP tools** for the Copilot, the **Operate** chat and the
-> **archive with retention**.
+> **archive with retention**. Release 0.13 adds **SNMP v2c traps and MIB names**, check templates built from the OID catalog,
+> **configuration export and import**, showing a credential's secret with its own permission, the Copilot knowing which
+> hypervisor a VM runs on, chosen models picked from lists, 5 and 15 minute charts and a round of UI polish.
 
 | Phase | Scope |
 |---|---|
@@ -433,7 +470,7 @@ Logo, favicons, tokens, base CSS, reference components and the app-shell mockup 
 | **F6** Ansible | Dynamic inventory, playbook catalog, live runs |
 | **F7** AI Copilot | RCA on alerts, action plans with human approval |
 | **F8** In progress | Commands via agent and approved actions, GitOps with signed webhooks, SNMP v2c/v3 checks (done); visual workflows, resume after restart, GitOps web UI, private Git repositories over https with a vault token (done); Windows agent (service, metrics, PowerShell install), AI providers with fallback routes, MCP tools, Operate chat, archive and retention (done in 0.10) |
-| **F8+** | Agent PTY & auto-update (done), external secret manager (done); next: remote desktop (RDP), OIDC, a VM-to-hypervisor link for the Copilot |
+| **F8+** | Agent PTY & auto-update (done), external secret manager (done); next: remote desktop (RDP), OIDC, SNMPv3 traps, credentials by reference (KV, read-only); SNMP v2c traps with MIB names, VM-to-hypervisor link for the Copilot, SNMP templates from the UI, short-range charts (5 and 15 minutes) and the continuous aggregates are done |
 
 Details, acceptance criteria and open decisions: [docs/PLAN.md](docs/PLAN.md).
 

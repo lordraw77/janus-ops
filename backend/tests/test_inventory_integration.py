@@ -1,6 +1,7 @@
 """Inventory and vault end to end (AC-01). Run with: make test/integration"""
 
 import json
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -435,3 +436,19 @@ def test_proxmox_capability_accepts_password(
     assert "secret" not in listed["pve-pass"]
     bad = admin.patch(f"/api/v1/credentials/{creds['pve-pass']}", json={"username": "admin"})
     assert bad.status_code == 422
+
+
+# ---------------------------------------------------------------- reveal
+def test_reveal_needs_its_permission_and_is_audited(
+    admin: TestClient, operator: TestClient, creds: dict[str, str]
+) -> None:
+    # the operator role does not hold credentials.reveal
+    assert operator.post(f"/api/v1/credentials/{creds['ssh-pass']}/reveal").status_code == 403
+    r = admin.post(f"/api/v1/credentials/{creds['ssh-pass']}/reveal")
+    assert r.status_code == 200, r.text
+    assert r.json()["secret"] == SSH_PASSWORD
+    assert r.headers["cache-control"] == "no-store"
+    events = run_sql("SELECT payload FROM audit_event WHERE action = 'credentials.revealed'")
+    assert events and events[0][0]["name"] == "ssh-pass"
+    assert SSH_PASSWORD not in str(events)
+    assert admin.post(f"/api/v1/credentials/{uuid.uuid4()}/reveal").status_code == 404

@@ -22,9 +22,12 @@ from janus_ops.auth.sessions import Session
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
 
-# range -> (span, bucket, source): 120-180 points per series. The source is the raw points up to a
-# few hours (cheap), then the continuous aggregates of migration 0025.
+# range -> (span, bucket, source): 30-180 points per series. The source is the raw points up to a
+# few hours (cheap), then the continuous aggregates of migration 0025. The agent samples every
+# 5-15 s (10 by default): the 5 and 15 minute charts use a 10 s bucket, about one point per sample.
 RANGES: dict[str, tuple[timedelta, timedelta, str | None]] = {
+    "5m": (timedelta(minutes=5), timedelta(seconds=10), None),
+    "15m": (timedelta(minutes=15), timedelta(seconds=10), None),
     "1h": (timedelta(hours=1), timedelta(seconds=30), None),
     "6h": (timedelta(hours=6), timedelta(minutes=2), "metric_1m"),
     "24h": (timedelta(hours=24), timedelta(minutes=10), "metric_1m"),
@@ -75,7 +78,7 @@ async def node_chart(
     node_id: uuid.UUID,
     session: Reader,
     name: Annotated[list[str], Query(max_length=20)],
-    range: Literal["1h", "6h", "24h", "7d", "30d", "90d"] = "1h",
+    range: Literal["5m", "15m", "1h", "6h", "24h", "7d", "30d", "90d"] = "1h",
 ) -> Chart:
     await node_scope.require_node(request, session, node_id)
     if not name or any(not NAME.match(n) for n in name):

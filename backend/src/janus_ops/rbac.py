@@ -21,6 +21,12 @@ PERMISSIONS: dict[str, str] = {
     "inventory.manage": "Create, edit and delete nodes, tags, groups and capabilities",
     "environments.manage": "Create, rename and delete environments (prod, staging, ...)",
     "credentials.manage": "Create, replace and delete vault credentials",
+    "config.export": "Export the configuration (nodes, checks, models...) as a file; with secrets"
+    " it also needs credentials.reveal. The admin role has it by default",
+    "config.import": "Import a configuration file (preview first); the credentials part also needs"
+    " credentials.manage. The admin role has it by default",
+    "credentials.reveal": "Show a stored secret (password, token, key) in clear; every view is"
+    " audited. The admin role has it by default",
     "ssh.connect": "Open web SSH terminals on nodes with the SSH capability",
     "sftp.transfer": "Browse, download, upload, rename and delete files on nodes over SFTP",
     "snippets.manage": "Create, edit and delete shared command snippets",

@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 
 import { AiHealthCard, AiProvidersCard, AiRoutesCard } from "@/components/AiProviders";
 import { AiSettingsCard, McpSettingsCard } from "@/components/AiSettings";
+import { ConfigIoTab } from "@/components/ConfigIo";
 import { EnvironmentsCard } from "@/components/Environments";
 import { Alert, Button, Card } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
-import { RequirePermission, useAuth } from "@/lib/auth";
+import { type Permission, RequirePermission, useAuth } from "@/lib/auth";
 import type { InventoryNode } from "@/lib/inventory";
 import { isOlder } from "@/lib/version";
 
@@ -99,18 +100,19 @@ function SystemCard() {
   );
 }
 
-type TabId = "general" | "providers" | "routes" | "models";
+type TabId = "general" | "providers" | "routes" | "models" | "backup";
 
-const TABS: { id: TabId; label: string; permission?: "ai.manage" }[] = [
+const TABS: { id: TabId; label: string; permission?: Permission | Permission[] }[] = [
   { id: "general", label: "General" },
   { id: "providers", label: "AI providers", permission: "ai.manage" },
   { id: "routes", label: "Routes & health", permission: "ai.manage" },
   { id: "models", label: "AI models & tools", permission: "ai.manage" },
+  { id: "backup", label: "Backup & restore", permission: ["config.export", "config.import"] },
 ];
 
 function Settings() {
   const { can } = useAuth();
-  const tabs = TABS.filter((t) => !t.permission || can(t.permission));
+  const tabs = TABS.filter((t) => !t.permission || [t.permission].flat().some((p) => can(p)));
   const [tab, setTab] = useState<TabId>("general");
 
   // the tab lives in the URL hash, so a reload or a shared link opens the same one
@@ -159,6 +161,7 @@ function Settings() {
           <AiHealthCard />
         </div>
       )}
+      {current === "backup" && <ConfigIoTab />}
       {current === "models" && (
         <div className="space-y-4">
           <AiSettingsCard />

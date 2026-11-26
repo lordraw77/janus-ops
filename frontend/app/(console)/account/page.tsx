@@ -3,7 +3,7 @@
 import { ShieldCheck, ShieldOff } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import { Alert, Button, Card, Field, RoleBadge, TextInput } from "@/components/ui";
+import { Alert, Button, Card, Field, Loading, RoleBadge, TextInput } from "@/components/ui";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -143,7 +143,7 @@ function TotpCard() {
     }
   }
 
-  if (!status) return <Card title="Two-factor authentication">{loadError ?? "Loading…"}</Card>;
+  if (!status) return <Card title="Two-factor authentication">{loadError ?? <Loading />}</Card>;
 
   return (
     <Card title="Two-factor authentication (optional)">

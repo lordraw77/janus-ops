@@ -16,7 +16,7 @@ import {
 import { useState } from "react";
 
 import { SortTh } from "@/components/SortTh";
-import { Alert, Button, Modal } from "@/components/ui";
+import { Alert, Button, Loading, Modal } from "@/components/ui";
 import { formatBytes } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -56,6 +56,7 @@ function Section({
   notice,
   error,
   loading,
+  refreshing,
   children,
 }: {
   count?: string;
@@ -65,6 +66,8 @@ function Section({
   error: string | null;
   /** shown while the first answer has not arrived (some calls take seconds) */
   loading?: string | false;
+  /** a reload is running while the old list stays on screen */
+  refreshing?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -78,14 +81,14 @@ function Section({
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {extra}
           <Button onClick={onReload}>
-            <RefreshCw className="h-3 w-3" aria-hidden /> Refresh
+            <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} aria-hidden /> Refresh
           </Button>
         </div>
       </div>
       {notice && <Alert kind={notice.kind}>{notice.text}</Alert>}
       {error && <Alert>{error}</Alert>}
       {loading && !error && (
-        <p className="py-6 text-center text-xs text-fg-muted">{loading}</p>
+        <Loading label={loading} className="justify-center py-6" />
       )}
       {children}
     </div>
@@ -660,6 +663,7 @@ export function StacksSection({ nodeId }: { nodeId: string }) {
     <Section
       count={`${sorted.length} stacks`}
       onReload={res.reload}
+      refreshing={res.loading}
       notice={notice}
       error={res.error}
       loading={!res.data && "Loading…"}
@@ -853,6 +857,7 @@ export function ImagesSection({ nodeId }: { nodeId: string }) {
     <Section
       count={`${sorted.length} images`}
       onReload={res.reload}
+      refreshing={res.loading}
       notice={notice}
       error={res.error}
       loading={!res.data && "Loading…"}
@@ -1010,6 +1015,7 @@ export function VolumesSection({ nodeId }: { nodeId: string }) {
     <Section
       count={`${sorted.length} volumes`}
       onReload={res.reload}
+      refreshing={res.loading}
       notice={notice}
       error={res.error}
       loading={
@@ -1166,6 +1172,7 @@ export function NetworksSection({ nodeId }: { nodeId: string }) {
     <Section
       count={`${sorted.length} networks`}
       onReload={res.reload}
+      refreshing={res.loading}
       notice={notice}
       error={res.error}
       loading={!res.data && "Loading…"}
@@ -1315,6 +1322,7 @@ export function DiskSection({ nodeId }: { nodeId: string }) {
   return (
     <Section
       onReload={res.reload}
+      refreshing={res.loading}
       notice={notice}
       error={res.error}
       loading={

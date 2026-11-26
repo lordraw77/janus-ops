@@ -38,7 +38,7 @@
 <header class="hero" id="top">
   <div class="wrap">
     <div>
-      <span class="eyebrow">Open source · Apache-2.0 · Pre-1.0 (0.10)</span>
+      <span class="eyebrow">Open source · Apache-2.0 · Pre-1.0 (0.13)</span>
       <h1>One portal for your whole <em>infrastructure</em> lifecycle.</h1>
       <p class="lead">Monitoring, containers, virtualization, SSH, automation and AI troubleshooting in a single pane of glass. One inventory at the core, decoupled modules around it, and an agent that only ever connects <strong>out</strong>.</p>
       <div class="cta">
@@ -97,7 +97,7 @@
       <article class="card">
         <div class="ico tel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
         <h3>Observability &amp; alerting</h3>
-        <p>High-frequency metrics, service discovery, OK / WARN / CRIT / UNKNOWN with hysteresis, acknowledgements, downtimes, flapping detection, parent/child dependencies and notification routing. SNMP v2c/v3 for NAS, switches and UPS.</p>
+        <p>High-frequency metrics, service discovery, OK / WARN / CRIT / UNKNOWN with hysteresis, acknowledgements, downtimes, flapping detection, parent/child dependencies and notification routing. SNMP v2c/v3 for NAS, switches and UPS, with check templates built from an OID catalog, v2c traps and MIB names. Charts from 5 minutes to 90 days.</p>
         <span class="tag">Checkmk-style</span>
       </article>
       <article class="card">
@@ -127,8 +127,14 @@
       <article class="card">
         <div class="ico ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg></div>
         <h3>AI Copilot &amp; Operate</h3>
-        <p>Root-cause analysis that can look at the node itself through MCP tools, a second opinion from another model, contextual IaC generation, and a chat to carry out an instruction on the servers you pick. Providers and keys of your choice, with fallback routes when one fails. Plans wait for approval; changes need a dedicated permission and are audited call by call.</p>
+        <p>Root-cause analysis that can look at the node itself through MCP tools, knowing which hypervisor a VM runs on, a second opinion from another model, contextual IaC generation, and a chat to carry out an instruction on the servers you pick. Providers and keys of your choice, each added from a gallery with its address filled in, with fallback routes when one fails and the main and second-opinion models picked from a list. Plans wait for approval; changes need a dedicated permission and are audited call by call.</p>
         <span class="tag">Any OpenAI-compatible provider</span>
+      </article>
+      <article class="card">
+        <div class="ico tel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg></div>
+        <h3>Backup &amp; restore</h3>
+        <p>Export the whole configuration (hosts, checks, notifications, workflows, AI providers) to one file, with the secrets encrypted by a passphrase you choose. Import it back with a preview first, into the same or another installation.</p>
+        <span class="tag">Preview before you apply</span>
       </article>
       <article class="card">
         <div class="ico warn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg></div>
@@ -169,7 +175,7 @@
     <span class="kicker">Security</span>
     <h2>Secrets stay on the server. Actions stay attributable.</h2>
     <div class="grid c2" style="margin-top:28px">
-      <div class="card"><h3>Encrypted vault</h3><p>Envelope encryption with AES-256-GCM, one key per secret. Secrets are write-only: no page or API returns them, and they never reach the browser or the audit log. The master key or the secrets themselves can live in an external manager such as OpenBao or HashiCorp Vault.</p></div>
+      <div class="card"><h3>Encrypted vault</h3><p>Envelope encryption with AES-256-GCM, one key per secret. Secrets are write-only: no page or API returns them and they never reach the audit log. The one exception is a Show button for users you grant a dedicated permission: it opens the secret for 30 seconds and records every view first. The master key or the secrets themselves can live in an external manager such as OpenBao or HashiCorp Vault.</p></div>
       <div class="card"><h3>Identity and access</h3><p>LDAP-backed sign-in (lldap included, or your own AD/LDAP), optional TOTP, a break-glass account, and RBAC with Admin, Operator and Auditor roles plus custom roles and per-node scope.</p></div>
       <div class="card"><h3>Immutable audit trail</h3><p>Every sign-in, change, shell, restart, playbook and AI action plan is attributed and chained by hash, so tampering is detectable.</p></div>
       <div class="card"><h3>Human in the loop</h3><p>The AI Copilot is read-only by default, never sees vault secrets and never runs destructive actions on its own. Plans wait for approval from someone with the right permission.</p></div>
@@ -202,7 +208,8 @@
       <div class="item"><span class="pill done">DONE</span><span>Inventory and vault, SSH bastion, agent and NOC dashboard, alerting, Docker, Proxmox VE, Ansible, AI Copilot</span></div>
       <div class="item"><span class="pill done">DONE</span><span>Commands through the agent, GitOps (private repositories included), SNMP, visual workflows, signed agent updates, external secret manager</span></div>
       <div class="item"><span class="pill done">DONE</span><span>Windows agent, AI providers with fallback routes, MCP tools for the Copilot, Operate chat, archive with retention (release 0.10)</span></div>
-      <div class="item"><span class="pill next">NEXT</span><span>Remote desktop in the browser, OIDC sign-in, SNMP templates from the UI</span></div>
+      <div class="item"><span class="pill done">DONE</span><span>SNMP v2c traps with MIB names, SNMP templates from the UI, configuration export and import, credential reveal with its own permission, the Copilot knows where a VM runs (release 0.13)</span></div>
+      <div class="item"><span class="pill next">NEXT</span><span>Remote desktop in the browser, OIDC sign-in, SNMPv3 traps, credentials by reference</span></div>
     </div>
     <p class="sub" style="margin-top:24px"><a href="https://github.com/lordraw77/janus-ops/blob/main/docs/PLAN.md">Read the plan and roadmap →</a></p>
   </div>

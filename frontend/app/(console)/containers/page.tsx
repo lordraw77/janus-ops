@@ -24,7 +24,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { SortTh } from "@/components/SortTh";
 import type { TerminalStatus } from "@/components/TerminalView";
-import { Alert, Button, Modal } from "@/components/ui";
+import { Alert, Button, Loading, Modal } from "@/components/ui";
 import { formatBytes } from "@/lib/agents";
 import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -212,7 +212,7 @@ function StatsDialog({
   return (
     <Modal title={`Stats · ${c.name}`} onClose={onClose}>
       {error && <Alert>{error}</Alert>}
-      {!stats && !error && <p className="text-sm text-fg-muted">Loading…</p>}
+      {!stats && !error && <Loading />}
       <dl className="grid grid-cols-[9rem_1fr] gap-y-1 font-mono text-xs">
         {rows.map(([k, v]) => (
           <div key={k} className="contents">
@@ -1149,6 +1149,8 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
   const [data, setData] = useState<Record<string, HostData>>({});
   const [loaded, setLoaded] = useState(false);
   const [tick, setTick] = useState(0);
+  // the refresh (button or an action) whose answer is on screen: the Refresh button spins until it catches up
+  const [doneTick, setDoneTick] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState("");
@@ -1189,6 +1191,7 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
       if (cancelled) return;
       setData(Object.fromEntries(entries));
       setLoaded(true);
+      setDoneTick(tick);
       setNow(Date.now());
       timer = setTimeout(() => void load(), LIVE_REFRESH_MS);
     };
@@ -1331,11 +1334,12 @@ function AllHostsView({ hosts }: { hosts: Host[] }) {
             ))}
           </select>
           <Button onClick={() => setTick((t) => t + 1)}>
-            <RefreshCw className="h-3 w-3" aria-hidden /> Refresh
+            <RefreshCw className={`h-3 w-3 ${loaded && doneTick !== tick ? "animate-spin" : ""}`} aria-hidden /> Refresh
           </Button>
         </div>
       </div>
       {notice && <Alert kind={notice.kind}>{notice.text}</Alert>}
+      {!loaded && <Loading label={`Loading the containers of ${hosts.length} host${hosts.length === 1 ? "" : "s"}…`} />}
       {failed.length > 0 && (
         <Alert>
           {failed

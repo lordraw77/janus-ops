@@ -8,7 +8,7 @@ import { type FormEvent, Suspense, useEffect, useState } from "react";
 import { ChecksCard } from "@/components/Checks";
 import { LineChart, type LineSeries } from "@/components/LineChart";
 import { TemplateSuggestions } from "@/components/TemplateSuggestions";
-import { Alert, Button, Card, Field, Modal, TextInput } from "@/components/ui";
+import { Alert, Button, Card, Field, Loading, Modal, Spinner, TextInput } from "@/components/ui";
 import {
   AGENT_STATUS,
   type AgentDetail,
@@ -22,9 +22,11 @@ import { api, message, useResource } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { EnvBadge } from "@/components/EnvBadge";
 
-const RANGES = ["1h", "6h", "24h", "7d", "30d", "90d"] as const;
+const RANGES = ["5m", "15m", "1h", "6h", "24h", "7d", "30d", "90d"] as const;
 type Range = (typeof RANGES)[number];
 const CHART_POLL_MS = 30_000;
+/** short ranges follow the agent (one sample every ~10 s), so they refresh as often */
+const SHORT_POLL_MS = 10_000;
 
 type ChartSpec = {
   title: string;
@@ -78,7 +80,13 @@ function seriesFor(spec: ChartSpec, all: Series[]): Series[] {
 
 function Charts({ nodeId }: { nodeId: string }) {
   const [range, setRange] = useState<Range>("1h");
-  const [chart, setChart] = useState<{ data: Chart | null; error: string | null }>({ data: null, error: null });
+  const [chart, setChart] = useState<{ data: Chart | null; error: string | null; range: Range | null }>({
+    data: null,
+    error: null,
+    range: null,
+  });
+  // the answer on screen belongs to another range (or there is none yet): a long range can take seconds
+  const busy = chart.range !== range;
 
   useEffect(() => {
     let cancelled = false;
@@ -86,10 +94,10 @@ function Charts({ nodeId }: { nodeId: string }) {
     for (const c of CHARTS) for (const n of c.names) params.append("name", n);
     const load = () =>
       void api<Chart>(`/telemetry/nodes/${nodeId}?${params}`).then((r) => {
-        if (!cancelled) setChart(r.ok ? { data: r.data, error: null } : { data: null, error: message(r.code) });
+        if (!cancelled) setChart(r.ok ? { data: r.data, error: null, range } : { data: null, error: message(r.code), range });
       });
     load();
-    const timer = setInterval(load, CHART_POLL_MS);
+    const timer = setInterval(load, range === "5m" || range === "15m" ? SHORT_POLL_MS : CHART_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -99,7 +107,14 @@ function Charts({ nodeId }: { nodeId: string }) {
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">Telemetry</h2>
+        <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-fg-muted">
+          Telemetry
+          {busy && (
+            <span role="status" className="flex items-center gap-1.5 font-normal normal-case tracking-normal">
+              <Spinner className="h-3.5 w-3.5" /> loading {range}…
+            </span>
+          )}
+        </h2>
         <div className="flex gap-1" role="group" aria-label="Time range">
           {RANGES.map((r) => (
             <button
@@ -115,8 +130,12 @@ function Charts({ nodeId }: { nodeId: string }) {
         </div>
       </div>
       {chart.error && <Alert>{chart.error}</Alert>}
+      {busy && !chart.data && !chart.error && <Loading label={`Loading the ${range} charts…`} />}
       {chart.data && (
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div
+          aria-busy={busy}
+          className={`grid gap-3 transition-opacity lg:grid-cols-2 ${busy ? "pointer-events-none opacity-40" : ""}`}
+        >
           {CHARTS.map((spec) => {
             const series = seriesFor(spec, chart.data!.series);
             const lines: LineSeries[] = series.map((s) => ({
@@ -535,7 +554,7 @@ function NodeView({ id }: { id: string }) {
   const [checksRev, setChecksRev] = useState(0);
   const a = agent.data;
   if (agent.error) return <Alert>{agent.error}</Alert>;
-  if (!a) return <p className="text-sm text-fg-muted">Loading…</p>;
+  if (!a) return <Loading label="Loading node…" />;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -574,7 +593,7 @@ function NodePage() {
 
 export default function Page() {
   return (
-    <Suspense fallback={<p className="text-sm text-fg-muted">Loading…</p>}>
+    <Suspense fallback={<Loading />}>
       <NodePage />
     </Suspense>
   );

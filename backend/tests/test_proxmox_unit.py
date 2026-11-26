@@ -244,3 +244,60 @@ def test_audit_statuses() -> None:
     strict = backups.audit(guests, jobs, archives, failures, now, max_age_s=DAY // 4)
     assert {r["vmid"]: r["status"] for r in strict}[106] == "stale"
     assert json.dumps(rows)  # plain JSON for the API
+
+
+# ------------------------------------------------------------------ VM -> hypervisor link
+from janus_ops.proxmox import link  # noqa: E402
+
+RES = [
+    {
+        "type": "node",
+        "node": "pve1",
+        "status": "online",
+        "cpu": 0.5,
+        "maxcpu": 8,
+        "mem": 8 * 2**30,
+        "maxmem": 32 * 2**30,
+    },
+    {
+        "type": "qemu",
+        "vmid": 105,
+        "name": "web1",
+        "node": "pve1",
+        "status": "running",
+        "cpu": 0.25,
+        "maxcpu": 2,
+        "mem": 2**30,
+        "maxmem": 4 * 2**30,
+        "uptime": 60,
+        "lock": "backup",
+    },
+    {"type": "lxc", "vmid": 106, "name": "db", "node": "pve1", "status": "running"},
+    {
+        "type": "qemu",
+        "vmid": 900,
+        "name": "web1",
+        "node": "pve1",
+        "status": "stopped",
+        "template": 1,
+    },
+]
+
+
+def test_short_name_drops_the_domain_and_case() -> None:
+    assert link.short("Web1.lab.local") == "web1"
+    assert link.short(None) == ""
+
+
+def test_match_by_node_name_or_agent_hostname_skips_templates() -> None:
+    assert [g["vmid"] for g in link.match_guests({"WEB1.lab", ""}, RES)] == [105]
+    assert [g["vmid"] for g in link.match_guests({"x", "db"}, RES)] == [106]
+    assert link.match_guests({"unknown"}, RES) == []
+    assert link.match_guests({""}, RES) == []
+
+
+def test_describe_names_the_host_its_load_and_the_lock() -> None:
+    text = link.describe("lab", RES[1], RES)
+    assert "qemu 105 'web1'" in text and "lock=backup" in text
+    assert "hypervisor: pve1 status=online cpu 50% of 8 cores" in text
+    assert "memory 25% of 32.0 GiB" in text and "2 guests running" in text

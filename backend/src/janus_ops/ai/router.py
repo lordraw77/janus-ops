@@ -214,6 +214,7 @@ async def start_diagnosis(problem_id: uuid.UUID, request: Request, session: User
         str(diagnosis_id),
         request.app.state.vault,
         "ai.operate" in session.permissions,
+        request.app.state.proxmox,
     )
     return {"id": str(diagnosis_id), "status": "pending"}
 

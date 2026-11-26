@@ -16,7 +16,7 @@
   --color-fg: #f1f5f9;
   --color-fg-secondary: #cbd5e1;
   --color-fg-nav: #94a3b8;
-  --color-fg-muted: #64748b;
+  --color-fg-muted: #7f8ea3; /* AA (>=5:1) on surface; was #64748b (3.8:1) */
 
   --color-ok: #10b981;
   --color-warn: #f59e0b;
@@ -30,6 +30,47 @@
 
 html {
   color-scheme: dark;
+  scrollbar-color: var(--color-line) var(--color-canvas);
+  scrollbar-width: thin;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-primary) 35%, transparent);
+  color: var(--color-fg);
+}
+
+/* Keyboard focus: one visible ring everywhere (inputs used to drop their outline) */
+:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--color-primary) 75%, transparent);
+  outline-offset: 2px;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary {
+  cursor: pointer;
+}
+
+/* Subtle ambient glow behind the login card */
+.bg-glow {
+  background-image:
+    radial-gradient(60rem 30rem at 50% -10%, color-mix(in oklab, var(--color-primary) 10%, transparent), transparent 70%),
+    radial-gradient(40rem 24rem at 90% 110%, color-mix(in oklab, var(--color-ai) 8%, transparent), transparent 70%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 body {

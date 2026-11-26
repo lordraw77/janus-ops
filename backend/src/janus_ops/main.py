@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,7 +12,7 @@ from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from janus_ops import __version__, health, retention
+from janus_ops import __version__, config_router, health, retention
 from janus_ops.admin import audit_log, roles, users
 from janus_ops.agents import gateway, manual, telemetry
 from janus_ops.agents import router as agents
@@ -34,6 +35,8 @@ from janus_ops.monitoring import (
     fritz_router,
     notify,
     snmp_oids,
+    snmp_trap,
+    snmp_trap_router,
     template_discovery,
     templates,
 )
@@ -46,6 +49,8 @@ from janus_ops.transit import build_kv
 from janus_ops.vault import Vault
 from janus_ops.workflows import engine as workflow_engine
 from janus_ops.workflows.router import router as workflows
+
+log = logging.getLogger(__name__)
 
 API_PREFIX = "/api/v1"
 
@@ -125,6 +130,20 @@ def create_app(
             asyncio.create_task(retention.loop(engine, settings.recordings_dir)),
             asyncio.create_task(discovery.loop(engine)),
         ]
+        communities = snmp_trap.parse_communities(
+            settings.snmp_trap_communities.get_secret_value()
+            if settings.snmp_trap_communities
+            else None
+        )
+        if settings.snmp_trap_port and communities:
+            app.state.trap_receiver = snmp_trap.Receiver(
+                engine, communities, settings.snmp_trap_bind, settings.snmp_trap_port
+            )
+            tasks.append(asyncio.create_task(app.state.trap_receiver.run()))
+        elif settings.snmp_trap_port:
+            log.warning(
+                "JANUS_SNMP_TRAP_PORT is set without JANUS_SNMP_TRAP_COMMUNITIES: no receiver"
+            )
         if settings.monitoring_enabled:
             tasks.append(asyncio.create_task(app.state.check_engine.run()))
             tasks.append(asyncio.create_task(app.state.dispatcher.run()))
@@ -202,6 +221,8 @@ def create_app(
         telemetry.router,
         monitoring.router,
         snmp_oids.router,
+        config_router.router,
+        snmp_trap_router.router,
         fritz_router.router,
         discovery.router,
         template_discovery.router,  # before templates: /templates/suggestions is not an id
