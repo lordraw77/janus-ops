@@ -41,7 +41,7 @@ It is designed from day one for **segmented, air-gapped and proxy-restricted net
 | 🐳 **Container & Stack Manager** | Multi-host Docker management through the agent tunnel, live logs/stats, exec shell, Compose stacks with GitOps, prune & image update checks | Dockhand / Portainer |
 | 🛡️ **Virtualization** | Proxmox VE clusters: quorum, nodes, storage, VM/LXC lifecycle, snapshots, migration, console, backup & replication audit | Proxmox VE UI |
 | 🔑 **SSH Bastion** | Web terminal (xterm.js), credential vault, SFTP browser, multi-tab & broadcast, snippet library, transparent ProxyJump / agent tunnel | MobaXterm / Termius |
-| ⚡ **Automation Hub** | Ansible playbooks with dynamic inventory from the DB, surveys, live output; visual event-driven workflow builder | AWX / n8n |
+| ⚡ **Automation Hub** | Ansible playbooks with dynamic inventory from the DB, surveys, live output; visual event-driven workflow builder with management steps (restart a service, container or Proxmox guest, check a process, HTTP or port, wait, retry, approvals) | AWX / n8n |
 | 🤖 **Janus AI Copilot** | One-click RCA on failing services (logs + metrics + audit trail), contextual IaC generation, a second opinion, **human-approved** action plans. Looks at the node itself through MCP tools, knows which hypervisor a VM runs on and the traps it sent; any OpenAI-compatible provider, with **fallback routes** | — |
 | 💬 **Operate** | A chat in which you pick servers and say what to do (“change the NTP server”): the AI looks, changes the minimum, verifies and reports, with every call listed and audited | — |
 | 📥 **Backup & restore** | Export the whole configuration (hosts, checks, notifications, workflows, AI providers…) to one file, secrets encrypted with a passphrase, and import it back with a preview first | — |
@@ -49,7 +49,7 @@ It is designed from day one for **segmented, air-gapped and proxy-restricted net
 
 Cross-cutting: unified inventory, encrypted secret vault, LDAP-backed login with TOTP and RBAC
 (Admin / Operator / Auditor), immutable audit log with optional terminal session recording,
-global command palette (`Ctrl+K`), a grouped and collapsible menu, and tables you can sort and
+global command palette (`Ctrl+K`), a grouped and collapsible menu, an in-app **Guide** with screenshots of every feature (also published as the [project wiki](https://github.com/lordraw77/janus-ops/wiki)), and tables you can sort and
 filter by host and group.
 
 ## Quick start
@@ -196,8 +196,8 @@ when it reconnects. Agents connect to the URL used in the browser (or `JANUS_AGE
 and trust Caddy's internal CA, which the proxy container publishes: with `JANUS_TLS=internal`,
 **`JANUS_DOMAIN` must be the host name or IP the agents use**, so that the certificate matches.
 
-The **Dashboard** shows a host-health hexagon, a card per node (CPU, RAM, disk, CPU sparkline)
-and the items needing attention (agent offline, file system ≥ 85 %, memory ≥ 90 %, failed units).
+The **Dashboard** shows a host-health hexagon, a card per node (CPU, RAM, disk, CPU sparkline; ordered by name,
+by load or by dragging, and shrinkable to two lines) and the items needing attention (a scrolling list) (agent offline, file system ≥ 85 %, memory ≥ 90 %, failed units).
 Thresholds are fixed until the alerting engine (F3). Each node page has charts over 1 h – 7 days.
 Protocol: [proto/agent-protocol.md](proto/agent-protocol.md).
 

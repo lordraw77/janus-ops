@@ -228,7 +228,7 @@ function WorkflowDialog({
               </button>
             </span>
           )}
-          <span className="ml-2 text-[11px] text-fg-muted">A destructive command and every approval step wait for a person.</span>
+          <span className="ml-2 text-[11px] text-fg-muted">A step that changes something waits for a person unless you mark it unattended; every approval step waits.</span>
         </div>
         <div className="max-h-[68vh] overflow-y-auto pr-1">
           {mode === "graph" && (
@@ -240,6 +240,7 @@ function WorkflowDialog({
                 nodes={nodes.data ?? []}
                 channels={channels.data ?? []}
                 channelsReadable={!channels.error}
+                checks={checks.data ?? []}
                 height={480}
               />
             </div>

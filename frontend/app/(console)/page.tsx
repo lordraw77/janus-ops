@@ -1,17 +1,40 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { type DragEvent, useEffect, useMemo, useState } from "react";
 
-import { AttentionTable, HexagonHealth, NodeCard } from "@/components/Noc";
+import { AttentionTable, CardControls, HexagonHealth, NodeCard } from "@/components/Noc";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Alert } from "@/components/ui";
 import type { Dashboard } from "@/lib/agents";
 import { api, message } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { DEFAULT_LAYOUT, type Layout, moveBefore, readLayout, sortNodes } from "@/lib/dashboardLayout";
 import { useEnvironments } from "@/lib/environments";
 
 const POLL_MS = 10_000;
+const LAYOUT_KEY = "janus.dashboard.layout";
+
+/** The card layout, kept in this browser (it is a personal view, not a setting of the installation). */
+function useLayout(): [Layout, (next: Layout) => void] {
+  // only mounted after sign-in, in the browser: reading the storage while creating the state is safe
+  const [layout, setLayout] = useState<Layout>(() => {
+    try {
+      return readLayout(window.localStorage.getItem(LAYOUT_KEY));
+    } catch {
+      return DEFAULT_LAYOUT; // storage blocked
+    }
+  });
+  const save = (next: Layout) => {
+    setLayout(next);
+    try {
+      window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+    } catch {
+      /* not saved, still applied */
+    }
+  };
+  return [layout, save];
+}
 
 type ReadyResponse = { status: "ok" | "unavailable"; version: string; checks: Record<string, string> };
 
@@ -84,6 +107,15 @@ function ControlPlane() {
 function Noc() {
   const result = usePoll(loadDashboard);
   const { names } = useEnvironments();
+  const [layout, setLayout] = useLayout();
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const envOrder = (env: string) => names.indexOf(env);
+  const nodes = useMemo(
+    () => (result?.data ? sortNodes(result.data.nodes, layout, envOrder) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- envOrder only reads `names`
+    [result, layout, names],
+  );
   if (result === null)
     return (
       <div className="space-y-4" aria-busy="true" aria-label="Loading dashboard">
@@ -100,17 +132,16 @@ function Noc() {
     );
   if (result.error || !result.data) return <Alert>{result.error}</Alert>;
   const dash = result.data;
-  const order = (env: string) => names.indexOf(env);
-  const nodes = [...dash.nodes].sort(
-    (a, b) =>
-      Number(a.state === "unmonitored") - Number(b.state === "unmonitored") ||
-      order(a.environment) - order(b.environment) ||
-      a.name.localeCompare(b.name),
-  );
+  const free = layout.mode === "custom";
+  const drop = (target: string | null) => {
+    if (dragging) setLayout({ ...layout, order: moveBefore(nodes.map((n) => n.node_id), dragging, target) });
+    setDragging(null);
+    setOver(null);
+  };
   return (
     <>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_1fr]">
-        <HexagonHealth hosts={dash.hosts} services={dash.services} />
+        <HexagonHealth hosts={dash.hosts} services={dash.services} controls={<CardControls layout={layout} onChange={setLayout} />} />
         <AttentionTable items={dash.attention} handled={dash.handled} />
       </div>
       {nodes.length === 0 ? (
@@ -119,10 +150,46 @@ function Noc() {
           enable the Janus agent capability and install it from the node page.
         </p>
       ) : (
-        <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
+        <div className={`grid items-start gap-3 sm:grid-cols-2 ${layout.compact ? "xl:grid-cols-3 2xl:grid-cols-4" : "xl:grid-cols-4 2xl:grid-cols-5"}`}>
           {nodes.map((n) => (
-            <NodeCard key={n.node_id} node={n} />
+            <div
+              key={n.node_id}
+              onDragOver={free && dragging ? (e: DragEvent) => { e.preventDefault(); setOver(n.node_id); } : undefined}
+              onDrop={free && dragging ? (e: DragEvent) => { e.preventDefault(); drop(n.node_id); } : undefined}
+              className={`rounded-lg transition-opacity ${dragging === n.node_id ? "opacity-40" : ""} ${over === n.node_id && dragging !== n.node_id ? "ring-2 ring-primary" : ""}`}
+            >
+              <NodeCard
+                node={n}
+                compact={layout.compact}
+                grip={
+                  free
+                    ? {
+                        onDragStart: (e) => {
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", n.node_id);
+                          const card = e.currentTarget.closest("article");
+                          if (card) e.dataTransfer.setDragImage(card, 16, 16);
+                          setDragging(n.node_id);
+                        },
+                        onDragEnd: () => {
+                          setDragging(null);
+                          setOver(null);
+                        },
+                      }
+                    : undefined
+                }
+              />
+            </div>
           ))}
+          {free && dragging && (
+            <div
+              onDragOver={(e) => { e.preventDefault(); setOver("__end"); }}
+              onDrop={(e) => { e.preventDefault(); drop(null); }}
+              className={`flex min-h-16 items-center justify-center rounded-lg border-2 border-dashed text-xs text-fg-muted ${over === "__end" ? "border-primary text-primary" : "border-line"}`}
+            >
+              Drop here to put it last
+            </div>
+          )}
         </div>
       )}
       <p className="font-mono text-[10px] text-fg-muted">

@@ -47,6 +47,7 @@ from janus_ops.terminal import router as terminal
 from janus_ops.terminal import sftp, snippets
 from janus_ops.transit import build_kv
 from janus_ops.vault import Vault
+from janus_ops.workflows import actions as workflow_actions
 from janus_ops.workflows import engine as workflow_engine
 from janus_ops.workflows.router import router as workflows
 
@@ -109,18 +110,19 @@ def create_app(
         app.state.agent_jobs = set()  # nodes with a bootstrap/uninstall in progress
         app.state.gitops_jobs = set()  # GitOps deploys running in the background
         app.state.workflow_jobs = set()  # workflow runs advancing in the background
-        # a run interrupted by a restart is resumed, unless a command step was in flight: then it is
-        # marked failed and a person decides (skipped when the schema is not migrated yet: /ready
-        # reports that)
-        with contextlib.suppress(Exception):
-            await workflow_engine.recover(
-                engine, app.state.agents, app.state.workflow_jobs, app.state.vault
-            )
         # the check templates shipped with the product (same: needs the migrated schema)
         with contextlib.suppress(Exception):
             await templates.sync_builtin(engine)
         app.state.docker = DockerAccess(engine, app.state.vault, settings, app.state.agents)
         app.state.proxmox = ProxmoxAccess(engine, app.state.vault)
+        workflow_actions.bind(app.state.docker, app.state.proxmox)
+        # a run interrupted by a restart is resumed, unless a command step was in flight: then it is
+        # marked failed and a person decides (skipped when the schema is not migrated yet: /ready
+        # reports that). After the Docker and Proxmox access exist: the steps may need them.
+        with contextlib.suppress(Exception):
+            await workflow_engine.recover(
+                engine, app.state.agents, app.state.workflow_jobs, app.state.vault
+            )
         app.state.check_engine = check_engine.Engine(
             engine, app.state.agents, app.state.proxmox, app.state.vault
         )

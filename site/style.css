@@ -155,3 +155,12 @@ footer ul { display: flex; flex-wrap: wrap; gap: 8px 22px; list-style: none; mar
 footer a { color: var(--text-2); }
 
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* ---------- screenshots ---------- */
+.shots { gap: 28px 20px; }
+.shot { margin: 0; }
+.shot a { display: block; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0,0,0,.35); transition: border-color .15s; }
+.shot a:hover { border-color: var(--border-strong); }
+.shot img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; }
+.shot figcaption { margin: 10px 2px 0; font-size: 13px; color: var(--muted); }
+.shot figcaption b { color: var(--text); margin-right: 4px; }

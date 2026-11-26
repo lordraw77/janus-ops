@@ -1,5 +1,5 @@
-// Copy brand assets from res/ (single source of truth) into public/ before dev/build.
-import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
+// Copy brand assets and the Guide screenshots from res/ (single source of truth) into public/ before dev/build.
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,5 +16,13 @@ copyFileSync(
   join(res, "logos", "janus-ops-logo-256.png"),
   join(pub, "brand", "janus-ops-logo-256.png"),
 );
+
+// screenshots of the Guide page
+if (existsSync(join(res, "guide"))) {
+  mkdirSync(join(pub, "guide"), { recursive: true });
+  for (const file of readdirSync(join(res, "guide"))) {
+    copyFileSync(join(res, "guide", file), join(pub, "guide", file));
+  }
+}
 
 console.log("brand assets synced from res/");

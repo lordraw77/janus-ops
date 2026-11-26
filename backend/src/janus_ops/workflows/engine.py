@@ -28,7 +28,14 @@ from janus_ops.agents import exec as node_exec
 from janus_ops.agents.hub import AgentHub
 from janus_ops.monitoring import notify
 from janus_ops.vault import Vault
-from janus_ops.workflows.model import condition_met, needs_approval
+from janus_ops.workflows import actions
+from janus_ops.workflows.model import (
+    changes_things,
+    condition_met,
+    describe,
+    needs_approval,
+    render,
+)
 
 log = logging.getLogger(__name__)
 
@@ -136,7 +143,40 @@ async def advance(
                     await _step_failed(engine, run_id, step["id"], "rejected")
                     await _set_run(engine, run_id, "failed", f"{step['id']}: rejected")
                     return
-            outcome = await _execute(engine, hub, run, step, vault)
+            if changes_things(step) and step.get("unattended"):
+                await _audit_run(
+                    engine,
+                    run,
+                    "workflow.step.unattended",
+                    {"step": step["id"], "does": describe(step)},
+                )
+            outcome = await _execute(engine, hub, run, step, vault, results)
+            attempts = 1
+            while (
+                not outcome["ok"]
+                and attempts <= int(step.get("retries", 0))
+                and outcome["error"] not in actions.NO_RETRY
+            ):
+                await asyncio.sleep(int(step.get("retry_delay_s", 10)))
+                fresh = await _load(engine, run_id)
+                if fresh is None or fresh.status != "running":
+                    return  # cancelled while waiting to try again
+                attempts += 1
+                outcome = await _execute(engine, hub, run, step, vault, results)
+            if attempts > 1:
+                outcome["output"] = f"{outcome['output']}\n(attempt {attempts})".strip()
+            if changes_things(step):
+                await _audit_run(
+                    engine,
+                    run,
+                    "workflow.step.executed",
+                    {
+                        "step": step["id"],
+                        "does": describe(step),
+                        "ok": outcome["ok"],
+                        "error": outcome["error"],
+                    },
+                )
             await _step_finished(engine, run_id, step["id"], outcome)
             if not outcome["ok"] and step.get("on_failure") == "continue":
                 await _audit_run(
@@ -215,7 +255,7 @@ async def _approval_state(engine: AsyncEngine, run_id: str, step_id: str) -> _Ap
 def _reason(step: dict[str, Any]) -> str:
     if step["action"] == "approval":
         return str(step["params"].get("reason", ""))
-    return f"exec on {step['params']['node_id']}: {step['params']['command']}"[:500]
+    return describe(step)
 
 
 async def _request_approval(engine: AsyncEngine, run: _Run, step: dict[str, Any]) -> None:
@@ -257,7 +297,12 @@ async def _wait(engine: AsyncEngine, run_id: str, step_id: str) -> None:
 
 
 async def _execute(
-    engine: AsyncEngine, hub: AgentHub, run: _Run, step: dict[str, Any], vault: Vault | None
+    engine: AsyncEngine,
+    hub: AgentHub,
+    run: _Run,
+    step: dict[str, Any],
+    vault: Vault | None,
+    results: dict[str, tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Runs one step and says how it went: ok, the output, the exit code and an error code."""
     params = step["params"]
@@ -274,7 +319,12 @@ async def _execute(
         by = state.decided_by if state else "?"
         return {"ok": True, "output": f"approved by {by}", "exit_code": None, "error": None}
     if step["action"] == "notify":
-        return await _notify(engine, run, step, vault)
+        return await _notify(engine, run, step, vault, results or {})
+    if step["action"] not in ("exec",):
+        try:
+            return await actions.run(engine, hub, step, run.requested_by)
+        except KeyError:
+            return {"ok": False, "output": "", "exit_code": None, "error": "unknown_action"}
     # exec
     async with engine.connect() as conn:
         if not await node_exec.policy_allows_exec(conn, str(params["node_id"])):
@@ -293,7 +343,11 @@ async def _execute(
 
 
 async def _notify(
-    engine: AsyncEngine, run: _Run, step: dict[str, Any], vault: Vault | None
+    engine: AsyncEngine,
+    run: _Run,
+    step: dict[str, Any],
+    vault: Vault | None,
+    results: dict[str, tuple[str, str]],
 ) -> dict[str, Any]:
     """Sends the step's message to its channel. A missing or disabled channel fails the step."""
     params = step["params"]
@@ -317,12 +371,13 @@ async def _notify(
         return {"ok": False, "output": "", "exit_code": None, "error": "channel_disabled"}
     if vault is None:
         return {"ok": False, "output": "", "exit_code": None, "error": "vault_unavailable"}
+    body = render(params["message"], results)[:500]
     message = notify.Message(
         event="workflow",
         state="ok",
         node=run.name,
         check=step["id"],
-        output=params["message"],
+        output=body,
         problem_id=run.id,
     )
     try:
@@ -343,7 +398,7 @@ async def _notify(
             target_id=run.name,
             payload={"run": run.id, "step": step["id"], "channel": channel_id},
         )
-    return {"ok": True, "output": params["message"], "exit_code": None, "error": None}
+    return {"ok": True, "output": body, "exit_code": None, "error": None}
 
 
 async def _step_finished(
@@ -489,11 +544,11 @@ async def recover(
     jobs: set[asyncio.Task[None]] | None = None,
     vault: Vault | None = None,
 ) -> int:
-    """At startup, runs left `running` by a restart are dealt with. A run whose command step was in
-    flight is marked failed (the command may have half happened: a person decides whether to start
-    it again). Any other run is resumed from its first unfinished step, which is safe because steps
-    already done are never run again. Without `hub` and `jobs` nothing is resumed and every
-    interrupted run is marked failed. Returns how many runs were marked failed."""
+    """At startup, runs left `running` by a restart are dealt with. A run whose command or
+    management step was in flight is marked failed (it may have half happened: a person decides
+    whether to start it again). Any other run is resumed from its first unfinished step, which
+    is safe because steps already done are never run again. Without `hub` and `jobs` nothing is
+    resumed and every interrupted run is marked failed. Returns how many runs were marked failed."""
     resume = hub is not None and jobs is not None
     async with engine.begin() as conn:
         rows = await conn.execute(
@@ -501,7 +556,8 @@ async def recover(
                 "UPDATE workflow_run r SET status = 'failed', error = 'server_restarted',"
                 " finished_at = now() WHERE r.status = 'running' AND (:all OR EXISTS ("
                 "  SELECT 1 FROM workflow_step_run s WHERE s.run_id = r.id"
-                "  AND s.action = 'exec' AND s.status = 'running')) RETURNING r.id"
+                "  AND s.action IN ('exec', 'service', 'process', 'container', 'proxmox')"
+                "  AND s.status = 'running')) RETURNING r.id"
             ),
             {"all": not resume},
         )

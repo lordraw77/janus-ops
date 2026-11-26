@@ -551,3 +551,125 @@ def test_a_restart_resumes_a_run_between_steps_and_fails_one_with_a_command_in_f
     assert states[resumed_id][0] == "done"
     assert states[failed_id] == ("failed", "server_restarted")
     assert _notify_count(resumed_id) == 1  # step "a" was already done: only "b" ran
+
+
+# ---------------------------------------------------------------- management steps
+
+
+def _step(step_id: str, action: str, **params: Any) -> dict[str, Any]:
+    extra = {
+        k: params.pop(k)
+        for k in ("unattended", "retries", "retry_delay_s", "when", "on_failure")
+        if k in params
+    }
+    return {"id": step_id, "action": action, "params": params, **extra}
+
+
+def _audit_count(run_id: str, action: str) -> int:
+    return int(
+        run_sql(
+            "SELECT count(*) FROM audit_event WHERE action = :a AND payload->>'run' = :r",
+            {"a": action, "r": run_id},
+        )[0][0]
+    )
+
+
+def test_a_service_restart_waits_for_approval_but_an_unattended_one_does_not() -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)
+        careful = _workflow(
+            admin, [_step("bounce", "service", node_id=node, name="nginx", op="restart")]
+        )
+        careful_run = _wait_until(
+            admin, _run(admin, careful["id"]), {"waiting_approval", "done", "failed"}
+        )
+        brave = _workflow(
+            admin,
+            [_step("bounce", "service", node_id=node, name="nginx", op="restart", unattended=True)],
+        )
+        brave_id = _run(admin, brave["id"])
+        brave_run = _wait_until(admin, brave_id, {"done", "failed"})
+    assert careful_run["status"] == "waiting_approval"
+    assert careful_run["approvals"][0]["reason"] == f"service restart nginx on {node}"
+    # no agent here: the step is refused, and the run says why (it did not wait for a person)
+    assert brave_run["status"] == "failed" and brave_run["error"] == "bounce: exec_not_allowed"
+    assert brave_run["approvals"] == []
+    assert _audit_count(brave_id, "workflow.step.unattended") == 1
+    assert _audit_count(brave_id, "workflow.step.executed") == 1
+
+
+def test_a_status_step_reads_only_and_needs_no_approval() -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)
+        wf = _workflow(admin, [_step("look", "service", node_id=node, name="nginx", op="status")])
+        run = _wait_until(admin, _run(admin, wf["id"]), {"waiting_approval", "done", "failed"})
+    assert run["status"] == "failed" and run["error"] == "look: exec_not_allowed"
+    assert run["approvals"] == []
+
+
+def test_a_port_step_is_read_against_what_is_expected() -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)  # 127.0.0.30: nothing listens on port 9
+        closed = _workflow(admin, [_step("p", "port", node_id=node, port=9, expect="closed")])
+        opened = _workflow(admin, [_step("p", "port", node_id=node, port=9, expect="open")])
+        closed_run = _wait_until(admin, _run(admin, closed["id"]), {"done", "failed"})
+        opened_run = _wait_until(admin, _run(admin, opened["id"]), {"done", "failed"})
+    assert closed_run["status"] == "done"
+    assert opened_run["status"] == "failed" and opened_run["error"] == "p: port_closed"
+
+
+def test_a_failed_step_is_tried_again_and_says_how_many_attempts() -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)
+        wf = _workflow(
+            admin,
+            [_step("p", "port", node_id=node, port=9, retries=1, retry_delay_s=1)],
+        )
+        run = _wait_until(admin, _run(admin, wf["id"]), {"done", "failed"})
+    assert run["status"] == "failed"
+    assert "(attempt 2)" in run["steps"][0]["output"]
+
+
+def test_a_check_step_reads_the_state_and_a_message_quotes_an_earlier_step(
+    channel: str, recorded: list[Any]
+) -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)
+        check = str(uuid.uuid4())
+        run_sql(
+            "INSERT INTO service_check (id, node_id, name, kind) VALUES"
+            " (CAST(:i AS uuid), CAST(:n AS uuid), :name, 'cpu.load')",
+            {"i": check, "n": node, "name": _name("load")},
+        )
+        run_sql(
+            "INSERT INTO check_state (check_id, state, last_output)"
+            " VALUES (CAST(:i AS uuid), 'crit', 'load 9')",
+            {"i": check},
+        )
+        wf = _workflow(
+            admin,
+            [
+                _step("c", "check", check_id=check, state="crit"),
+                _step("w", "wait", seconds=1),
+                _notify("say", channel, "the check says: {{c.output}} ({{c.status}})"),
+            ],
+        )
+        run = _wait_until(admin, _run(admin, wf["id"]), {"done", "failed"})
+        bad = _workflow(admin, [_step("c", "check", check_id=check, state="ok")])
+        bad_run = _wait_until(admin, _run(admin, bad["id"]), {"done", "failed"})
+    assert run["status"] == "done"
+    assert any("load 9" in item[2] and "(ok)" in item[2] for item in recorded)
+    assert bad_run["status"] == "failed" and bad_run["error"] == "c: state_crit"
+
+
+def test_a_management_step_with_a_bad_field_is_refused_by_the_api() -> None:
+    with signed_in("alice") as admin:
+        node = _plain_node(admin)
+        body = {
+            "name": _name("wf"),
+            "definition": {
+                "trigger": {"type": "manual"},
+                "steps": [_step("x", "service", node_id=node, name="nginx; reboot")],
+            },
+        }
+        assert admin.post("/api/v1/workflows", json=body).status_code == 422

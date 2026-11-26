@@ -202,6 +202,11 @@
 > - Release 0.10.0: agent signatures renewed (the agent bytes changed), image published on Docker Hub.
 >
 > **v0.35** — **continuous aggregates and the 500-node load test** (NFR-05): see the F1 row of the metrics and `docs/SIZING.md`. Release **0.7.0** published (the live stack runs on it): migration `0025` on the real database materialised the history of 16M points in about 2 minutes in the background; charts of 1 h to 90 d answer in 50-100 ms.
+> **workflow management steps** (FR-80, no migration): `service`, `container`, `process`, `proxmox`, `http`, `port`, `check`
+> and `wait` steps next to `exec`, `notify` and `approval` (`workflows/actions.py`); retries per step, `unattended` as
+> the author's explicit opt-out of the approval of a step that changes something (audited), `{{step.output}}` in
+> messages, `examples/workflows/`. Steps act on the node's own address or through the agent, Docker and Proxmox access:
+> no user-typed URL or shell line.
 > **v0.34** — **Ctrl+K palette (pages, nodes, SSH, run a check, ask the AI); undo/redo in the workflow editor (Ctrl+Z, Ctrl+Shift+Z or Y; typing in a field is one step; 100 steps; `lib/history.ts`, 8 tests) and a browser test of a notification step; Copilot and Ansible tried in the browser on the live stack**: the Copilot with the real NVIDIA model, Ansible with a real dry run on a node (see FR-05 and the F7/F6 rows). Release **0.6.0** (graph workflow editor) published on Docker Hub; the live stack runs on the published image.
 > **v0.33** — **graph workflow editor**: nodes and branches on a canvas (React Flow), drag to reorder and connect, side panel,
 > read-only graph with run status; `ui` positions stored with each step; see §5.11.
@@ -960,8 +965,8 @@ No blocking question. The `[VERIFY]` points remain to be closed during the indiv
 ```
 STATE
   Tier:        L
-  Phase:       Engineer — release 0.13.0; F0–F7 completed (F7 and F6 with partial checks, §5.10 and §5.9); F8 completed in code with partial checks (§5.11); F2 with AC-04 verified only on Debian amd64
-  Delivered:   plan v0.31, migrations 0001–0043, release 0.13.0 (SNMP traps and MIBs, configuration export/import, credential reveal, VM-to-hypervisor link); F0–F5 (F3 alerts, F4 containers, F5 Proxmox); F0–F2: web SSH bastion, SFTP, snippets;
+  Phase:       Engineer — release 0.14.0; F0–F7 completed (F7 and F6 with partial checks, §5.10 and §5.9); F8 completed in code with partial checks (§5.11); F2 with AC-04 verified only on Debian amd64
+  Delivered:   plan v0.31, migrations 0001–0043, release 0.14.0 (workflow management steps, in-app Guide and wiki, dashboard card orders and compact view; before it 0.13.0: SNMP traps and MIBs, configuration export/import, credential reveal, VM-to-hypervisor link); F0–F5 (F3 alerts, F4 containers, F5 Proxmox); F0–F2: web SSH bastion, SFTP, snippets;
                Go agent (WSS tunnel, telemetry, buffer), enrollment with an ed25519 key,
                SSH bootstrap, idempotent Timescale ingest, NOC dashboard and node page;
                F6 Ansible, F7 AI Copilot; F8: exec/PTY through the agent, signed auto-update with rollback and mass rollout,

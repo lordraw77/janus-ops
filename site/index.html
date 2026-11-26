@@ -26,6 +26,8 @@
     <a class="brand" href="#top"><img src="assets/janus-ops-logo-512.png" alt="" width="32" height="32"><span>Janus-<b>Ops</b></span></a>
     <ul>
       <li><a href="#modules">Modules</a></li>
+      <li><a href="#screens">Screenshots</a></li>
+      <li><a href="#docs">Docs</a></li>
       <li><a href="#agent">Agent</a></li>
       <li><a href="#security">Security</a></li>
       <li><a href="#start">Quick start</a></li>
@@ -38,7 +40,7 @@
 <header class="hero" id="top">
   <div class="wrap">
     <div>
-      <span class="eyebrow">Open source · Apache-2.0 · Pre-1.0 (0.13)</span>
+      <span class="eyebrow">Open source · Apache-2.0 · Pre-1.0 (0.14)</span>
       <h1>One portal for your whole <em>infrastructure</em> lifecycle.</h1>
       <p class="lead">Monitoring, containers, virtualization, SSH, automation and AI troubleshooting in a single pane of glass. One inventory at the core, decoupled modules around it, and an agent that only ever connects <strong>out</strong>.</p>
       <div class="cta">
@@ -121,7 +123,7 @@
       <article class="card">
         <div class="ico tel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7.5 11 16M16 7.5 13 16"/></svg></div>
         <h3>Automation hub</h3>
-        <p>Ansible playbooks with a dynamic inventory from the database, surveys and live output. A visual workflow builder with webhook, interval and alert triggers, branches, approvals, and runs that resume after a restart.</p>
+        <p>Ansible playbooks with a dynamic inventory from the database, surveys and live output. A visual workflow builder with webhook, interval and alert triggers, branches and approvals, and management steps: restart a service, container or Proxmox guest, check a process, an HTTP page or a port, wait, retry and verify. Steps that change something wait for a person unless you decide otherwise, and runs resume after a restart.</p>
         <span class="tag">AWX / n8n-style</span>
       </article>
       <article class="card">
@@ -142,6 +144,43 @@
         <p>Recorded SSH sessions and Operate chats move to a searchable archive after a number of days and are deleted after another. Search even inside the recorded output, filter by host or group, replay, and mark what must never be deleted.</p>
         <span class="tag">You set the days</span>
       </article>
+      <article class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h3>Access, roles &amp; audit</h3>
+        <p>Sign-in against an LDAP directory, two-factor authentication, roles with fine-grained permissions (reading a stored secret has its own), per-group scoping and an audit log of who did what, from where.</p>
+        <span class="tag">Least privilege by default</span>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap">
+    <span class="kicker">Screenshots</span>
+    <h2>See it before you run it.</h2>
+    <p class="sub">Taken on a demonstration installation with sample hosts and real agents; nothing comes from a real infrastructure. The in-app Guide and the wiki show all 52 screens, chapter by chapter.</p>
+    <div class="grid c2 shots">
+      <figure class="shot"><a href="assets/shots/dashboard.png"><img src="assets/shots/dashboard.png" alt="Dashboard: Fleet health at a glance, with the host cards ordered by name, load or by hand, and a compact view." width="1440" height="900" loading="lazy"></a><figcaption><b>Dashboard</b> Fleet health at a glance: nodes, open problems, trends, refreshed every 10 seconds.</figcaption></figure>
+      <figure class="shot"><a href="assets/shots/node-telemetry.png"><img src="assets/shots/node-telemetry.png" alt="Telemetry: Per-node charts from the agent, with short ranges that follow every sample." width="1440" height="900" loading="lazy"></a><figcaption><b>Telemetry</b> Per-node charts from the agent, with short ranges that follow every sample.</figcaption></figure>
+      <figure class="shot"><a href="assets/shots/containers.png"><img src="assets/shots/containers.png" alt="Containers: Multi-host Docker, with logs, stats, stacks and images." width="1440" height="900" loading="lazy"></a><figcaption><b>Containers</b> Multi-host Docker, with logs, stats, stacks and images.</figcaption></figure>
+      <figure class="shot"><a href="assets/shots/problems.png"><img src="assets/shots/problems.png" alt="Problems: OK / WARN / CRIT / UNKNOWN with acknowledgements, downtimes and history." width="1440" height="900" loading="lazy"></a><figcaption><b>Problems</b> OK / WARN / CRIT / UNKNOWN with acknowledgements, downtimes and history.</figcaption></figure>
+      <figure class="shot"><a href="assets/shots/terminal-session.png"><img src="assets/shots/terminal-session.png" alt="SSH bastion: A web terminal with pinned host keys, a file browser and recorded sessions." width="1440" height="900" loading="lazy"></a><figcaption><b>SSH bastion</b> A web terminal with pinned host keys, a file browser and recorded sessions.</figcaption></figure>
+      <figure class="shot"><a href="assets/shots/ai-copilot.png"><img src="assets/shots/ai-copilot.png" alt="AI Copilot: A root-cause diagnosis that looked at the node through read-only tools." width="1440" height="900" loading="lazy"></a><figcaption><b>AI Copilot</b> A root-cause diagnosis that looked at the node through read-only tools.</figcaption></figure>
+      <figure class="shot"><a href="assets/shots/workflows-editor.png"><img src="assets/shots/workflows-editor.png" alt="Workflows: A visual builder with triggers, branches, approvals and Ansible steps." width="1440" height="900" loading="lazy"></a><figcaption><b>Workflows</b> A visual builder with triggers, branches, approvals and Ansible steps.</figcaption></figure>
+      <figure class="shot"><a href="assets/shots/traps.png"><img src="assets/shots/traps.png" alt="SNMP traps: Traps received and shown by name, one click from an alert." width="1440" height="900" loading="lazy"></a><figcaption><b>SNMP traps</b> Traps received and shown by name, one click from an alert.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section id="docs" class="alt">
+  <div class="wrap">
+    <span class="kicker">Documentation</span>
+    <h2>A manual in the app, the same one on GitHub.</h2>
+    <p class="sub">Every feature is explained step by step, with the permission it needs and screenshots. Pick the entry point that suits you.</p>
+    <div class="grid c3">
+      <article class="card"><h3>In-app Guide</h3><p>Open <b>Help &rarr; Guide</b> in the console (or press Ctrl+K and type "guide"): 23 chapters in menu order, searchable, with a contents panel that stays in place while you read.</p><span class="tag">Always matches your version</span></article>
+      <article class="card"><h3>GitHub wiki</h3><p>The same chapters as wiki pages, generated from the Guide so they never drift. Read them without installing anything.</p><span class="tag"><a href="https://github.com/lordraw77/janus-ops/wiki">Open the wiki &rarr;</a></span></article>
+      <article class="card"><h3>Reference</h3><p>README and quick start, changelog, AI providers, OpenBao, sizing, agent releases, and the roadmap with acceptance criteria.</p><span class="tag"><a href="https://github.com/lordraw77/janus-ops#readme">README &rarr;</a> · <a href="https://github.com/lordraw77/janus-ops/blob/main/CHANGELOG.md">Changelog &rarr;</a></span></article>
     </div>
   </div>
 </section>
@@ -209,6 +248,7 @@
       <div class="item"><span class="pill done">DONE</span><span>Commands through the agent, GitOps (private repositories included), SNMP, visual workflows, signed agent updates, external secret manager</span></div>
       <div class="item"><span class="pill done">DONE</span><span>Windows agent, AI providers with fallback routes, MCP tools for the Copilot, Operate chat, archive with retention (release 0.10)</span></div>
       <div class="item"><span class="pill done">DONE</span><span>SNMP v2c traps with MIB names, SNMP templates from the UI, configuration export and import, credential reveal with its own permission, the Copilot knows where a VM runs (release 0.13)</span></div>
+      <div class="item"><span class="pill done">DONE</span><span>Workflow management steps (service, container, process, Proxmox guest, HTTP and port checks, wait, retries), the in-app Guide with 52 screenshots, a GitHub wiki generated from it, and this site's screenshots and documentation sections, dashboard cards by name, load or by hand with a compact view (release 0.14)</span></div>
       <div class="item"><span class="pill next">NEXT</span><span>Remote desktop in the browser, OIDC sign-in, SNMPv3 traps, credentials by reference</span></div>
     </div>
     <p class="sub" style="margin-top:24px"><a href="https://github.com/lordraw77/janus-ops/blob/main/docs/PLAN.md">Read the plan and roadmap →</a></p>

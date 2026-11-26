@@ -163,9 +163,30 @@ export function addStep(def: Definition, action: Action): Definition {
 /** One line saying what a step does, for the node. */
 export function describeStep(step: Step): string {
   const p = step.params;
-  if (step.action === "exec") return String(p.command ?? "") || "no command yet";
-  if (step.action === "notify") return String(p.message ?? "") || "no message yet";
-  return String(p.reason ?? "") || "waits for a person";
+  const op = String(p.op ?? "");
+  switch (step.action) {
+    case "exec":
+      return String(p.command ?? "") || "no command yet";
+    case "notify":
+      return String(p.message ?? "") || "no message yet";
+    case "service":
+    case "container":
+      return p.name ? `${op} ${p.name}` : "no name yet";
+    case "process":
+      return p.name ? `${op === "kill" ? `kill (${p.signal})` : "check"} ${p.name}` : "no name yet";
+    case "http":
+      return `${p.method ?? "GET"} ${p.scheme ?? "http"}://…:${p.port ?? 80}${p.path ?? "/"} → ${p.expect_status ?? 200}`;
+    case "port":
+      return `port ${p.port} is ${p.expect ?? "open"}`;
+    case "wait":
+      return `wait ${p.seconds} s`;
+    case "check":
+      return p.check_id ? `check is ${String(p.state ?? "ok").toUpperCase()}${Number(p.wait_s) ? ` (wait ${p.wait_s} s)` : ""}` : "no check yet";
+    case "proxmox":
+      return `${op || "status"} ${p.kind} ${p.vmid}${p.pve_node ? ` on ${p.pve_node}` : ""}`;
+    default:
+      return String(p.reason ?? "") || "waits for a person";
+  }
 }
 
 export const STATUS_TONE: Record<string, string> = {

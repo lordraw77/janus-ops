@@ -6,9 +6,18 @@ import uuid
 import pytest
 from pydantic import ValidationError
 
-from janus_ops.workflows.model import DefinitionIn, condition_met, exec_nodes, needs_approval
+from janus_ops.workflows.model import (
+    DefinitionIn,
+    condition_met,
+    describe,
+    exec_nodes,
+    needs_approval,
+    render,
+    target_nodes,
+)
 
 NODE = str(uuid.UUID("00000000-0000-0000-0000-00000000000a"))
+OTHER = str(uuid.UUID("00000000-0000-0000-0000-00000000000b"))
 
 
 def _definition(
@@ -201,3 +210,127 @@ def test_the_position_drawn_by_the_visual_editor_is_kept_and_bounded() -> None:
     for bad in ({"x": 1}, {"x": 1, "y": 2, "z": 3}, {"x": 10**7, "y": 0}, {"x": "left", "y": 0}):
         with pytest.raises(ValidationError):
             DefinitionIn.model_validate(_wf({**step, "ui": bad}))
+
+
+# ---------------------------------------------------------------- management actions
+
+
+def _one(action: str, params: dict[str, object], **extra: object) -> dict[str, object]:
+    step = DefinitionIn.model_validate(
+        _definition([{"id": "a", "action": action, "params": params, **extra}])
+    )
+    return step.normal()["steps"][0]  # type: ignore[no-any-return]
+
+
+@pytest.mark.parametrize(
+    ("action", "params", "waits"),
+    [
+        ("service", {"node_id": NODE, "name": "nginx", "op": "restart"}, True),
+        ("service", {"node_id": NODE, "name": "nginx", "op": "status"}, False),
+        ("process", {"node_id": NODE, "name": "java", "op": "kill"}, True),
+        ("process", {"node_id": NODE, "name": "java", "op": "check"}, False),
+        ("container", {"node_id": NODE, "name": "web", "op": "stop"}, True),
+        ("container", {"node_id": NODE, "name": "web", "op": "status"}, False),
+        ("proxmox", {"cluster": NODE, "pve_node": "pve1", "vmid": 101, "op": "reboot"}, True),
+        ("proxmox", {"cluster": NODE, "pve_node": "pve1", "vmid": 101, "op": "status"}, False),
+        ("http", {"node_id": NODE, "port": 8080}, False),
+        ("port", {"node_id": NODE, "port": 22}, False),
+        ("wait", {"seconds": 5}, False),
+    ],
+)
+def test_only_the_steps_that_change_something_wait_for_approval(
+    action: str, params: dict[str, object], waits: bool
+) -> None:
+    assert needs_approval(_one(action, params)) is waits
+
+
+def test_an_unattended_step_runs_without_a_person_but_an_approval_still_waits() -> None:
+    step = _one("service", {"node_id": NODE, "name": "nginx", "op": "restart"}, unattended=True)
+    assert step["unattended"] is True
+    assert needs_approval(step) is False
+    approval = _one("approval", {"reason": "go?"}, unattended=True)
+    assert needs_approval(approval) is True
+
+
+def test_the_defaults_are_not_stored() -> None:
+    step = _one("wait", {"seconds": 5})
+    assert "retries" not in step
+    assert "unattended" not in step
+    kept = _one("wait", {"seconds": 5}, retries=2, retry_delay_s=30)
+    assert (kept["retries"], kept["retry_delay_s"]) == (2, 30)
+
+
+@pytest.mark.parametrize(
+    ("action", "params"),
+    [
+        ("service", {"node_id": NODE, "name": "nginx; reboot"}),
+        ("service", {"node_id": NODE, "name": "a b"}),
+        ("process", {"node_id": NODE, "name": "java -9"}),
+        ("container", {"node_id": NODE, "name": "../etc"}),
+        ("service", {"node_id": NODE, "name": "nginx", "shell": "true"}),
+        ("http", {"node_id": NODE, "path": "no-slash"}),
+        ("http", {"node_id": NODE, "path": "/a b"}),
+        ("port", {"node_id": NODE, "port": 70000}),
+        ("wait", {"seconds": 601}),
+        ("proxmox", {"cluster": NODE, "pve_node": "pve1", "vmid": 101, "op": "snapshot"}),
+        ("proxmox", {"cluster": NODE, "pve_node": "pve1;x", "vmid": 101}),
+        ("proxmox", {"cluster": NODE, "pve_node": "pve1", "vmid": 5}),
+    ],
+)
+def test_a_wrong_management_step_is_refused(action: str, params: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        _one(action, params)
+
+
+def test_target_nodes_include_every_action_that_names_a_node() -> None:
+    steps = [
+        {"id": "a", "action": "service", "params": {"node_id": NODE, "name": "x"}},
+        {
+            "id": "b",
+            "action": "proxmox",
+            "params": {"cluster": OTHER, "pve_node": "p", "vmid": 100},
+        },
+        {"id": "c", "action": "wait", "params": {"seconds": 1}},
+    ]
+    out = DefinitionIn.model_validate(_definition(steps)).normal()
+    assert target_nodes(out) == {NODE, OTHER}
+
+
+def test_a_message_may_quote_an_earlier_step_only() -> None:
+    notify = {"channel_id": NODE, "message": "restarted: {{svc.output}} ({{svc.status}})"}
+    svc = {"id": "svc", "action": "service", "params": {"node_id": NODE, "name": "x"}}
+    DefinitionIn.model_validate(
+        _definition([svc, {"id": "n", "action": "notify", "params": notify}])
+    )
+    with pytest.raises(ValidationError):
+        DefinitionIn.model_validate(
+            _definition([{"id": "n", "action": "notify", "params": notify}, svc])
+        )
+    with pytest.raises(ValidationError):
+        DefinitionIn.model_validate(
+            _definition([{"id": "n", "action": "notify", "params": notify}])
+        )
+
+
+def test_render_fills_output_and_status() -> None:
+    results = {"svc": ("done", " active \n"), "bad": ("failed", "boom")}
+    assert render("{{ svc.output }}/{{svc.status}}/{{bad.status}}/{{nope.output}}!", results) == (
+        "active/ok/failed/!"
+    )
+    assert len(render("{{bad.output}}", {"bad": ("failed", "x" * 900)})) == 300
+
+
+def test_describe_says_what_the_step_does() -> None:
+    step = _one("service", {"node_id": NODE, "name": "nginx", "op": "restart"})
+    assert describe(step) == f"service restart nginx on {NODE}"
+
+
+def test_every_example_workflow_is_a_valid_definition() -> None:
+    import json
+    from pathlib import Path
+
+    found = sorted((Path(__file__).resolve().parents[2] / "examples" / "workflows").glob("*.json"))
+    assert len(found) >= 4
+    for path in found:
+        definition = DefinitionIn.model_validate(json.loads(path.read_text()))
+        assert definition.steps, path.name

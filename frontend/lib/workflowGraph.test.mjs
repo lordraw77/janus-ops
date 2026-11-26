@@ -148,3 +148,15 @@ test("a condition can be set and cleared directly", () => {
   assert.deepEqual(set.steps[1].when, { step: "a", outcome: "ok", contains: "active" });
   assert.equal(setWhen(set, "b", null).steps[1].when, undefined);
 });
+
+test("each management step says what it does on its node", () => {
+  const s = (action, params) => ({ id: "a", action, params });
+  assert.equal(describeStep(s("service", { op: "restart", name: "nginx" })), "restart nginx");
+  assert.equal(describeStep(s("process", { op: "kill", signal: "HUP", name: "java" })), "kill (HUP) java");
+  assert.equal(describeStep(s("container", { op: "status", name: "" })), "no name yet");
+  assert.equal(describeStep(s("http", { method: "GET", scheme: "https", port: 443, path: "/up", expect_status: 200 })), "GET https://…:443/up → 200");
+  assert.equal(describeStep(s("port", { port: 22, expect: "closed" })), "port 22 is closed");
+  assert.equal(describeStep(s("wait", { seconds: 30 })), "wait 30 s");
+  assert.equal(describeStep(s("check", { check_id: "x", state: "ok", wait_s: 60 })), "check is OK (wait 60 s)");
+  assert.equal(describeStep(s("proxmox", { op: "reboot", kind: "lxc", vmid: 105, pve_node: "pve1" })), "reboot lxc 105 on pve1");
+});

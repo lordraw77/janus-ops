@@ -40,7 +40,7 @@ self-hosted TLS, and a Go agent that only opens outbound connections.
 | Containers | Docker hosts and Compose stacks through the agent or SSH: logs, stats, actions, shell |
 | Proxmox VE | Clusters, VM/LXC lifecycle, snapshots, backup audit, consoles |
 | Ansible | Playbook catalogue (Git, upload, editor, network mount, SFTP), surveys, live runs, history |
-| Workflows | Graph editor (drag steps, connect branches), manual / interval / alert / signed-webhook triggers, conditional branches, approvals, run status drawn on the flow |
+| Workflows | Graph editor (drag steps, connect branches), manual / interval / alert / signed-webhook triggers, conditional branches, approvals, management steps (service, container, process, Proxmox guest, HTTP and port checks, wait, retries; changing steps wait for a person unless marked unattended), run status drawn on the flow |
 | GitOps | Compose stacks deployed from Git with a signed webhook |
 | AI Copilot | Diagnosis of problems on any OpenAI-compatible provider, with fallback routes and optional MCP tools that look at the node; knows which hypervisor a VM runs on; action plans you approve |
 | Operate | A chat to carry out an instruction on servers you pick (looks, changes the minimum, verifies, reports); every call audited |
@@ -108,7 +108,7 @@ Check readiness:
 
 ```bash
 curl -k https://localhost/api/v1/ready
-# {"status":"ok","version":"0.13.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
+# {"status":"ok","version":"0.14.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
 ```
 
 Optional overrides, used with `-f compose.yaml -f <file>` (all in the same `deploy/` folder):
@@ -295,12 +295,12 @@ Sign in as `breakglass`. Every use is audited and logged as a warning.
 # 1. Apply the schema (needs PostgreSQL 16 with the TimescaleDB extension)
 docker run --rm \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.13.0 migrate
+  lordraw/janus-ops:0.14.0 migrate
 
 # 2. Start the server
 docker run -d --name janus-ops -p 127.0.0.1:8000:8000 \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.13.0
+  lordraw/janus-ops:0.14.0
 ```
 
 ## Configuration
@@ -356,7 +356,7 @@ Variables used by the Compose stack (`.env`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.13.0` | Image and tag to run |
+| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.14.0` | Image and tag to run |
 | `JANUS_DOMAIN` | `localhost` | Host name served by Caddy |
 | `JANUS_TLS` | `internal` | `internal` (local CA, works offline) or an e-mail for ACME |
 | `JANUS_HTTP_PORT` / `JANUS_HTTPS_PORT` | `80` / `443` | Host ports of the proxy |
@@ -406,7 +406,7 @@ Variables used by the Compose stack (`.env`):
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.13.0`) | Immutable release, built from git tag `vX.Y.Z` |
+| `X.Y.Z` (e.g. `0.14.0`) | Immutable release, built from git tag `vX.Y.Z` |
 | `X.Y` (e.g. `0.5`) | Latest patch release of that minor version |
 | `latest` | Most recent release |
 

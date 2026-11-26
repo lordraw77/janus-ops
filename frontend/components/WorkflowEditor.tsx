@@ -1,12 +1,14 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Bell, Clock, Copy, GitBranch, Plus, ShieldCheck, Terminal, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Clock, Copy, GitBranch, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 
-import { Button, Select, TextInput } from "@/components/ui";
-import { StepFields } from "@/components/WorkflowStepFields";
+import { Select, TextInput } from "@/components/ui";
+import { ACTION_ICON, ACTION_TONE, AddStepBar } from "@/components/WorkflowActions";
+import { StepFields, StepOptions } from "@/components/WorkflowStepFields";
 import { TriggerFields } from "@/components/WorkflowTrigger";
 import {
+  ACTION_LABEL,
   type Action,
   type ChannelOption,
   type CheckOption,
@@ -18,13 +20,8 @@ import {
   defaultParams,
   freeId,
   problems,
+  waitsForPerson,
 } from "@/lib/workflows";
-
-const ACTIONS: Record<Action, { label: string; icon: ReactNode; tone: string }> = {
-  exec: { label: "Run a command", icon: <Terminal className="h-3.5 w-3.5" aria-hidden />, tone: "text-primary" },
-  notify: { label: "Send a notification", icon: <Bell className="h-3.5 w-3.5" aria-hidden />, tone: "text-ok" },
-  approval: { label: "Wait for approval", icon: <ShieldCheck className="h-3.5 w-3.5" aria-hidden />, tone: "text-warn" },
-};
 
 const OUTCOME_LABEL: Record<Outcome, string> = {
   ok: "succeeded",
@@ -125,24 +122,22 @@ export function WorkflowEditor({
 
       {/* steps */}
       {value.steps.map((s, i) => {
-        const meta = ACTIONS[s.action];
         const earlier = value.steps.slice(0, i);
-        const destructive = s.action === "exec" && !s.params.read_only;
         return (
           <div key={`${i}-${s.action}`}>
             <Connector branch={Boolean(s.when)} />
             <div className={`rounded border bg-canvas p-3 ${s.when ? "border-dashed border-warn/70" : "border-line"}`}>
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-elevated text-[10px] font-semibold text-fg-secondary">{i + 1}</span>
-                <span className={`flex items-center gap-1 text-xs font-semibold ${meta.tone}`}>
-                  {meta.icon} {meta.label}
+                <span className={`flex items-center gap-1 text-xs font-semibold ${ACTION_TONE[s.action]}`}>
+                  {ACTION_ICON[s.action]} {ACTION_LABEL[s.action]}
                 </span>
                 {s.when && (
                   <span className="flex items-center gap-1 rounded border border-warn/50 px-1.5 py-0.5 text-[10px] text-warn">
                     <GitBranch className="h-3 w-3" aria-hidden /> only if {s.when.step} {OUTCOME_LABEL[s.when.outcome]}
                   </span>
                 )}
-                {(s.action === "approval" || destructive) && (
+                {waitsForPerson(s) && (
                   <span className="rounded border border-warn/50 px-1.5 py-0.5 text-[10px] text-warn">waits for a person</span>
                 )}
                 {s.on_failure === "continue" && (
@@ -169,6 +164,7 @@ export function WorkflowEditor({
                 nodes={nodes}
                 channels={channels}
                 channelsReadable={channelsReadable}
+                checks={checks}
                 onParams={(patch) => setParams(i, patch)}
                 onRename={(id) => rename(i, id)}
               />
@@ -208,6 +204,7 @@ export function WorkflowEditor({
                     If this step fails, carry on (so a later step can react to the failure)
                   </label>
                 )}
+                <StepOptions step={s} onPatch={(patch) => setStep(i, patch)} />
               </div>
             </div>
           </div>
@@ -216,18 +213,7 @@ export function WorkflowEditor({
 
       <Connector />
       <div className="flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1 text-xs text-fg-muted">
-          <Plus className="h-3.5 w-3.5" aria-hidden /> Add a step:
-        </span>
-        <Button onClick={() => add("exec")}>
-          <Terminal className="h-3.5 w-3.5" aria-hidden /> Command
-        </Button>
-        <Button onClick={() => add("notify")}>
-          <Bell className="h-3.5 w-3.5" aria-hidden /> Notification
-        </Button>
-        <Button onClick={() => add("approval")}>
-          <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Approval
-        </Button>
+        <AddStepBar onAdd={add} />
         {t.type === "interval" && (
           <span className="ml-auto flex items-center gap-1 text-[11px] text-fg-muted">
             <Clock className="h-3 w-3" aria-hidden /> runs every {Number(t.interval_s) || "…"} s

@@ -33,7 +33,7 @@ from janus_ops.auth.sessions import Session
 from janus_ops.scope import require_node
 from janus_ops.vault import VaultUnavailable
 from janus_ops.workflows import engine as wf
-from janus_ops.workflows.model import DefinitionIn, exec_nodes
+from janus_ops.workflows.model import DefinitionIn, target_nodes
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -66,7 +66,7 @@ class DecisionIn(BaseModel):
 
 
 async def _scope_check(request: Request, session: Session, definition: dict[str, Any]) -> None:
-    for node_id in exec_nodes(definition):
+    for node_id in target_nodes(definition):
         await require_node(request, session, node_id)
 
 

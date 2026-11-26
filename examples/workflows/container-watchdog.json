@@ -1,0 +1,45 @@
+{
+  "trigger": {
+    "type": "interval",
+    "interval_s": 300
+  },
+  "steps": [
+    {
+      "id": "look",
+      "action": "container",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "name": "web",
+        "op": "status",
+        "expect": "running"
+      },
+      "on_failure": "continue"
+    },
+    {
+      "id": "restart",
+      "action": "container",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "name": "web",
+        "op": "restart"
+      },
+      "when": {
+        "step": "look",
+        "outcome": "failed"
+      },
+      "unattended": true
+    },
+    {
+      "id": "tell",
+      "action": "notify",
+      "params": {
+        "channel_id": "00000000-0000-0000-0000-00000000000c",
+        "message": "web was down ({{look.output}}), restarted: {{restart.status}}"
+      },
+      "when": {
+        "step": "restart",
+        "outcome": "ok"
+      }
+    }
+  ]
+}

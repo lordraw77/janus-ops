@@ -10,7 +10,7 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
       <div className="flex min-h-screen">
         <Sidebar />
         <CommandPalette />
-        <main className="flex-1 overflow-x-hidden p-6">{children}</main>
+        <main className="flex-1 overflow-x-clip p-6">{children}</main>
       </div>
     </AuthGate>
   );

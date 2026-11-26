@@ -1,0 +1,59 @@
+{
+  "trigger": {
+    "type": "manual"
+  },
+  "steps": [
+    {
+      "id": "look",
+      "action": "process",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "name": "java",
+        "op": "check",
+        "expect": "running"
+      }
+    },
+    {
+      "id": "ask",
+      "action": "process",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "name": "java",
+        "op": "kill",
+        "signal": "TERM"
+      }
+    },
+    {
+      "id": "wait",
+      "action": "wait",
+      "params": {
+        "seconds": 10
+      }
+    },
+    {
+      "id": "still",
+      "action": "process",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "name": "java",
+        "op": "check",
+        "expect": "stopped"
+      },
+      "on_failure": "continue"
+    },
+    {
+      "id": "force",
+      "action": "process",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "name": "java",
+        "op": "kill",
+        "signal": "KILL"
+      },
+      "when": {
+        "step": "still",
+        "outcome": "failed"
+      }
+    }
+  ]
+}

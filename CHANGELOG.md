@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.14.0 — 2026-11-26
+
+**Added**
+- **Dashboard cards, three orders and a compact view.** A selector in the health panel orders the host cards by **name**
+  (A-Z or Z-A), by **load** (the busiest first or last, on CPU, RAM, disk or load, hosts without a reading always
+  last) or **free**, by dragging a card by its handle. **Compact** shrinks a card to two lines: name, address,
+  environment and buttons, then state, uptime and the numbers for CPU, disk and load. The choice is saved per
+  browser. The **Unhandled problems** panel no longer grows with the number of problems: it stops at the height of the
+  health panel and scrolls, with its header kept in view.
+- **Workflow management steps.** Eight new steps next to Command, Notification and Approval: **Service** (systemd unit or
+  Windows service: status, start, stop, restart, reload), **Container** (Docker: status, start, stop, restart),
+  **Process** (check by exact name, or kill with TERM, HUP, INT or KILL), **Proxmox guest** (status, start, shut down,
+  stop, reboot, snapshot, waiting for the task), **HTTP check** and **Port check** (against the node's own address, so
+  no free URL), **Check state** (read a check, optionally waiting until it reaches a state) and **Wait**. Each step builds
+  its operation from validated fields (no shell), and a status step can succeed when the target is running or stopped
+  so a condition can react to it.
+- **Retries, unattended steps and quoting.** Any step can be tried again up to 5 times, 1 to 300 s apart (not for a wrong
+  setup). A step that changes something still waits for a person by default; the author can tick **Run without waiting
+  for approval** on that step for automatic fixes, and the audit log records `workflow.step.unattended` and
+  `workflow.step.executed` for each run. A notification can quote an earlier step with `{{step.output}}` or
+  `{{step.status}}`. A run interrupted by a restart while one of these steps was in flight is marked failed, as for commands.
+- **Workflow recipes** in `examples/workflows/` (restart a service on an alert, container watchdog, snapshot then
+  upgrade, stop a runaway process), checked by a test.
+- **Guide.** A **Guide** entry in the menu (Help) opens a detailed, searchable manual of every feature, chapter by chapter
+  and in the order of the menu, with 52 screenshots taken on a demonstration installation (sample hosts, real agents,
+  traps and an AI diagnosis; nothing from a real infrastructure). It is open to every signed-in user and also reachable from
+  Ctrl+K. The text is `frontend/lib/guide.ts`, the images are in `res/guide/` (copied to `public/guide/` at build); a test
+  checks that every screenshot exists and none is unused.
+- **Wiki and site.** The GitHub wiki is generated from the Guide (`scripts/gen-wiki.mjs`, published by `scripts/publish-wiki.sh`),
+  and the GitHub Pages site gains a screenshots gallery, a documentation section and an access-control card.
+
+**Fixed**
+- The contents of the **Guide** now stay in place while the chapters scroll (the page container no longer
+  clips the sticky panel).
+
 ## 0.13.0 — 2026-11-26
 
 **Added**

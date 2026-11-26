@@ -4,6 +4,7 @@ import {
   Archive,
   ChevronDown,
   ChevronRight,
+  BookOpen,
   Bell,
   Bot,
   RadioTower,
@@ -72,6 +73,7 @@ export const NAV: NavItem[] = [
   { label: "Audit log", icon: ScrollText, keywords: "history who did", target: { href: "/audit/", permission: "audit.read" } },
   { label: "Notifications", icon: Bell, target: { href: "/notifications/", permission: "notifications.manage" } },
   { label: "Settings", icon: Settings, target: { href: "/settings/", permission: "inventory.read" } },
+  { label: "Guide", icon: BookOpen, keywords: "help manual documentation how to tutorial screenshots", target: { href: "/guide/" } },
 ];
 
 /** The menu by area. Items are found by label in NAV, which also feeds the Ctrl+K palette. */
@@ -81,6 +83,7 @@ const GROUPS: { id: string; label: string; items: string[] }[] = [
   { id: "automation", label: "Automation", items: ["Ansible", "Workflows", "GitOps", "SSH Bastion"] },
   { id: "ai", label: "AI", items: ["Janus AI Copilot", "Operate"] },
   { id: "admin", label: "Administration", items: ["Users & roles", "Audit log", "Archive", "Settings"] },
+  { id: "help", label: "Help", items: ["Guide"] },
 ];
 const COLLAPSED_KEY = "janus.nav.collapsed";
 

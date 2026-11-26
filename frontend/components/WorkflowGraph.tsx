@@ -20,10 +20,11 @@ import {
   useNodesState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Bell, GitBranch, ShieldCheck, Terminal, Trash2, Wand2, X, Zap } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GitBranch, Trash2, Wand2, X, Zap } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { StepFields } from "@/components/WorkflowStepFields";
+import { ACTION_ICON, ACTION_TONE, AddStepBar } from "@/components/WorkflowActions";
+import { StepFields, StepOptions } from "@/components/WorkflowStepFields";
 import { Button, Field, Select, TextInput } from "@/components/ui";
 import {
   type FlowEdge,
@@ -43,20 +44,18 @@ import {
   toGraph,
 } from "@/lib/workflowGraph";
 import {
+  ACTION_LABEL,
   type Action,
   type ChannelOption,
+  type CheckOption,
   type Definition,
   type NodeOption,
   type Outcome,
   type Step,
   problemSteps,
+  waitsForPerson,
 } from "@/lib/workflows";
 
-const META: Record<Action, { label: string; icon: ReactNode; tone: string }> = {
-  exec: { label: "Command", icon: <Terminal className="h-3.5 w-3.5" aria-hidden />, tone: "text-primary" },
-  notify: { label: "Notification", icon: <Bell className="h-3.5 w-3.5" aria-hidden />, tone: "text-ok" },
-  approval: { label: "Approval", icon: <ShieldCheck className="h-3.5 w-3.5" aria-hidden />, tone: "text-warn" },
-};
 const TRIGGER_LABEL: Record<string, string> = {
   manual: "By hand",
   interval: "On a schedule",
@@ -87,8 +86,7 @@ function TriggerNode({ data }: NodeProps<RFNode>) {
 
 function StepNode({ data, selected }: NodeProps<RFNode>) {
   const s = data.step as Step;
-  const meta = META[s.action];
-  const waits = s.action === "approval" || (s.action === "exec" && !s.params.read_only);
+  const waits = waitsForPerson(s);
   const tone = data.status ? (STATUS_TONE[data.status] ?? "border-line") : data.issue ? "border-crit" : selected ? "border-primary" : "border-line";
   return (
     <div
@@ -99,8 +97,8 @@ function StepNode({ data, selected }: NodeProps<RFNode>) {
       <Handle type="target" position={Position.Top} id="in" isConnectable={false} className="!bg-line" />
       <Handle type="target" position={Position.Left} id="cond" title="Drop a branch here" className="!h-3 !w-3 !bg-warn" />
       <div className="flex items-center gap-1.5">
-        <span className={`flex items-center gap-1 font-semibold ${meta.tone}`}>
-          {meta.icon} {meta.label}
+        <span className={`flex items-center gap-1 font-semibold ${ACTION_TONE[s.action]}`}>
+          {ACTION_ICON[s.action]} {ACTION_LABEL[s.action]}
         </span>
         <span className="ml-auto font-mono text-[10px] text-fg-muted">{s.id}</span>
       </div>
@@ -169,6 +167,7 @@ export function WorkflowGraph({
   nodes: nodeOptions = [],
   channels = [],
   channelsReadable = true,
+  checks = [],
   readOnly = false,
   statuses,
   height = 520,
@@ -178,6 +177,7 @@ export function WorkflowGraph({
   nodes?: NodeOption[];
   channels?: ChannelOption[];
   channelsReadable?: boolean;
+  checks?: CheckOption[];
   /** draw only (the run view): no dragging, no panel */
   readOnly?: boolean;
   /** step id -> status of the run, to colour the nodes */
@@ -230,12 +230,7 @@ export function WorkflowGraph({
     <div className="space-y-2">
       {!readOnly && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-fg-muted">Add a step:</span>
-          {(Object.keys(META) as Action[]).map((a) => (
-            <Button key={a} onClick={() => add(a)}>
-              {META[a].icon} {META[a].label}
-            </Button>
-          ))}
+          <AddStepBar onAdd={add} />
           <Button onClick={() => { change(relayout(value)); setNote(null); fit(); }} title="Put the steps back in a tidy column">
             <Wand2 className="h-3.5 w-3.5" aria-hidden /> Tidy up
           </Button>
@@ -311,8 +306,8 @@ export function WorkflowGraph({
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
-                  <span className={`flex items-center gap-1 font-semibold ${META[step.action].tone}`}>
-                    {META[step.action].icon} {META[step.action].label}
+                  <span className={`flex items-center gap-1 font-semibold ${ACTION_TONE[step.action]}`}>
+                    {ACTION_ICON[step.action]} {ACTION_LABEL[step.action]}
                   </span>
                   <button
                     type="button"
@@ -330,6 +325,7 @@ export function WorkflowGraph({
                   nodes={nodeOptions}
                   channels={channels}
                   channelsReadable={channelsReadable}
+                  checks={checks}
                   onParams={(patch) => change({ ...value, steps: value.steps.map((s) => (s.id === step.id ? { ...s, params: { ...s.params, ...patch } } : s)) })}
                   onRename={(id) => { change(renameStep(value, step.id, id)); setSelected(id); }}
                 />
@@ -377,6 +373,7 @@ export function WorkflowGraph({
                       If this step fails, carry on
                     </label>
                   )}
+                  <StepOptions step={step} onPatch={(patch) => change({ ...value, steps: value.steps.map((s) => (s.id === step.id ? { ...s, ...patch } : s)) })} />
                 </div>
               </div>
             )}

@@ -1,0 +1,67 @@
+{
+  "trigger": {
+    "type": "manual"
+  },
+  "steps": [
+    {
+      "id": "ok",
+      "action": "approval",
+      "params": {
+        "reason": "Maintenance window open? Snapshot, then upgrade the guest."
+      }
+    },
+    {
+      "id": "snap",
+      "action": "proxmox",
+      "params": {
+        "cluster": "00000000-0000-0000-0000-00000000000a",
+        "pve_node": "pve1",
+        "kind": "qemu",
+        "vmid": 101,
+        "op": "snapshot",
+        "snapshot": "before-upgrade",
+        "wait_s": 300
+      }
+    },
+    {
+      "id": "upgrade",
+      "action": "exec",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "command": "apt-get -y upgrade",
+        "timeout_s": 300
+      }
+    },
+    {
+      "id": "reboot",
+      "action": "proxmox",
+      "params": {
+        "cluster": "00000000-0000-0000-0000-00000000000a",
+        "pve_node": "pve1",
+        "kind": "qemu",
+        "vmid": 101,
+        "op": "reboot",
+        "wait_s": 120
+      }
+    },
+    {
+      "id": "back",
+      "action": "port",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "port": 22,
+        "expect": "open"
+      },
+      "retries": 5,
+      "retry_delay_s": 30
+    },
+    {
+      "id": "done",
+      "action": "notify",
+      "params": {
+        "channel_id": "00000000-0000-0000-0000-00000000000c",
+        "message": "upgrade done, ssh is back: {{back.output}}"
+      }
+    }
+  ]
+}

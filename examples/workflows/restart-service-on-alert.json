@@ -1,0 +1,84 @@
+{
+  "trigger": {
+    "type": "alert"
+  },
+  "steps": [
+    {
+      "id": "status",
+      "action": "service",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "name": "nginx",
+        "op": "status",
+        "expect": "running"
+      },
+      "on_failure": "continue"
+    },
+    {
+      "id": "restart",
+      "action": "service",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "name": "nginx",
+        "op": "restart"
+      },
+      "when": {
+        "step": "status",
+        "outcome": "failed"
+      },
+      "unattended": true
+    },
+    {
+      "id": "settle",
+      "action": "wait",
+      "params": {
+        "seconds": 5
+      },
+      "when": {
+        "step": "restart",
+        "outcome": "ok"
+      }
+    },
+    {
+      "id": "verify",
+      "action": "http",
+      "params": {
+        "node_id": "00000000-0000-0000-0000-00000000000a",
+        "port": 80,
+        "path": "/",
+        "expect_status": 200
+      },
+      "when": {
+        "step": "restart",
+        "outcome": "ok"
+      },
+      "retries": 3,
+      "retry_delay_s": 10,
+      "on_failure": "continue"
+    },
+    {
+      "id": "good",
+      "action": "notify",
+      "params": {
+        "channel_id": "00000000-0000-0000-0000-00000000000c",
+        "message": "nginx restarted and answering: {{verify.output}}"
+      },
+      "when": {
+        "step": "verify",
+        "outcome": "ok"
+      }
+    },
+    {
+      "id": "bad",
+      "action": "notify",
+      "params": {
+        "channel_id": "00000000-0000-0000-0000-00000000000c",
+        "message": "nginx restart did not fix it: {{verify.output}}"
+      },
+      "when": {
+        "step": "verify",
+        "outcome": "failed"
+      }
+    }
+  ]
+}
