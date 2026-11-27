@@ -28,6 +28,15 @@ pytestmark = [
 ]
 
 EXPECTED_TABLES = {
+    "service_heartbeat",
+    "lan_event",
+    "lan_host",
+    "lan_scan",
+    "lan_settings",
+    "lan_subnet",
+    "snmp_mib",
+    "snmp_mib_object",
+    "snmp_trap",
     "ai_config",
     "ai_diagnosis",
     "ai_iac",

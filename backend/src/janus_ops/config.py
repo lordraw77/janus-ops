@@ -154,12 +154,17 @@ class Settings(BaseSettings):
     agent_bootstrap_wait_s: int = Field(default=45, ge=0, le=300)
 
     # --- SNMP traps (F8): a v2c receiver, off unless a port is set. A port below 1024 needs
-    # privileges: listen on 1162 and publish it as 162/udp (deploy/compose.snmp-traps.yaml)
+    # privileges: the compose profile snmp-traps runs it in its own container on 1162 and
+    # publishes it as 162/udp
     snmp_trap_port: int = Field(default=0, ge=0, le=65535, description="UDP port; 0 = off")
     snmp_trap_bind: str = "0.0.0.0"
     snmp_trap_communities: SecretStr | None = Field(
         default=None, description="Comma-separated v2c communities accepted for traps"
     )
+
+    # --- LAN watch: who sweeps the subnets. local = this process (a host install); external = a
+    # lan-scanner container on the host network (profile lan-watch); the compose file sets it
+    lan_scan: Literal["local", "external"] = "local"
 
     # --- Alerting (F3): check engine and notification dispatcher run in this process
     monitoring_enabled: bool = Field(

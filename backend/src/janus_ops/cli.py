@@ -1,4 +1,4 @@
-"""`janus-ops` command line: serve | migrate | version."""
+"""`janus-ops` command line: serve | migrate | setup | lan-scan | snmp-trap | version ..."""
 
 import argparse
 import logging
@@ -22,6 +22,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="migrate, then create the initial administrator from JANUS_ADMIN_* if missing",
     )
     sub.add_parser("version", help="print the version and exit")
+    sub.add_parser(
+        "lan-scan", help="run the LAN scanner alone (compose profile lan-watch, host network)"
+    )
+    sub.add_parser(
+        "snmp-trap", help="run the SNMP trap receiver alone (compose profile snmp-traps)"
+    )
     sc = sub.add_parser(
         "secrets", help="where the master key lives: status, or move it between backends (FR-86)"
     )
@@ -262,6 +268,25 @@ def _import_providers_command(args: argparse.Namespace, settings: Any) -> int:
     return asyncio.run(run())
 
 
+async def _worker(command: str, settings: Any) -> int:
+    """A background worker as a process of its own: the container exits if it cannot run."""
+    if command == "snmp-trap":
+        from janus_ops.monitoring import snmp_trap
+
+        return await snmp_trap.run_standalone(settings)
+
+    from janus_ops.db import create_engine
+    from janus_ops.inventory import lan
+
+    db = create_engine(settings)
+    try:
+        log.info("LAN scanner started")
+        await lan.loop(db)
+    finally:
+        await db.dispose()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "version":
@@ -319,6 +344,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "secrets":
         return _secrets_command(args, settings)
+
+    if args.command in ("lan-scan", "snmp-trap"):
+        import asyncio
+
+        return asyncio.run(_worker(args.command, settings))
 
     if args.command == "breakglass":
         import asyncio

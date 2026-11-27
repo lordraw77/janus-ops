@@ -29,12 +29,15 @@ from pysnmp.entity.rfc3413 import ntfrcv
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from janus_ops import heartbeat
+
 log = logging.getLogger(__name__)
 
 SNMP_TRAP_OID = "1.3.6.1.6.3.1.1.4.1.0"
 RATE_PER_MIN = 120
 QUEUE_MAX = 1000
 KEEP_DAYS = 30
+HEARTBEAT = "snmp-trap-receiver"
 VALUE_CHARS = 500
 MAX_VARBINDS = 40
 
@@ -196,6 +199,11 @@ class Receiver:
             log.error("snmp trap receiver cannot listen on %s:%d: %s", self.host, self.port, exc)
             return
         pruned = 0.0
+        beating = asyncio.create_task(
+            heartbeat.keep_beating(
+                self.db, HEARTBEAT, lambda: {"port": self.port, "dropped": self.dropped}
+            )
+        )
         try:
             while True:
                 try:
@@ -211,7 +219,28 @@ class Receiver:
                 except Exception:
                     log.exception("snmp trap storage failed")
         finally:
+            beating.cancel()
             self.close()
+
+
+async def run_standalone(settings: Any) -> int:
+    """The receiver as a process of its own (compose profile snmp-traps)."""
+    from janus_ops.db import create_engine
+
+    communities = parse_communities(
+        settings.snmp_trap_communities.get_secret_value()
+        if settings.snmp_trap_communities
+        else None
+    )
+    if not settings.snmp_trap_port or not communities:
+        log.error("JANUS_SNMP_TRAP_PORT and JANUS_SNMP_TRAP_COMMUNITIES must be set")
+        return 2
+    db = create_engine(settings)
+    try:
+        await Receiver(db, communities, settings.snmp_trap_bind, settings.snmp_trap_port).run()
+    finally:
+        await db.dispose()
+    return 1  # run() returns only when the socket could not be opened
 
 
 def parse_communities(raw: str | None) -> list[str]:

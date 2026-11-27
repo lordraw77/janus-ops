@@ -1,5 +1,5 @@
 # OpenBao for Janus-Ops (FR-86): single node, integrated storage, TLS on the internal network,
-# and automatic unseal with a static key so that a restart needs nobody (compose.openbao.yaml).
+# and automatic unseal with a static key so that a restart needs nobody (profile openbao of compose.yaml).
 # The unseal key sits next to the data on this host: it protects a copy of the data volume, not a
 # host that is already compromised. See docs/OPENBAO.md.
 ui            = false

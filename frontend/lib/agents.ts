@@ -133,6 +133,7 @@ export function formatValue(v: number, unit: string | null): string {
   if (unit === "B") return formatBytes(v);
   if (unit === "B/s") return formatBytes(v, true);
   if (unit === "s") return formatDuration(v);
+  if (unit === "count") return Math.round(v).toString();
   return v === 0 || v >= 100 ? v.toFixed(0) : v.toFixed(2);
 }
 

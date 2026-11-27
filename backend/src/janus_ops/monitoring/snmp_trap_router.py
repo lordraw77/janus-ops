@@ -14,10 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from janus_ops import audit
+from janus_ops import audit, heartbeat
 from janus_ops.auth.deps import require_permission
 from janus_ops.auth.sessions import Session
-from janus_ops.monitoring import mib
+from janus_ops.monitoring import mib, snmp_trap
 
 router = APIRouter(tags=["monitoring"])
 Reader = Annotated[Session, Depends(require_permission("inventory.read"))]
@@ -35,16 +35,17 @@ def _named(index: mib.NameIndex, oid: str | None) -> str | None:
 
 @router.get("/snmp-traps/status")
 async def status(request: Request, _: Reader) -> dict[str, Any]:
-    settings = request.app.state.settings
-    receiver = getattr(request.app.state, "trap_receiver", None)
+    """The receiver runs in this process or in its own container: either way it reports in."""
     async with request.app.state.engine.connect() as conn:
+        beat = await heartbeat.read(conn, snmp_trap.HEARTBEAT)
         last_hour = await conn.scalar(
             text("SELECT count(*) FROM snmp_trap WHERE received_at > now() - interval '1 hour'")
         )
+    info = beat[1] if beat else {}
     return {
-        "enabled": receiver is not None,
-        "port": settings.snmp_trap_port or None,
-        "dropped": receiver.dropped if receiver else 0,
+        "enabled": beat is not None,
+        "port": info.get("port"),
+        "dropped": int(info.get("dropped", 0)),
         "last_hour": int(last_hour or 0),
     }
 

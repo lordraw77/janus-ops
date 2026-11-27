@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.15.0 — 2026-11-27
+
+**Added**
+- **Network watch** (like WatchYourLAN). A new **Network watch** page sweeps the networks you choose with ARP and ping every
+  1 minute to 1 day (set per network, in the background or with **Sweep now**) and lists every address that is up with its
+  MAC and DNS name. Each address and MAC pair is kept with its **history**: when it came online, went offline, an address
+  that answers from a **different MAC**, a MAC that appears on a **different address**. A host shows an availability strip
+  (24 hours to 90 days), its percentage of time up and its events; a **Changes** tab is the feed of all of them, and a chart
+  shows the hosts up over time. History is deleted after a configurable number of days (90 by default). Needs
+  `inventory.manage`.
+- In Network watch, an address that is a node of the **inventory** is marked with a badge linking to it, and the host list can
+  be filtered to the hosts in or out of the inventory. **Scan a network now** scans a network typed by hand and saves the
+  result (hosts and history); it can be kept as a watched network or saved as paused.
+- **Compose profiles.** The optional pieces are now profiles of the one `deploy/compose.yaml`, turned on with
+  `COMPOSE_PROFILES` in `deploy/.env`: **`snmp-traps`** (the receiver in its own container, publishing UDP 162; replaces
+  `compose.snmp-traps.yaml`), **`lan-watch`** (the LAN scanner on the host network, with a loopback relay to the database)
+  and **`openbao`** (replaces `compose.openbao.yaml`: set `JANUS_BAO_CA_FILE=/etc/janus-ops/openbao-tls/ca.crt`).
+  `compose.build.yaml`, `compose.release.yaml`, `compose.mcp.yaml` and `compose.external-directory.yaml` stay separate
+  because they change the app's own settings. New commands `janus-ops lan-scan` and `janus-ops snmp-trap`; the workers
+  report through a heartbeat, so the pages say when one is not running. "Sweep now" is a request the scanner picks up.
+- Network watch scans with no capability: the scanner pings through the kernel's unprivileged ICMP socket and reads
+  `/proc/net/arp`. Networks up to a /22. Migrations `0044` to `0046`.
+
+**Fixed**
+- The migrations test now lists the SNMP trap and MIB tables of 0043.
+
 ## 0.14.0 — 2026-11-26
 
 **Added**

@@ -29,7 +29,15 @@ from janus_ops.containers.access import DockerAccess
 from janus_ops.db import create_engine, schema_head
 from janus_ops.directory import LldapAdmin
 from janus_ops.gitops.router import router as gitops
-from janus_ops.inventory import credentials, discovery, environments, groups, nodes, services
+from janus_ops.inventory import (
+    credentials,
+    discovery,
+    environments,
+    groups,
+    lan,
+    nodes,
+    services,
+)
 from janus_ops.monitoring import engine as check_engine
 from janus_ops.monitoring import (
     fritz_router,
@@ -132,6 +140,8 @@ def create_app(
             asyncio.create_task(retention.loop(engine, settings.recordings_dir)),
             asyncio.create_task(discovery.loop(engine)),
         ]
+        if settings.lan_scan == "local":
+            tasks.append(asyncio.create_task(lan.loop(engine)))
         communities = snmp_trap.parse_communities(
             settings.snmp_trap_communities.get_secret_value()
             if settings.snmp_trap_communities
@@ -227,6 +237,7 @@ def create_app(
         snmp_trap_router.router,
         fritz_router.router,
         discovery.router,
+        lan.router,
         template_discovery.router,  # before templates: /templates/suggestions is not an id
         templates.router,
         workflows,

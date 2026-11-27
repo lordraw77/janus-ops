@@ -1,13 +1,15 @@
 # OpenBao in the stack: the master key outside Janus-Ops (FR-86)
 
-`deploy/compose.openbao.yaml` adds an OpenBao (raft storage, internal TLS) that **unseals itself**
+The `openbao` profile of `deploy/compose.yaml` adds an OpenBao (raft storage, internal TLS) that **unseals itself**
 on every restart with a static key (`seal "static"`). Janus-Ops uses it as the Transit engine (the
 master key never leaves OpenBao) or as KV v2.
 
 ## First time
 
     scripts/openbao-setup.sh                      # keys, certificates, init, Transit, KV, AppRole, .env
-    make docker/run COMPOSE_EXTRA="-f deploy/compose.openbao.yaml"   # (with your own list of overrides)
+    # in deploy/.env: COMPOSE_PROFILES=openbao (add your other profiles), JANUS_BAO_ADDR=https://openbao:8200,
+    #                 JANUS_BAO_CA_FILE=/etc/janus-ops/openbao-tls/ca.crt
+    make docker/run
     docker compose ... exec janus-ops janus-ops secrets migrate --to openbao-transit
     # then in deploy/.env: JANUS_SECRET_BACKEND=openbao-transit, and recreate janus-ops
 

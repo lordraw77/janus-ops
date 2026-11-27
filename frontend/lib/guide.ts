@@ -317,7 +317,7 @@ export const GUIDE: GuideSection[] = [
         ordered: true,
         items: [
           "Set the communities you accept: `JANUS_SNMP_TRAP_COMMUNITIES=public-ro,lab` in `deploy/.env`.",
-          "Start the stack with the extra file: `docker compose -f deploy/compose.yaml -f deploy/compose.snmp-traps.yaml up -d`.",
+          "Turn the receiver on: add `snmp-traps` to `COMPOSE_PROFILES` in `deploy/.env` and start the stack again (`make docker/run`). It runs in its own container and publishes **162/udp**.",
           "Point your devices at this server, port **162/udp**, SNMP v2c, with one of the communities. SNMPv3 traps are not accepted yet.",
         ],
       },
@@ -326,6 +326,42 @@ export const GUIDE: GuideSection[] = [
       {
         t: "p",
         text: "**MIB files** (`.mib`, `.txt`) give names to the numeric OIDs: upload your vendor's files and the traps are shown by name. Only names are kept, not the files.",
+      },
+    ],
+  },
+  {
+    id: "lan",
+    group: "Monitoring",
+    title: "Network watch",
+    summary: "See which addresses are up on your networks, with their MAC, and keep the history of who comes and goes.",
+    needs: "`inventory.manage`",
+    blocks: [
+      {
+        t: "p",
+        text: "**Network watch** sweeps the networks you choose with ARP and ping, in the background, every few minutes, and remembers what it sees. Each **address and MAC pair** is a host: it is *up* while a sweep sees it and *down* after. Nothing is lost when a host goes quiet: if `192.168.0.10` is up for ten minutes, down, then up again with the same MAC, the page shows each stretch. If the same address answers from **another MAC**, or a MAC turns up on **another address**, that is recorded as a change and both pairs are kept.",
+      },
+      { t: "h", text: "Turning it on" },
+      {
+        t: "list",
+        ordered: true,
+        items: [
+          "ARP does not cross a router or the bridge of a container, so the sweep is done by a **scanner** container on the host network. Add `lan-watch` to `COMPOSE_PROFILES` in `deploy/.env` and start the stack again (`make docker/run`). It needs no capability; the page tells you when no scanner is running.",
+          "Open **Network watch**, tab **Networks**, and choose **Watch a network**: a name, the network in CIDR notation (at most a /22) and how often to sweep, from every minute to every day. The server must be attached to that network; a network behind a router is reported as not reachable.",
+          "**Sweep now** runs a sweep at once. The first one lists every host that is up. **Scan a network now** scans a network you type in without setting up a schedule and **saves the result** (hosts and history); tick *Keep watching it* to keep sweeping it, otherwise it is saved as paused and you can sweep it again from the list.",
+        ],
+      },
+      { t: "h", text: "Reading it" },
+      {
+        t: "list",
+        items: [
+          "**Hosts** shows the chart of hosts up over time and the list with state, address, MAC, name (a label you give, else the DNS name), how long it has been in this state and when it was last seen. An address that is also a node of the **inventory** carries a green badge with the node's name, linking to it, and a filter shows only the hosts that are in the inventory or only those that are not: a host that is up and unknown is the one to look at. A *2 MACs* or *2 addresses* badge marks an address or a MAC that has changed partner. Click a host for its **availability strip** (green up, grey down, over 24 hours to 90 days), the percentage of time it was up and its history.",
+          "**Changes** is the feed of first sightings, hosts coming up and going down, MAC changes and address changes, with the old MAC or address.",
+          "**Networks** lists what is watched, how many are up and the outcome of the last sweep, and sets how long the history is kept (90 days by default).",
+        ],
+      },
+      {
+        t: "p",
+        text: "A host that is up is seen by its ARP entry, so a PC that drops pings (Windows by default) is still found. A host that leaves is noticed at the next sweep, not at once. Phones that use a random MAC per network show up as a new host each time they change it.",
       },
     ],
   },

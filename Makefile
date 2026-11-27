@@ -5,8 +5,9 @@ SHELL := /usr/bin/env bash
 
 VERSION   := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/janus_ops/__init__.py)
 IMAGE     ?= lordraw/janus-ops
-# COMPOSE_EXTRA adds override files, e.g. the signed agents and the OpenBao of this stack:
-#   make docker/run COMPOSE_EXTRA="-f deploy/compose.release.yaml -f deploy/compose.openbao.yaml"
+# Optional pieces (snmp-traps, lan-watch, openbao) are profiles of deploy/compose.yaml: turn them on
+# with COMPOSE_PROFILES in deploy/.env. COMPOSE_EXTRA adds override files that change the app itself:
+#   make docker/run COMPOSE_EXTRA="-f deploy/compose.release.yaml -f deploy/compose.mcp.yaml"
 COMPOSE_EXTRA ?=
 COMPOSE   := docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml $(COMPOSE_EXTRA) --env-file deploy/.env
 

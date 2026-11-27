@@ -17,6 +17,7 @@ import {
   LayoutTemplate,
   LogOut,
   type LucideIcon,
+  Network,
   Search,
   ScrollText,
   Server,
@@ -54,6 +55,7 @@ export const NAV: NavItem[] = [
   { label: "Credentials", icon: KeyRound, target: { href: "/credentials/", permission: "inventory.read" } },
   { label: "Templates", icon: LayoutTemplate, keywords: "checks monitoring postgres proxmox apache zabbix", target: { href: "/templates/", permission: "inventory.read" } },
   { label: "Problems", icon: TriangleAlert, target: { href: "/problems/", permission: "inventory.read" } },
+  { label: "Network watch", icon: Network, keywords: "lan arp ping mac ip subnet watchyourlan devices presence", target: { href: "/lan/", permission: "inventory.manage" } },
   { label: "SNMP traps", icon: RadioTower, keywords: "mib notifications snmp", target: { href: "/traps/", permission: "inventory.read" } },
   { label: "Containers", icon: Container, target: { href: "/containers/", permission: "inventory.read" } },
   { label: "Proxmox VE", icon: Boxes, target: { href: "/proxmox/", permission: "inventory.read" } },
@@ -79,7 +81,7 @@ export const NAV: NavItem[] = [
 /** The menu by area. Items are found by label in NAV, which also feeds the Ctrl+K palette. */
 const GROUPS: { id: string; label: string; items: string[] }[] = [
   { id: "infra", label: "Infrastructure", items: ["Inventory", "Credentials", "Templates", "Containers", "Proxmox VE"] },
-  { id: "monitoring", label: "Monitoring", items: ["Problems", "SNMP traps", "Notifications"] },
+  { id: "monitoring", label: "Monitoring", items: ["Problems", "Network watch", "SNMP traps", "Notifications"] },
   { id: "automation", label: "Automation", items: ["Ansible", "Workflows", "GitOps", "SSH Bastion"] },
   { id: "ai", label: "AI", items: ["Janus AI Copilot", "Operate"] },
   { id: "admin", label: "Administration", items: ["Users & roles", "Audit log", "Archive", "Settings"] },

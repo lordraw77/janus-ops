@@ -123,7 +123,7 @@ function Receiver({ status }: { status: Status | null }) {
         </>
       ) : (
         <span className="text-fg-muted">
-          off. Start the stack with <span className="font-mono">deploy/compose.snmp-traps.yaml</span> and set{" "}
+          off. Turn on the <span className="font-mono">snmp-traps</span> profile (<span className="font-mono">COMPOSE_PROFILES=snmp-traps</span>) and set{" "}
           <span className="font-mono">JANUS_SNMP_TRAP_COMMUNITIES</span>.
         </span>
       )}

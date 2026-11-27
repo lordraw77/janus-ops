@@ -258,7 +258,7 @@ template editor an SNMP check has a catalog picker. **SNMP traps (v2c)**: an opt
 inventory nodes (matched by source address, no SNMP credentials needed), shows them with names on the **SNMP traps**
 page, and each trap has an **Alert** button that creates a check (`snmp_traps.recent`) which opens a problem when it
 arrives and closes it by itself after a window without new traps. **MIB files** (`.mib`, `.txt`) give names to OIDs
-(only names are kept; standard names are built in). Start the receiver with `deploy/compose.snmp-traps.yaml` and
+(only names are kept; standard names are built in). Turn the receiver on with the `snmp-traps` profile (`COMPOSE_PROFILES` in `deploy/.env`) and
 `JANUS_SNMP_TRAP_COMMUNITIES`; devices send to port 162/udp. SNMPv3 traps are not accepted yet.
 The node page has telemetry charts from 5 minutes to 90 days (long ranges come from continuous aggregates).
 

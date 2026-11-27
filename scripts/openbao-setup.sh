@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEPLOY="$ROOT/deploy"
 SECRETS="$DEPLOY/secrets/openbao"
 ENVFILE="$DEPLOY/.env"
-COMPOSE=(docker compose -f "$DEPLOY/compose.yaml" -f "$DEPLOY/compose.openbao.yaml" --env-file "$ENVFILE")
+COMPOSE=(docker compose -f "$DEPLOY/compose.yaml" --profile openbao --env-file "$ENVFILE")
 BAO_UID=100 BAO_GID=1000  # the user of the openbao image
 
 [ -f "$ENVFILE" ] || { echo "deploy/.env missing: run 'make env' first" >&2; exit 1; }

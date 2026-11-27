@@ -1,5 +1,14 @@
 # Janus-Ops stack. Runs the published image; from a source checkout `make docker/run`
 # adds compose.build.yaml to build it locally. Variables: deploy/.env.example.
+#
+# Optional pieces are PROFILES of this file: turn them on with COMPOSE_PROFILES in deploy/.env
+# (comma separated), or `docker compose --profile <name> ...`:
+#   snmp-traps   SNMP trap receiver (its own container, publishes UDP 162). Needs JANUS_SNMP_TRAP_COMMUNITIES.
+#   lan-watch    LAN scanner on the host network (ARP/ping sweeps for Network watch) and the loopback
+#                relay it uses to reach the database.
+#   openbao      An OpenBao that unseals itself, as master key or KV (docs/OPENBAO.md).
+# Still separate files, because they change settings of the app itself and not add a service:
+# compose.build.yaml, compose.release.yaml, compose.mcp.yaml, compose.external-directory.yaml.
 name: janus-ops
 
 # Settings shared by the app and the setup job
@@ -38,7 +47,7 @@ services:
     networks: [edge]
 
   janus-ops:
-    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.14.0}
+    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.15.0}
     restart: unless-stopped
     environment:
       <<: *janus-env
@@ -57,6 +66,8 @@ services:
       JANUS_BAO_KV_PREFIX: ${JANUS_BAO_KV_PREFIX:-janus-ops}
       JANUS_BAO_CA_FILE: ${JANUS_BAO_CA_FILE:-}
       JANUS_BAO_DEK_CACHE_S: ${JANUS_BAO_DEK_CACHE_S:-300}
+      # Network watch is swept by the lan-scanner container (profile lan-watch), not by the app
+      JANUS_LAN_SCAN: external
       JANUS_DB_POOL_SIZE: ${JANUS_DB_POOL_SIZE:-20}
       JANUS_DB_MAX_OVERFLOW: ${JANUS_DB_MAX_OVERFLOW:-20}
       JANUS_SESSION_TTL_S: ${JANUS_SESSION_TTL_S:-28800}
@@ -85,9 +96,15 @@ services:
     volumes:
       - recordings:/var/lib/janus-ops/recordings
       - pki_public:/var/lib/janus-ops/pki:ro
+      # CA of the stack's OpenBao (profile openbao): JANUS_BAO_CA_FILE=/etc/janus-ops/openbao-tls/ca.crt
+      - ./secrets/openbao/tls:/etc/janus-ops/openbao-tls:ro
     depends_on:
       setup:
         condition: service_completed_successfully
+      # waits for the OpenBao of the stack when the profile is on, ignored when it is not
+      openbao:
+        condition: service_healthy
+        required: false
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -96,7 +113,7 @@ services:
 
   # One-shot: database migrations, then the initial administrator (created only if missing)
   setup:
-    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.14.0}
+    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.15.0}
     command: ["setup"]
     restart: "no"
     environment:
@@ -193,6 +210,107 @@ services:
     tmpfs: [/tmp]
     networks: [backend]
 
+  # ---------------------------------------------------------------- profile snmp-traps
+  # SNMP v2c trap receiver in its own container. It listens on 1162 (no privileges) and the host
+  # publishes 162/udp; devices send to <this host>:162 with one of the communities. Only traps from an
+  # inventory node (same address) are kept; anything else is dropped and counted.
+  snmp-trap:
+    profiles: [snmp-traps]
+    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.15.0}
+    command: ["snmp-trap"]
+    restart: unless-stopped
+    environment:
+      JANUS_DATABASE_URL: postgresql+asyncpg://janus:${POSTGRES_PASSWORD:?run make env}@db:5432/janus
+      JANUS_LOG_LEVEL: ${JANUS_LOG_LEVEL:-INFO}
+      JANUS_SNMP_TRAP_PORT: "1162"
+      JANUS_SNMP_TRAP_COMMUNITIES: ${JANUS_SNMP_TRAP_COMMUNITIES:?set JANUS_SNMP_TRAP_COMMUNITIES (comma-separated)}
+    ports:
+      - "${JANUS_SNMP_TRAP_HOST_PORT:-162}:1162/udp"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # edge is not internal, so it can publish the port; backend reaches the database
+    networks: [edge, backend]
+
+  # ---------------------------------------------------------------- profile lan-watch
+  # ARP does not cross a container's bridge: the scanner runs on the host network and sweeps the
+  # subnets the HOST is attached to. It needs no capability: it pings through the kernel's
+  # unprivileged ICMP socket (check `sysctl net.ipv4.ping_group_range` includes GID 10001) and reads
+  # /proc/net/arp. A subnet behind a router is reported as "not on this network".
+  lan-scanner:
+    profiles: [lan-watch]
+    image: ${JANUS_IMAGE:-lordraw/janus-ops}:${JANUS_VERSION:-0.15.0}
+    command: ["lan-scan"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      JANUS_DATABASE_URL: postgresql+asyncpg://janus:${POSTGRES_PASSWORD:?run make env}@127.0.0.1:${JANUS_LAN_DB_PORT:-5432}/janus
+      JANUS_LOG_LEVEL: ${JANUS_LOG_LEVEL:-INFO}
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      lan-db-relay:
+        condition: service_started
+    healthcheck:
+      disable: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  # The scanner is outside the Docker networks and the database is inside an internal one (which
+  # cannot publish ports): this forwards 127.0.0.1:${JANUS_LAN_DB_PORT} of the host to it.
+  lan-db-relay:
+    profiles: [lan-watch]
+    image: alpine/socat:1.8.0.3
+    command: ["-d", "TCP-LISTEN:5432,fork,reuseaddr", "TCP:db:5432"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${JANUS_LAN_DB_PORT:-5432}:5432"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend, edge]
+
+  # ---------------------------------------------------------------- profile openbao
+  # OpenBao (raft storage, internal TLS) that unseals itself with a static key (docs/OPENBAO.md).
+  # Set up with scripts/openbao-setup.sh, which also writes the JANUS_BAO_* values to deploy/.env.
+  # Then JANUS_BAO_ADDR=https://openbao:8200 and JANUS_BAO_CA_FILE=/etc/janus-ops/openbao-tls/ca.crt.
+  openbao:
+    profiles: [openbao]
+    image: openbao/openbao:2.4.1
+    restart: unless-stopped
+    command: ["server"]
+    user: "100:1000"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      BAO_ADDR: https://127.0.0.1:8200
+      BAO_CACERT: /openbao/tls/ca.crt
+    volumes:
+      - openbao_data:/openbao/file
+      - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - ./secrets/openbao/seal.key:/openbao/secrets/seal.key:ro
+      - ./secrets/openbao/tls:/openbao/tls:ro
+    healthcheck:
+      test: ["CMD", "bao", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: [backend]
+
 networks:
   edge:
   backend:
@@ -206,3 +324,4 @@ volumes:
   caddy_config:
   pg_data:
   ldap_data:
+  openbao_data:

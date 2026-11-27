@@ -108,14 +108,21 @@ Check readiness:
 
 ```bash
 curl -k https://localhost/api/v1/ready
-# {"status":"ok","version":"0.14.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
+# {"status":"ok","version":"0.15.0","checks":{"timescaledb":"ok","schema":"ok","database":"ok"}}
 ```
 
-Optional overrides, used with `-f compose.yaml -f <file>` (all in the same `deploy/` folder):
+Optional pieces of `compose.yaml` are **profiles**: list the ones you want in `COMPOSE_PROFILES` in `.env`.
+
+| Profile | Adds |
+|---|---|
+| `openbao` | An OpenBao with automatic unseal, as the home of the master key |
+| `snmp-traps` | The SNMP trap receiver, in its own container, publishing UDP 162 |
+| `lan-watch` | The LAN scanner for Network watch, on the host network |
+
+Overrides that change the app itself, used with `-f compose.yaml -f <file>` (all in the same `deploy/` folder):
 
 | File | Adds |
 |---|---|
-| `compose.openbao.yaml` | An OpenBao with automatic unseal, as the home of the master key |
 | `compose.external-directory.yaml` | Sign-in with an external LDAP / Active Directory instead of lldap |
 | `compose.release.yaml` | A host directory of signed agent binaries (only for hand-signed builds) |
 
@@ -203,11 +210,12 @@ new binary cannot connect. Roll an update out from **Inventory → Update agents
 An optional receiver stores SNMP v2c traps from the hosts in the inventory (matched by source address; no SNMP
 credentials needed) and shows them on the **SNMP traps** page with names from the MIB files you upload (standard names are
 built in). Each trap has an **Alert** button that creates a check which opens a problem when the trap arrives and closes
-it after a window without new ones. Add the overlay and a community, then point the devices at port 162/udp:
+it after a window without new ones. Turn the profile on and set a community, then point the devices at port 162/udp:
 
 ```bash
 echo 'JANUS_SNMP_TRAP_COMMUNITIES=<long random community>' >> .env
-docker compose -f compose.yaml -f compose.snmp-traps.yaml up -d
+echo 'COMPOSE_PROFILES=snmp-traps' >> .env     # add to the profiles you already have, comma separated
+docker compose up -d
 ```
 
 | Variable | Default | Meaning |
@@ -272,7 +280,7 @@ By default the master key is `JANUS_SECRET_KEY`. Set `JANUS_SECRET_BACKEND` to k
 **OpenBao or HashiCorp Vault**: `openbao-transit` (the key lives in Transit; secrets stay encrypted in
 PostgreSQL) or `openbao-kv` (the content of each secret lives in KV v2, PostgreSQL holds only a
 reference). `janus-ops secrets migrate --to <backend>` moves existing secrets, all or nothing and
-reversible. `compose.openbao.yaml` runs an OpenBao that unseals itself on restart.
+reversible. The `openbao` profile runs an OpenBao that unseals itself on restart.
 
 ### External directory / Active Directory (optional)
 
@@ -295,12 +303,12 @@ Sign in as `breakglass`. Every use is audited and logged as a warning.
 # 1. Apply the schema (needs PostgreSQL 16 with the TimescaleDB extension)
 docker run --rm \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.14.0 migrate
+  lordraw/janus-ops:0.15.0 migrate
 
 # 2. Start the server
 docker run -d --name janus-ops -p 127.0.0.1:8000:8000 \
   -e JANUS_DATABASE_URL='postgresql+asyncpg://janus:PASSWORD@db-host:5432/janus' \
-  lordraw/janus-ops:0.14.0
+  lordraw/janus-ops:0.15.0
 ```
 
 ## Configuration
@@ -356,7 +364,7 @@ Variables used by the Compose stack (`.env`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.14.0` | Image and tag to run |
+| `JANUS_IMAGE` / `JANUS_VERSION` | `lordraw/janus-ops` / `0.15.0` | Image and tag to run |
 | `JANUS_DOMAIN` | `localhost` | Host name served by Caddy |
 | `JANUS_TLS` | `internal` | `internal` (local CA, works offline) or an e-mail for ACME |
 | `JANUS_HTTP_PORT` / `JANUS_HTTPS_PORT` | `80` / `443` | Host ports of the proxy |
@@ -406,7 +414,7 @@ Variables used by the Compose stack (`.env`):
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.14.0`) | Immutable release, built from git tag `vX.Y.Z` |
+| `X.Y.Z` (e.g. `0.15.0`) | Immutable release, built from git tag `vX.Y.Z` |
 | `X.Y` (e.g. `0.5`) | Latest patch release of that minor version |
 | `latest` | Most recent release |
 
